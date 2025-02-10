@@ -54,9 +54,9 @@ void main() {
     for (uint i = 0; i < uniformBuffer.lightCount; i++) {
         vec4 lightPosition = uniformBuffer.viewProjection * lightBuffer.lights[i].position;
         lightPosition /= lightPosition.w;
-        if (lightPosition.z <= texture(sceneDepth, screenPosition).r) {
-            float distanceFromLight = length(lightPosition.xy - (2 * screenPosition - 1));
-            colour += (1 - lightPosition.z) * (1 - lightPosition.z) * lightBuffer.lights[i].colourIntensity.xyz / distanceFromLight;
+        if (lightPosition.z <= texture(sceneDepth, screenPosition).r && lightPosition.z >= 0) {
+            float distanceFromLight = (1 - lightPosition.z) / length(lightPosition.xy - (2 * screenPosition - 1));
+            colour += lightBuffer.lights[i].colourIntensity.xyz * distanceFromLight;
         }
     }
 
