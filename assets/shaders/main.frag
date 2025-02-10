@@ -44,7 +44,7 @@ void main() {
     vec3 normal = outerProduct(inNormal, vec3(0.0, 0.0, 1.0)) * (texture(normalArray, vec3(inUV, inNormalIndex)).xyz - 0.5) * 2.0;
 
     for (uint index = 0; index < uniformBuffer.lightCount; index++) {
-        Light light = lightBuffer.lights[index];
+        #define light lightBuffer.lights[index]
 
         vec3 relativePosition = light.position.xyz - inPosition.xyz;
         float lightSquaredDistance = dot(relativePosition, relativePosition);
@@ -59,6 +59,6 @@ void main() {
         cumulativeColour += albedo * shadow * lambertainCoefficient * light.colourIntensity.xyz / lightSquaredDistance;
     }
 
-    cumulativeColour = clamp(cumulativeColour, albedo * pushConstant.ambientLight, albedo * 10);
+    cumulativeColour = max(cumulativeColour, albedo * pushConstant.ambientLight);
     outColour =  vec4(cumulativeColour, 1.0);
 }

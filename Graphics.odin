@@ -23,10 +23,19 @@ import vk "vendor:vulkan"
 
 
 @(private = "file")
+UI_ENABLED: bool : true
+
+@(private = "file")
+HDR_ENABLED: bool : true
+
+@(private = "file")
 requestedLayers: []cstring : {"VK_LAYER_KHRONOS_validation"}
 
 @(private = "file")
-requiredDeviceExtensions: []cstring : {vk.KHR_SWAPCHAIN_EXTENSION_NAME}
+deviceExtensions: []cstring : {vk.KHR_SWAPCHAIN_EXTENSION_NAME}
+
+@(private = "file")
+instanceExtensions: []cstring : {vk.EXT_DEBUG_UTILS_EXTENSION_NAME, vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME}
 
 @(private = "file")
 vertexBindingDescription: vk.VertexInputBindingDescription : {
@@ -89,9 +98,6 @@ DEPTH_BIAS_CONSTANT: f32 : 1.25
 
 @(private = "file")
 DEPTH_BIAS_SLOPE: f32 : 1.75
-
-@(private = "file")
-UI_ENABLED: bool : true
 
 
 // ###################################################################
@@ -387,6 +393,14 @@ GraphicsContext :: struct {
 	// Util
 	currentFrame:          u32,
 	framebufferResized:    b8,
+
+	// Rendering push constants
+	contrast:              f32,
+	brightness:            f32,
+	saturation:            f32,
+	exposure:              f32,
+	tonemapper:            f32,
+	gamma:                 f32,
 }
 
 
@@ -404,6 +418,7 @@ initVkGraphics :: proc(
 	when ODIN_DEBUG {
 		glfw.SetErrorCallback(glfwErrorCallback)
 	}
+
 	if !glfw.Init() {
 		log.log(.Fatal, "Failed to initalize GLFW!")
 		panic("Failed to init GLFW!")
@@ -443,14 +458,19 @@ initVkGraphics :: proc(
 
 	createSyncObjects(graphicsContext)
 	createSamplers(graphicsContext)
-	// TODO: Should add a preproces pipeline for vertex transforms (from bones) as were computing them lightCount * 6 + 1 times atm.
+
+	// TODO: Should add a preproces pipeline for vertex transforms (from bones) as I'm computing them lightCount * 6 + 1 times atm.
 	pipelines = make([]Pipeline, len(PipelineIndex))
+
 	createRenderPass(graphicsContext)
 	createFramebuffers(graphicsContext)
+
 	createGraphicsDescriptorSets(graphicsContext)
 	createComputeDescriptorSets(graphicsContext)
+
 	updateGraphicsDescriptorSets(graphicsContext)
 	updateComputeDescriptorSets(graphicsContext)
+
 	createGraphicsPipelines(graphicsContext)
 	createComputePipelines(graphicsContext)
 
@@ -461,6 +481,12 @@ initVkGraphics :: proc(
 
 	framebufferResized = false
 	currentFrame = 0
+	contrast = 1.0
+	brightness = 0.0
+	saturation = 1.0
+	exposure = 0.0
+	tonemapper = 0.0 if !HDR_ENABLED else 1.0
+	gamma = 1.0 if HDR_ENABLED else 2.2
 	scenes = make([dynamic]Scene)
 
 	if sceneFile == "" {
@@ -496,11 +522,11 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 	availableExtensions := make([]vk.ExtensionProperties, extensionCount)
 	defer delete(availableExtensions)
 	vk.EnumerateInstanceExtensionProperties(nil, &extensionCount, raw_data(availableExtensions))
-	instance_extension_outer_loop: for name in glfwExtensions {
+	glfw_extension_outer_loop: for name in glfwExtensions {
 		for &extension in availableExtensions {
 			if name == cstring(&extension.extensionName[0]) {
 				append(&supportedExtensions, name)
-				continue instance_extension_outer_loop
+				continue glfw_extension_outer_loop
 			}
 		}
 		log.logf(.Error, "Failed to find required extension: {}", name)
@@ -508,12 +534,11 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	when ODIN_DEBUG {
-		requestedExtensions := [?]cstring{"VK_EXT_debug_utils"}
-		instance_extension2_outer_loop: for name in requestedExtensions {
+		instance_extension_outer_loop: for name in instanceExtensions {
 			for &extension in availableExtensions {
 				if (name == cstring(&extension.extensionName[0])) {
 					append(&supportedExtensions, name)
-					continue instance_extension2_outer_loop
+					continue instance_extension_outer_loop
 				}
 			}
 			log.logf(.Warning, "Failed to find requested extension: {}", name)
@@ -531,8 +556,8 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 		ppEnabledExtensionNames = raw_data(supportedExtensions),
 	}
 
-	debugMessengerCreateInfo: vk.DebugUtilsMessengerCreateInfoEXT
 	when ODIN_DEBUG {
+		debugMessengerCreateInfo: vk.DebugUtilsMessengerCreateInfoEXT
 		supportedLayers: [dynamic]cstring
 		defer delete(supportedLayers)
 		layerCount: u32
@@ -834,7 +859,7 @@ pickPhysicalDevice :: proc(graphicsContext: ^GraphicsContext) {
 			raw_data(availableExtensions),
 		)
 
-		outer_loop: for name in requiredDeviceExtensions {
+		outer_loop: for name in deviceExtensions {
 			for &extension in availableExtensions {
 				if (name == cstring(&extension.extensionName[0])) {
 					continue outer_loop
@@ -1007,7 +1032,7 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 		inheritedQueries                        = false,
 	}
 
-	requiredDeviceExtensions := requiredDeviceExtensions
+	requiredDeviceExtensions := deviceExtensions
 	createInfo: vk.DeviceCreateInfo = {
 		sType                   = .DEVICE_CREATE_INFO,
 		pNext                   = nil,
@@ -1047,14 +1072,25 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 
 @(private = "file")
 createSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
-	chooseFormat :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
+	chooseFormat :: proc(formats: []vk.SurfaceFormatKHR) -> (fmt: vk.SurfaceFormatKHR) {
+		fmt = formats[0]
 		for format in formats {
-			if (format.format == .B8G8R8A8_UNORM || format.format == .R8G8B8A8_UNORM) &&
-			   format.colorSpace == .SRGB_NONLINEAR {
-				return format
+			when HDR_ENABLED {
+				if format.colorSpace == .HDR10_ST2084_EXT {
+					return format
+				} else if format.colorSpace == .SRGB_NONLINEAR && fmt.format != .R8G8B8A8_UNORM {
+					if format.format == .R8G8B8A8_UNORM || format.format == .B8G8R8A8_UNORM {
+						fmt = format
+					}
+				}
+			} else {
+				if (format.format == .B8G8R8A8_UNORM || format.format == .R8G8B8A8_UNORM) &&
+				   format.colorSpace == .SRGB_NONLINEAR {
+					fmt = format
+				}
 			}
 		}
-		return formats[0]
+		return
 	}
 
 	choosePresentMode :: proc(modes: []vk.PresentModeKHR) -> (mode: vk.PresentModeKHR) {
@@ -1063,7 +1099,7 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 				return mode
 			}
 		}
-		return vk.PresentModeKHR.FIFO
+		return .FIFO
 	}
 
 	chooseExtent :: proc(
@@ -3281,7 +3317,7 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	// POST PROCESSING
 	{
-		inImage.format = .R8G8B8A8_UNORM
+		inImage.format = .R16G16B16A16_SFLOAT
 		createImage(
 			graphicsContext,
 			&inImage,
@@ -3308,7 +3344,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 			1,
 		)
 
-		outImage.format = .R8G8B8A8_UNORM
+		outImage.format = .R16G16B16A16_SFLOAT
 		createImage(
 			graphicsContext,
 			&outImage,
@@ -4198,7 +4234,7 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 
 	// MAIN
 	{
-		pipelines[PipelineIndex.MAIN].colour.format = .R8G8B8A8_UNORM
+		pipelines[PipelineIndex.MAIN].colour.format = .R16G16B16A16_SFLOAT
 
 		createImage(
 			graphicsContext,
@@ -4818,14 +4854,20 @@ createComputePipelines :: proc(
 	pipelineCache: vk.PipelineCache = 0,
 ) {
 	// POST PROCESSING
+	postPushConstants: vk.PushConstantRange = {
+		stageFlags = {.COMPUTE},
+		offset     = 0,
+		size       = 6 * size_of(f32),
+	}
+
 	postPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
 		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
 		pNext                  = nil,
 		flags                  = {},
 		setLayoutCount         = 1,
 		pSetLayouts            = &pipelines[PipelineIndex.POST].descriptorSetLayout,
-		pushConstantRangeCount = 0,
-		pPushConstantRanges    = nil,
+		pushConstantRangeCount = 1,
+		pPushConstantRanges    = &postPushConstants,
 	}
 
 	if vk.CreatePipelineLayout(
@@ -5046,7 +5088,7 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 
 	// RenderPass
 	{
-		imguiData.colour.format = .R8G8B8A8_UNORM
+		imguiData.colour.format = .R16G16B16A16_SFLOAT
 
 		createImage(
 			graphicsContext,
@@ -5747,6 +5789,15 @@ recordComputeBuffer :: proc(
 		nil,
 	)
 
+	vk.CmdPushConstants(
+		commandBuffer,
+		pipelines[PipelineIndex.POST].layout,
+		{.COMPUTE},
+		0,
+		6 * size_of(f32),
+		raw_data([]f32{contrast, brightness, saturation, pow(f32(2.0), exposure), tonemapper, gamma}),
+	)
+
 	vk.CmdBindPipeline(commandBuffer, .COMPUTE, pipelines[PipelineIndex.POST].pipeline)
 
 	vk.CmdDispatch(
@@ -5825,38 +5876,6 @@ recordComputeBuffer :: proc(
 			{.DEPTH},
 			6,
 		)
-
-		// vk.CmdBlitImage(
-		// 	commandBuffer,
-		// 	outImage.vkImage,
-		// 	.TRANSFER_SRC_OPTIMAL,
-		// 	swapchainImages[imageIndex],
-		// 	.TRANSFER_DST_OPTIMAL,
-		// 	1,
-		// 	&vk.ImageBlit {
-		// 		srcSubresource = {
-		// 			aspectMask = {.COLOR},
-		// 			mipLevel = 0,
-		// 			baseArrayLayer = 0,
-		// 			layerCount = 1,
-		// 		},
-		// 		srcOffsets = {
-		// 			{x = 0, y = 0, z = 0},
-		// 			{x = i32(swapchainExtent.width), y = i32(swapchainExtent.height), z = 1},
-		// 		},
-		// 		dstSubresource = {
-		// 			aspectMask = {.COLOR},
-		// 			mipLevel = 0,
-		// 			baseArrayLayer = 0,
-		// 			layerCount = 1,
-		// 		},
-		// 		dstOffsets = {
-		// 			{x = 0, y = 0, z = 0},
-		// 			{x = i32(swapchainExtent.width), y = i32(swapchainExtent.height), z = 1},
-		// 		},
-		// 	},
-		// 	.NEAREST,
-		// )
 
 		transitionImageLayout(
 			graphicsContext,
@@ -6203,6 +6222,12 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			paused = !paused
 		}
 
+		imgui.DragFloat("Contrast", &contrast, 0.01)
+		imgui.DragFloat("Brightness", &brightness, 0.01)
+		imgui.DragFloat("Saturation", &saturation, 0.01)
+		imgui.DragFloat("Exposure", &exposure, 0.01)
+		imgui.DragFloat("Gamma", &gamma, 0.01)
+
 		if imgui.BeginCombo("Scene Selection", scene.name) {
 			for &s, index in scenes {
 				if activeScene != u32(index) && imgui.Selectable(s.name) {
@@ -6461,18 +6486,20 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 
 	vk.ResetCommandBuffer(mainCommandBuffers[currentFrame], {})
 	vk.ResetCommandBuffer(computeCommandBuffers[currentFrame], {})
-	vk.ResetCommandBuffer(uiCommandBuffers[currentFrame], {})
-
 	when UI_ENABLED {
-		drawUI(graphicsContext)
+		vk.ResetCommandBuffer(uiCommandBuffers[currentFrame], {})
 	}
 
 	updateUniformBuffer(graphicsContext)
 	updateLightBuffer(graphicsContext, delta)
 	updateInstanceBuffer(graphicsContext, delta)
+	when UI_ENABLED {
+		drawUI(graphicsContext)
+	}
 
 	recordGraphicsBuffer(graphicsContext, mainCommandBuffers[currentFrame], imageIndex)
 	recordComputeBuffer(graphicsContext, computeCommandBuffers[currentFrame], imageIndex)
+
 	when UI_ENABLED {
 		recordUIBuffer(graphicsContext, uiCommandBuffers[currentFrame], imageIndex)
 	}

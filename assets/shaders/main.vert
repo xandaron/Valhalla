@@ -46,7 +46,7 @@ layout(location = 3) out float outAlbedoIndex;
 layout(location = 4) out float outNormalIndex;
 
 void main() {
-    // This computation is being done 6 * #lights + 1 times per render.
+    // This computation is being done 6 * lightCount + 1 times per render.
     // This should be done as part of a precompute step ---------------------------------------
     mat4 boneTransform = mat4(0.0);
     uint boneOffset = instanceBuffer.instanceInfo[gl_InstanceIndex].boneOffset;
@@ -60,7 +60,7 @@ void main() {
     outPosition = vertexTransform * vec4(inPosition, 1.0);
     gl_Position = uniformBuffer.viewProjection * outPosition;
 
-    outUV = inUV.xy;
+    outUV = inUV;
     outNormal = normalize(mat3(vertexTransform) * inNormal);
     outAlbedoIndex = instanceBuffer.instanceInfo[gl_InstanceIndex].albedoSamplerOffset;
     outNormalIndex = instanceBuffer.instanceInfo[gl_InstanceIndex].normalSamplerOffset;

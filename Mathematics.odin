@@ -60,6 +60,8 @@ invert :: linalg.matrix4_inverse_f32
 
 quatLurp :: linalg.quaternion_nlerp_f32
 
+pow :: linalg.pow
+
 lookAt :: proc(eye, center, up: Vec3) -> Mat4 {
 	f := normalize(center - eye)
 	s := normalize(cross(up, f))

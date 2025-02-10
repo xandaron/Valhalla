@@ -15,6 +15,17 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 - Cross-platform support (Windows, Linux)
 - Integration with Vulkan API
 
+## Roadmap
+
+- [X] Implement basic rendering pipeline
+- [X] Implement basic lighting
+- [X] Implement shadow mapping
+- [X] Fully featured GUI with scene save, load and editing with runtime asset import
+- [X] HDR support
+- [ ] Add precompute step
+- [ ] Raytracer
+- [ ] Implement my own file dialog (ImFileDialog is great but I have issues with it)
+
 ## Getting Started
 
 ### Prerequisites
@@ -53,17 +64,6 @@ odin build . -out:build/build.exe
 ![CMY Bunny](demo/CMY_Bunny.gif)
 
 *The CMY Bunny demonstrates a rendered scene of the Stanford bunny illuminated by rotating Cyan, Magenta, and Yellow point lights around the Z-axis.*
-
-## Roadmap
-
-- [X] Implement basic rendering pipeline
-- [X] Implement basic lighting
-- [X] Implement shadow mapping
-- [X] Fully featured GUI with scene save, load and editing with runtime asset import
-- [ ] HDR support
-- [ ] Raytracer
-- [ ] Add precompute step
-- [ ] Implement my own file dialog (ImFileDialog is great but I have issues with it)
 
 ## Contributing
 
