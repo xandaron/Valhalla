@@ -1,4 +1,4 @@
-#version 450
+#version 460
 
 layout(binding = 0, rgba8) uniform readonly image2D inImage;
 layout(binding = 1, rgba8) uniform writeonly image2D outImage;
@@ -23,7 +23,7 @@ layout(binding = 4) readonly buffer LightBuffer {
     Light[] lights;
 } lightBuffer;
 
-layout(push_constant, std140) uniform PushConstants {
+layout(push_constant) uniform PushConstants {
     float contrast;
     float brightness;
     float saturation;

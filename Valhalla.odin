@@ -99,7 +99,7 @@ main :: proc() {
 
 	graphicsContext: GraphicsContext
 	engineState.graphicsContext = &graphicsContext
-	if err := initVkGraphics(&graphicsContext, "./assets/scenes/bunny_cmy.json"); err != .None {
+	if err := initVkGraphics(&graphicsContext, "./assets/scenes/shambler.json"); err != .None {
 		#partial switch err {
 		case .FailedToLoadSceneFile, .FailedToParseJson:
 			log.log(.Warning, "Failed to load scene file")

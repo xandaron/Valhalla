@@ -1,4 +1,4 @@
-#version 450
+#version 460
 
 // glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS)
 
@@ -16,7 +16,7 @@ struct Light {
     float far;
 };
 
-layout(binding = 3) readonly buffer LightBuffer {
+layout(binding = 2) readonly buffer LightBuffer {
     Light[] lights;
 } lightBuffer;
 
@@ -24,7 +24,7 @@ layout(binding = 4) uniform sampler2DArray albedoArray;
 layout(binding = 5) uniform sampler2DArray normalArray;
 layout(binding = 6) uniform samplerCubeArray shadowMap;
 
-layout(location = 0) in vec4 inPosition;
+layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
 layout(location = 2) in vec3 inNormal;
 layout(location = 3) in float inAlbedoIndex;
@@ -33,6 +33,7 @@ layout(location = 4) in float inNormalIndex;
 layout(location = 0) out vec4 outColour;
 
 layout(push_constant) uniform PushConstants {
+    uint vertexOffset;
 	float ambientLight;
 } pushConstant;
 
@@ -41,12 +42,13 @@ layout(push_constant) uniform PushConstants {
 void main() {
     vec3 cumulativeColour = vec3(0.0);
     vec3 albedo = texture(albedoArray, vec3(inUV, inAlbedoIndex)).xyz;
+    albedo = pow(albedo, vec3(1 / 2.2));
     vec3 normal = outerProduct(inNormal, vec3(0.0, 0.0, 1.0)) * (texture(normalArray, vec3(inUV, inNormalIndex)).xyz - 0.5) * 2.0;
 
     for (uint index = 0; index < uniformBuffer.lightCount; index++) {
         #define light lightBuffer.lights[index]
 
-        vec3 relativePosition = light.position.xyz - inPosition.xyz;
+        vec3 relativePosition = light.position.xyz - inPosition;
         float lightSquaredDistance = dot(relativePosition, relativePosition);
 
         float lightDistance = sqrt(lightSquaredDistance);

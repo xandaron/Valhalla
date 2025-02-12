@@ -1,0 +1,59 @@
+#version 460
+
+struct Vertex {
+    vec3 position;
+    vec2 uv;
+    vec3 normal;
+    uvec4 bones;
+    vec4 weights;
+};
+
+layout(binding = 0, std430) readonly buffer VertexBuffer {
+    Vertex[] vertices;
+} vertexBuffer;
+
+struct InstanceInfo {
+    mat4 model;
+    uint boneOffset;
+    float samplerOffset;
+};
+
+layout(binding = 1) readonly buffer InstanceBuffer {
+    InstanceInfo[] instanceInfo;
+} instanceBuffer;
+
+layout(binding = 2) readonly buffer BoneBuffer {
+    mat4[] boneTransforms;
+} boneBuffer;
+
+layout(binding = 3) writeonly buffer TransformBuffer {
+    mat4[] vertexTransforms;
+} transformBuffer;
+
+layout(push_constant) uniform PushConstants {
+    uint instance;
+    uint vertexCount;
+    uint vertexOffset;
+    uint transformOffset;
+} pushConstants;
+
+// x * y * z <= 1024; must be true
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    if (gl_GlobalInvocationID.x >= pushConstants.vertexCount) {
+        return;
+    }
+
+    Vertex vertex = vertexBuffer.vertices[pushConstants.vertexOffset + gl_GlobalInvocationID.x];
+    uint boneOffset = instanceBuffer.instanceInfo[pushConstants.instance].boneOffset;
+
+    mat4 boneTransform = mat4(0.0);
+    boneTransform += boneBuffer.boneTransforms[boneOffset + vertex.bones[0]] * vertex.weights[0];
+    boneTransform += boneBuffer.boneTransforms[boneOffset + vertex.bones[1]] * vertex.weights[1];
+    boneTransform += boneBuffer.boneTransforms[boneOffset + vertex.bones[2]] * vertex.weights[2];
+    boneTransform += boneBuffer.boneTransforms[boneOffset + vertex.bones[3]] * vertex.weights[3];
+    transformBuffer.vertexTransforms[pushConstants.transformOffset + gl_GlobalInvocationID.x]
+        = instanceBuffer.instanceInfo[pushConstants.instance].model * boneTransform;
+    // transformBuffer.vertexTransforms[pushConstants.transformOffset + gl_GlobalInvocationID.x] = mat4(1.0);
+}
