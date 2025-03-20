@@ -1,5 +1,7 @@
 #version 460
 
+#extension GL_EXT_multiview : enable
+
 struct InstanceInfo {
     mat4 model;
     uint boneOffset;
@@ -28,7 +30,6 @@ layout(binding = 2) readonly buffer TransformBuffer {
 layout(push_constant) uniform PushConstants {
     uint vertexOffset;
     uint lightIndex;
-    uint faceIndex;
 } pushConstants;
 
 layout(location = 0) in vec3 inPosition;
@@ -40,74 +41,43 @@ layout(location = 4) in vec4 inWeights;
 layout(location = 0) out float outColour;
 
 #define PI 3.14159265358979323846264338327950288
-#define tanHalfFOVReciprocal (1.0 / tan(PI / 4.0))
+#define tanHalfFOVReciprocal (1.0 / tan(PI / 4.0)) // 1
+#define projection mat4(vec4(tanHalfFOVReciprocal, 0, 0, 0), vec4(0, tanHalfFOVReciprocal, 0, 0), vec4(0, 0, light.far / (light.near - light.far), -1), vec4(0, 0, -(light.far * light.near)/(light.far - light.near), 0))
 
-// TODO: Might be better as a compute shader using a cubeSampler.
+#define positiveX (projection * mat4(vec4(0, 0, -1, 0), vec4(0, -1, 0, 0), vec4(-1, 0, 0, 0), vec4(light.position.z, light.position.y, light.position.x, 1)))
+#define negativeX (projection * mat4(vec4(0, 0, 1, 0), vec4(0, -1, 0, 0), vec4(1, 0, 0, 0), vec4(-light.position.z, light.position.y, -light.position.x, 1)))
+#define positiveY (projection * mat4(vec4(1, 0, 0, 0), vec4(0, 0, -1, 0), vec4(0, 1, 0, 0), vec4(-light.position.x, -light.position.z, light.position.y, 1)))
+#define negativeY (projection * mat4(vec4(1, 0, 0, 0), vec4(0, 0, 1, 0), vec4(0, -1, 0, 0), vec4(-light.position.x, light.position.z, -light.position.y, 1)))
+#define positiveZ (projection * mat4(vec4(1, 0, 0, 0), vec4(0, -1, 0, 0), vec4(0, 0, -1, 0), vec4(-light.position.x, light.position.y, light.position.z, 1)))
+#define negativeZ (projection * mat4(vec4(-1, 0, 0, 0), vec4(0, -1, 0, 0), vec4(0, 0, 1, 0), vec4(light.position.x, light.position.y, -light.position.z, 1)))
+
 void main() {
     const Light light = lightBuffer.lights[pushConstants.lightIndex];
-    mat4 projection = mat4(
-            vec4(tanHalfFOVReciprocal, 0.0, 0.0, 0.0),
-            vec4(0.0, -tanHalfFOVReciprocal, 0.0, 0.0),
-            vec4(0.0, 0.0, light.far / (light.far - light.near), 1.0),
-            vec4(0.0, 0.0, -(light.far * light.near) / (light.far - light.near), 0.0)
-        );
 
-    mat4 view;
-    switch (pushConstants.faceIndex) {
-        case 0: // POSITIVE_X
-        view = mat4(
-                vec4(0, 0, 1, 0),
-                vec4(0, 1, 0, 0),
-                vec4(-1, 0, 0, 0),
-                vec4(light.position.z, -light.position.yx, 1.0)
-            );
-        break;
-        case 1: // NEGATIVE_X
-        view = mat4(
-                vec4(0, 0, -1, 0),
-                vec4(0, 1, 0, 0),
-                vec4(1, 0, 0, 0),
-                vec4(-light.position.zy, light.position.x, 1.0)
+    const vec4 vertexPosition = transformBuffer.vertexTransforms[gl_VertexIndex - gl_BaseVertex + pushConstants.vertexOffset] * vec4(inPosition, 1.0);
 
-            );
-        break;
-        case 2: // POSITIVE_Y
-        view = mat4(
-                vec4(1, 0, 0, 0),
-                vec4(0, 0, 1, 0),
-                vec4(0, -1, 0, 0),
-                vec4(-light.position.x, light.position.z, -light.position.y, 1.0)
-            );
-        break;
-        case 3: // NEGATIVE_Y
-        view = mat4(
-                vec4(1, 0, 0, 0),
-                vec4(0, 0, -1, 0),
-                vec4(0, 1, 0, 0),
-                vec4(-light.position.xz, light.position.y, 1.0)
-            );
-        break;
-        case 4: // POSITIVE_Z
-        view = mat4(
-                vec4(1.0, 0.0, 0.0, 0.0),
-                vec4(0.0, 1.0, 0.0, 0.0),
-                vec4(0.0, 0.0, 1.0, 0.0),
-                vec4(-light.position.xyz, 1.0)
-            );
-        break;
-        case 5: // NEGATIVE_Z
-        view = mat4(
-                vec4(-1.0, 0.0, 0.0, 0.0),
-                vec4(0.0, 1.0, 0.0, 0.0),
-                vec4(0.0, 0.0, -1.0, 0.0),
-                vec4(light.position.x, -light.position.y, light.position.z, 1.0)
-            );
-        break;
+    // +x = 0, -x = 1, +y = 2, -y = 3, +z = 4, -z = 5
+    switch(gl_ViewIndex) {
+        case 0:
+            gl_Position = positiveX * vertexPosition;
+            break;
+        case 1:
+            gl_Position = negativeX * vertexPosition;
+            break;
+        case 2:
+            gl_Position = positiveY * vertexPosition;
+            break;
+        case 3:
+            gl_Position = negativeY * vertexPosition;
+            break;
+        case 4:
+            gl_Position = positiveZ * vertexPosition;
+            break;
+        case 5:
+            gl_Position = negativeZ * vertexPosition;
+            break;
     }
-    mat4 vertexTransform = transformBuffer.vertexTransforms[gl_VertexIndex - gl_BaseVertex + pushConstants.vertexOffset];
 
-    vec4 vertexPosition = vertexTransform * vec4(inPosition, 1.0);
-    gl_Position = projection * view * vertexPosition;
-    vertexPosition.xyz /= vertexPosition.w;
-    outColour = length(vertexPosition.xyz - light.position.xyz);
+    const vec3 relativePosition = (vertexPosition.xyz / vertexPosition.w) - light.position.xyz;
+    outColour = dot(relativePosition, relativePosition);
 }

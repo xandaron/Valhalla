@@ -33,12 +33,18 @@ HDR_ENABLED: bool : true
 requestedLayers: []cstring : {"VK_LAYER_KHRONOS_validation"}
 
 @(private = "file")
-deviceExtensions: []cstring : {vk.KHR_SWAPCHAIN_EXTENSION_NAME, vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME}
+deviceExtensions: []cstring : {
+	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
+	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
+	vk.EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
+	vk.KHR_MULTIVIEW_EXTENSION_NAME,
+}
 
 @(private = "file")
 instanceExtensions: []cstring : {
 	vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
 	vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,
+	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
 }
 
 @(private = "file")
@@ -338,6 +344,7 @@ CameraMode :: enum {
 Camera :: struct {
 	name:            cstring,
 	eye, center, up: Vec3,
+	near, far:       f32,
 	distance:        f32,
 	fov:             f32,
 	mode:            CameraMode,
@@ -519,7 +526,7 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 		applicationVersion = APP_VERSION,
 		pEngineName        = "Asgardina Graphics",
 		engineVersion      = ENGINE_VERSION,
-		apiVersion         = vk.API_VERSION_1_3,
+		apiVersion         = vk.API_VERSION_1_4,
 	}
 
 	glfwExtensions := glfw.GetRequiredInstanceExtensions()
@@ -1017,7 +1024,7 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 		wideLines                               = false,
 		largePoints                             = false,
 		alphaToOne                              = false,
-		multiViewport                           = false,
+		multiViewport                           = true,
 		samplerAnisotropy                       = true,
 		textureCompressionETC2                  = false,
 		textureCompressionASTC_LDR              = false,
@@ -1056,10 +1063,24 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 		inheritedQueries                        = false,
 	}
 
+	multiview: vk.PhysicalDeviceMultiviewFeatures = {
+		sType                       = .PHYSICAL_DEVICE_MULTIVIEW_FEATURES,
+		pNext                       = nil,
+		multiview                   = true,
+		multiviewGeometryShader     = false,
+		multiviewTessellationShader = false,
+	}
+
+	sync2: vk.PhysicalDeviceSynchronization2Features = {
+		sType            = .PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+		pNext            = &multiview,
+		synchronization2 = true,
+	}
+
 	requiredDeviceExtensions := deviceExtensions
 	createInfo: vk.DeviceCreateInfo = {
 		sType                   = .DEVICE_CREATE_INFO,
-		pNext                   = nil,
+		pNext                   = &sync2,
 		flags                   = {},
 		queueCreateInfoCount    = u32(len(queueCreateInfos)),
 		pQueueCreateInfos       = raw_data(queueCreateInfos),
@@ -4019,7 +4040,7 @@ updateSceneInstanceModel :: proc(using graphicsContext: ^GraphicsContext, sceneI
 	transformBufferSize := size_of(Mat4) * scene.instanceVerticesCount
 	transformBufferInfo: vk.DescriptorBufferInfo = {
 		offset = 0,
-		range = vk.DeviceSize(transformBufferSize),
+		range  = vk.DeviceSize(transformBufferSize),
 	}
 
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -4384,11 +4405,11 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 		createImage(
 			graphicsContext,
 			&pipelines[PipelineIndex.LIGHT].colour,
-			{},
+			{.CUBE_COMPATIBLE},
 			.D2,
 			u32(SHADOW_RESOLUTION.x),
 			u32(SHADOW_RESOLUTION.y),
-			1,
+			6,
 			{._1},
 			.OPTIMAL,
 			{.COLOR_ATTACHMENT, .TRANSFER_SRC},
@@ -4401,10 +4422,10 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 		pipelines[PipelineIndex.LIGHT].colour.view = createImageView(
 			graphicsContext,
 			pipelines[PipelineIndex.LIGHT].colour.vkImage,
-			.D2,
+			.D2_ARRAY,
 			pipelines[PipelineIndex.LIGHT].colour.format,
 			{.COLOR},
-			1,
+			6,
 		)
 
 		pipelines[PipelineIndex.LIGHT].depth.format = findSupportedDepthFormat(
@@ -4417,11 +4438,11 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 		createImage(
 			graphicsContext,
 			&pipelines[PipelineIndex.LIGHT].depth,
-			{},
+			{.CUBE_COMPATIBLE},
 			.D2,
 			u32(SHADOW_RESOLUTION.x),
 			u32(SHADOW_RESOLUTION.y),
-			1,
+			6,
 			{._1},
 			.OPTIMAL,
 			{.DEPTH_STENCIL_ATTACHMENT},
@@ -4434,10 +4455,10 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 		pipelines[PipelineIndex.LIGHT].depth.view = createImageView(
 			graphicsContext,
 			pipelines[PipelineIndex.LIGHT].depth.vkImage,
-			.D2,
+			.D2_ARRAY,
 			pipelines[PipelineIndex.LIGHT].depth.format,
 			{.DEPTH},
-			1,
+			6,
 		)
 
 		colourAttachment: vk.AttachmentDescription = {
@@ -4508,9 +4529,21 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 			},
 		}
 
+		viewmask: u32 = 0b00111111
+		multiview: vk.RenderPassMultiviewCreateInfo = {
+			sType = .RENDER_PASS_MULTIVIEW_CREATE_INFO,
+			pNext = nil,
+			subpassCount = 1,
+			pViewMasks = &viewmask,
+			dependencyCount = 0,
+			pViewOffsets = nil,
+			correlationMaskCount = 1,
+			pCorrelationMasks = &viewmask,
+		}
+
 		renderPassInfo: vk.RenderPassCreateInfo = {
 			sType           = .RENDER_PASS_CREATE_INFO,
-			pNext           = nil,
+			pNext           = &multiview,
 			flags           = {},
 			attachmentCount = 2,
 			pAttachments    = raw_data(
@@ -4797,11 +4830,13 @@ createGraphicsPipelines :: proc(
 	pipelineInfos := make([]vk.GraphicsPipelineCreateInfo, pipelineCount)
 	defer delete(pipelineInfos)
 
+	vertexBindingDescription := vertexBindingDescription
+
 	// SHADOW PIPELINE
 	shadowPushConstants: vk.PushConstantRange = {
 		stageFlags = {.VERTEX},
 		offset     = 0,
-		size       = 3 * size_of(u32),
+		size       = 2 * size_of(u32),
 	}
 
 	shadowPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -4850,7 +4885,6 @@ createGraphicsPipelines :: proc(
 		delete(shadowShaderStagesInfo)
 	}
 
-	vertexBindingDescription := vertexBindingDescription
 	pipelineInfos[0] = {
 		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
 		pNext               = nil,
@@ -5886,8 +5920,8 @@ recordPrecomputeBuffer :: proc(
 		panic("Failed to being recording command buffer!")
 	}
 
-	offset: u32 = 0
-	for &inst, index in scene.instances {
+	// PRECOMPUTE
+	{
 		vk.CmdBindDescriptorSets(
 			commandBuffer,
 			.COMPUTE,
@@ -5898,27 +5932,33 @@ recordPrecomputeBuffer :: proc(
 			0,
 			nil,
 		)
-
-		vk.CmdPushConstants(
-			commandBuffer,
-			pipelines[PipelineIndex.PRECOMPUTE].layout,
-			{.COMPUTE},
-			0,
-			4 * size_of(u32),
-			raw_data(
-				[]u32 {
-					u32(index),
-					u32(len(scene.models[inst.modelID].vertices)),
-					scene.models[inst.modelID].vertexOffset,
-					offset,
-				},
-			),
-		)
-		offset += u32(len(scene.models[inst.modelID].vertices))
-
 		vk.CmdBindPipeline(commandBuffer, .COMPUTE, pipelines[PipelineIndex.PRECOMPUTE].pipeline)
 
-		vk.CmdDispatch(commandBuffer, u32(len(scene.models[inst.modelID].vertices)) / 64 + 1, 1, 1)
+		offset: u32 = 0
+		for &inst, index in scene.instances {
+			vk.CmdPushConstants(
+				commandBuffer,
+				pipelines[PipelineIndex.PRECOMPUTE].layout,
+				{.COMPUTE},
+				0,
+				4 * size_of(u32),
+				raw_data(
+					[]u32 {
+						u32(index),
+						u32(len(scene.models[inst.modelID].vertices)),
+						scene.models[inst.modelID].vertexOffset,
+						offset,
+					},
+				),
+			)
+			vk.CmdDispatch(
+				commandBuffer,
+				u32(len(scene.models[inst.modelID].vertices)) / 64 + 1,
+				1,
+				1,
+			)
+			offset += u32(len(scene.models[inst.modelID].vertices))
+		}
 	}
 
 	if vk.EndCommandBuffer(commandBuffer) != .SUCCESS {
@@ -5947,20 +5987,19 @@ recordGraphicsBuffer :: proc(
 	}
 
 	// SHADOW
-	lightCount := u32(len(scene.pointLights))
-	shadowImageCount := lightCount * 6
-	transitionImageLayout(
-		graphicsContext,
-		commandBuffer,
-		scene.shadowImages.vkImage,
-		.SHADER_READ_ONLY_OPTIMAL,
-		.TRANSFER_DST_OPTIMAL,
-		{.COLOR},
-		shadowImageCount,
-	)
-
-	for index: u32 = 0; index < lightCount; index += 1 {
-		for face: u32 = 0; face < 6; face += 1 {
+	{
+		lightCount := u32(len(scene.pointLights))
+		shadowImageCount := lightCount * 6
+		transitionImageLayout(
+			graphicsContext,
+			commandBuffer,
+			scene.shadowImages.vkImage,
+			.SHADER_READ_ONLY_OPTIMAL,
+			.TRANSFER_DST_OPTIMAL,
+			{.COLOR},
+			shadowImageCount,
+		)
+		for index: u32 = 0; index < u32(len(scene.pointLights)); index += 1 {
 			renderPassInfo: vk.RenderPassBeginInfo = {
 				sType = .RENDER_PASS_BEGIN_INFO,
 				pNext = nil,
@@ -5973,7 +6012,7 @@ recordGraphicsBuffer :: proc(
 				clearValueCount = 2,
 				pClearValues = raw_data(
 					[]vk.ClearValue {
-						{color = vk.ClearColorValue{float32 = {0.0, 0.0, 0.0, 0.0}}},
+						{color = vk.ClearColorValue{float32 = {0, 0, 0, 0}}},
 						{depthStencil = vk.ClearDepthStencilValue{depth = 1, stencil = 0}},
 					},
 				),
@@ -5992,15 +6031,6 @@ recordGraphicsBuffer :: proc(
 				nil,
 			)
 
-			vk.CmdPushConstants(
-				commandBuffer,
-				pipelines[PipelineIndex.LIGHT].layout,
-				{.VERTEX},
-				size_of(u32),
-				2 * size_of(u32),
-				raw_data([]u32{index, face}),
-			)
-
 			vk.CmdBindVertexBuffers(
 				commandBuffer,
 				0,
@@ -6008,12 +6038,15 @@ recordGraphicsBuffer :: proc(
 				&scene.vertexBuffer.buffer,
 				raw_data([]vk.DeviceSize{0}),
 			)
+			vk.CmdBindIndexBuffer(commandBuffer, scene.indexBuffer.buffer, 0, .UINT32)
 
-			vk.CmdBindIndexBuffer(
+			vk.CmdPushConstants(
 				commandBuffer,
-				scene.indexBuffer.buffer,
-				0,
-				.UINT32,
+				pipelines[PipelineIndex.LIGHT].layout,
+				{.VERTEX},
+				size_of(u32),
+				size_of(u32),
+				&index,
 			)
 
 			offset: u32 = 0
@@ -6053,14 +6086,14 @@ recordGraphicsBuffer :: proc(
 						aspectMask = {.COLOR},
 						mipLevel = 0,
 						baseArrayLayer = 0,
-						layerCount = 1,
+						layerCount = 6,
 					},
 					srcOffset = {0, 0, 0},
 					dstSubresource = vk.ImageSubresourceLayers {
 						aspectMask = {.COLOR},
 						mipLevel = 0,
-						baseArrayLayer = index * 6 + face,
-						layerCount = 1,
+						baseArrayLayer = index * 6,
+						layerCount = 6,
 					},
 					dstOffset = {0, 0, 0},
 					extent = vk.Extent3D {
@@ -6071,17 +6104,17 @@ recordGraphicsBuffer :: proc(
 				},
 			)
 		}
-	}
 
-	transitionImageLayout(
-		graphicsContext,
-		commandBuffer,
-		scene.shadowImages.vkImage,
-		.TRANSFER_DST_OPTIMAL,
-		.SHADER_READ_ONLY_OPTIMAL,
-		{.COLOR},
-		shadowImageCount,
-	)
+		transitionImageLayout(
+			graphicsContext,
+			commandBuffer,
+			scene.shadowImages.vkImage,
+			.TRANSFER_DST_OPTIMAL,
+			.SHADER_READ_ONLY_OPTIMAL,
+			{.COLOR},
+			shadowImageCount,
+		)
+	}
 
 	// MAIN
 	{
@@ -6100,10 +6133,10 @@ recordGraphicsBuffer :: proc(
 					{
 						color = vk.ClearColorValue {
 							float32 = Vec4 {
-								f32(scene.clearColour.x) / 255.0,
-								f32(scene.clearColour.y) / 255.0,
-								f32(scene.clearColour.z) / 255.0,
-								f32(scene.clearColour.w) / 255.0,
+								f32(scene.clearColour.x) / 255,
+								f32(scene.clearColour.y) / 255,
+								f32(scene.clearColour.z) / 255,
+								f32(scene.clearColour.w) / 255,
 							},
 						},
 					},
@@ -6309,7 +6342,7 @@ recordComputeBuffer :: proc(
 		transitionImageLayout(
 			graphicsContext,
 			commandBuffer,
-			scene.shadowImages.vkImage,
+			scene.shadowMapImages.vkImage,
 			.SHADER_READ_ONLY_OPTIMAL,
 			.TRANSFER_SRC_OPTIMAL,
 			{.DEPTH},
@@ -6318,7 +6351,7 @@ recordComputeBuffer :: proc(
 
 		upscaleImage(
 			commandBuffer,
-			scene.shadowImages.vkImage,
+			scene.shadowMapImages.vkImage,
 			swapchainImages[imageIndex],
 			{u32(SHADOW_RESOLUTION.x), u32(SHADOW_RESOLUTION.y)},
 			{swapchainExtent.width, swapchainExtent.height},
@@ -6329,7 +6362,7 @@ recordComputeBuffer :: proc(
 		transitionImageLayout(
 			graphicsContext,
 			commandBuffer,
-			scene.shadowImages.vkImage,
+			scene.shadowMapImages.vkImage,
 			.TRANSFER_SRC_OPTIMAL,
 			.SHADER_READ_ONLY_OPTIMAL,
 			{.DEPTH},
@@ -6542,7 +6575,9 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			if active {
 				scene.activeCamera = u32(index)
 			}
-			imgui.DragFloat3("Position", &camera.eye, 0.001)
+			imgui.DragFloat3("Eye", &camera.eye, 0.001)
+			imgui.DragFloat3("Center", &camera.center, 0.001)
+			imgui.DragFloat3("Up", &camera.up, 0.001)
 			imgui.DragFloat("FOV", &camera.fov, 0.5)
 			imgui.SeparatorText("Camera Mode")
 			if imgui.RadioButton("Perspective", camera.mode == .PERSPECTIVE) {

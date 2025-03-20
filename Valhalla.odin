@@ -112,6 +112,9 @@ main :: proc() {
 	glfw.SetWindowUserPointer(graphicsContext.window, &engineState)
 
 	for !glfw.WindowShouldClose(graphicsContext.window) {
+		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
+		lastFrameTime = time.now()
+
 		glfw.PollEvents()
 
 		scene := &graphicsContext.scenes[graphicsContext.activeScene]
@@ -131,8 +134,7 @@ main :: proc() {
 					axis -= cross(camera.up, forward)
 				}
 				rotation := rotation3(f32(radians(cameraSpeed)), axis)
-				camera.up = rotation * camera.up
-				forward = rotation * forward
+				forward =  rotation * forward
 				camera.eye = camera.center - forward
 				mouseDelta = {0, 0}
 			}
@@ -145,27 +147,24 @@ main :: proc() {
 		}
 		if cameraMove.x != 0 {
 			right := normalize(cross(camera.up, (camera.center - camera.eye) / camera.distance))
-			movement := cameraMoveSpeed * cameraMove.x * right
+			movement := delta * cameraMoveSpeed * cameraMove.x * right
 			camera.eye += movement
 			camera.center += movement
 		}
 		if cameraMove.y != 0 {
 			scene := &graphicsContext.scenes[graphicsContext.activeScene]
-			movement := cameraMoveSpeed * cameraMove.y * camera.up
+			movement := delta * cameraMoveSpeed * cameraMove.y * camera.up
 			camera.eye += movement
 			camera.center += movement
 		}
 		if cameraMove.z != 0 {
-			movement :=
-				cameraMoveSpeed * cameraMove.z * (camera.center - camera.eye)
+			movement := delta * cameraMoveSpeed * cameraMove.z * (camera.center - camera.eye)
 			camera.eye += movement
 			camera.center += movement
 		}
-		camera.up = Vec3{0, 1, 0}
+		// camera.up = Vec3{0, 1, 0}
 
-		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
-		lastFrameTime = time.now()
-		drawFrame(&graphicsContext, delta if !paused else 0.0)
+		drawFrame(&graphicsContext, delta if !paused else 0)
 		calcFrameRate(graphicsContext.window)
 
 		// I'm not using the temp allocator so this shouldn't do anything
