@@ -103,9 +103,7 @@ orthographic :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
 	assert(aspect != 0, "Aspect ratio can't be zero!")
 	tanHalfFov := tan(0.5 * fov)
 	top := tanHalfFov * near
-	bottom := -top
 	right := top * aspect
-	left := -right
 
 	m[0, 0] = 1 / right
 	m[1, 1] = -1 / top

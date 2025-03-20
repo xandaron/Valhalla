@@ -12,10 +12,11 @@ import "core:strings"
 import "imgui"
 import implGLFW "imgui/imgui_impl_glfw"
 import implVulkan "imgui/imgui_impl_vulkan"
-import fbx "ufbx"
+import "ufbx"
 import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
+
 
 // ###################################################################
 // #                          Constants                              #
@@ -1876,20 +1877,20 @@ loadModels :: proc(
 	modelPaths: []cstring,
 ) {
 	loadFBX :: proc(graphicsContext: ^GraphicsContext, model: ^Model, filename: cstring) {
-		opts: fbx.Load_Opts = {
-			target_axes = fbx.Coordinate_Axes {
+		opts: ufbx.Load_Opts = {
+			target_axes = ufbx.Coordinate_Axes {
 				right = .POSITIVE_X,
 				up = .POSITIVE_Y,
 				front = .POSITIVE_Z,
 			},
 		}
-		err: fbx.Error
-		scene := fbx.load_file(filename, &opts, &err)
+		err: ufbx.Error
+		scene := ufbx.load_file(filename, &opts, &err)
 		if err.type != .NONE || scene == nil {
 			log.logf(.Error, "Failed to load FBX file! Reason\n{}", err.description.data)
 			panic("Failed to load FBX file!")
 		}
-		defer fbx.free_scene(scene)
+		defer ufbx.free_scene(scene)
 
 		model.skeleton = make([]Bone, scene.bones.count)
 		boneIndex := 0
@@ -1936,8 +1937,8 @@ loadModels :: proc(
 				face := mesh.faces.data[faceIndex]
 				triangulatedIndexCount := (face.num_indices - 2) * 3
 
-				err: fbx.Panic
-				tris := fbx.catch_triangulate_face(
+				err: ufbx.Panic
+				tris := ufbx.catch_triangulate_face(
 					&err,
 					raw_data(model.indices[indexOffset:indexOffset + triangulatedIndexCount]),
 					uint(triangulatedIndexCount),
@@ -2051,13 +2052,13 @@ loadModels :: proc(
 		for animIndex in 0 ..< scene.anim_stacks.count {
 			stack := scene.anim_stacks.data[animIndex]
 
-			err: fbx.Error
-			bakedAnim := fbx.bake_anim(scene, stack.anim, nil, &err)
+			err: ufbx.Error
+			bakedAnim := ufbx.bake_anim(scene, stack.anim, nil, &err)
 			if err.type != .NONE {
 				log.logf(.Error, "Error baking animation: {}", err.description.data)
 				continue
 			}
-			defer fbx.free_baked_anim(bakedAnim)
+			defer ufbx.free_baked_anim(bakedAnim)
 
 			animation := &model.animations[animIndex]
 			// TODO: Surely there is a way to copy a cstring better than this. Might have to copy the data?
@@ -2119,7 +2120,7 @@ loadModels :: proc(
 
 	for path, index in modelPaths {
 		modelIndex := modelOffset + index
-		
+
 		scene.models[modelIndex].vertexOffset = u32(len(scene.vertices))
 		scene.models[modelIndex].indexOffset = u32(len(scene.indices))
 

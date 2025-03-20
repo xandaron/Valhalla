@@ -41,8 +41,8 @@ EngineState :: struct {
 engineState: EngineState
 
 main :: proc() {
-	// Sets the current dir to the folder above the dir of the exe file
 	{
+		// Sets the current dir to the folder above the dir of the exe file
 		dashCount: u32 = 0
 		filePath, _ := filepath.abs(os.args[0])
 		for i := len(filePath) - 1; i >= 0; i -= 1 {
@@ -99,21 +99,17 @@ main :: proc() {
 
 	graphicsContext: GraphicsContext
 	engineState.graphicsContext = &graphicsContext
-	if err := initVkGraphics(&graphicsContext, "./assets/scenes/shambler.json"); err != .None {
-		#partial switch err {
-		case .FailedToLoadSceneFile, .FailedToParseJson:
-			log.log(.Warning, "Failed to load scene file")
-		case .FailedToLoadModel:
-			log.log(.Warning, "Failed to load model file")
-		case .FailedToLoadTexture:
-			log.log(.Warning, "Failed to load texture file")
-		}
+	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/omni_light_demo.json") {
+	case .FailedToLoadSceneFile, .FailedToParseJson:
+		log.log(.Warning, "Failed to load scene file")
+	case .FailedToLoadModel:
+		log.log(.Warning, "Failed to load model file")
+	case .FailedToLoadTexture:
+		log.log(.Warning, "Failed to load texture file")
 	}
 	defer cleanupVkGraphics(&graphicsContext)
 
 	glfw.SetWindowUserPointer(graphicsContext.window, &engineState)
-
-	setActiveScene(&graphicsContext, 0)
 
 	for !glfw.WindowShouldClose(graphicsContext.window) {
 		glfw.PollEvents()
@@ -161,17 +157,18 @@ main :: proc() {
 		}
 		if cameraMove.z != 0 {
 			movement :=
-				cameraMoveSpeed * cameraMove.z * (camera.center - camera.eye) / camera.distance
+				cameraMoveSpeed * cameraMove.z * (camera.center - camera.eye)
 			camera.eye += movement
 			camera.center += movement
 		}
+		camera.up = Vec3{0, 1, 0}
 
 		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
 		lastFrameTime = time.now()
 		drawFrame(&graphicsContext, delta if !paused else 0.0)
 		calcFrameRate(graphicsContext.window)
 
-		// I'm not using the temp allocatior so this shouldn't do anything
+		// I'm not using the temp allocator so this shouldn't do anything
 		free_all(context.temp_allocator)
 	}
 }

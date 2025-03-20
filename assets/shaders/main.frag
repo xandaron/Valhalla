@@ -1,7 +1,5 @@
 #version 460
 
-// glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS)
-
 layout(binding = 0) readonly uniform UniformBuffer {
 	mat4 view;
 	mat4 projection;
@@ -41,24 +39,22 @@ layout(push_constant) uniform PushConstants {
 
 void main() {
     vec3 cumulativeColour = vec3(0.0);
-    vec3 albedo = texture(albedoArray, vec3(inUV, inAlbedoIndex)).xyz;
-    albedo = pow(albedo, vec3(1 / 2.2));
-    vec3 normal = outerProduct(inNormal, vec3(0.0, 0.0, 1.0)) * (texture(normalArray, vec3(inUV, inNormalIndex)).xyz - 0.5) * 2.0;
+    const vec3 albedo = pow(texture(albedoArray, vec3(inUV, inAlbedoIndex)).xyz, vec3(1.0 / 2.2));
+    const vec3 normal = outerProduct(inNormal, vec3(0.0, 0.0, 1.0)) * (texture(normalArray, vec3(inUV, inNormalIndex)).xyz - 0.5) * 2.0;
 
     for (uint index = 0; index < uniformBuffer.lightCount; index++) {
         #define light lightBuffer.lights[index]
 
-        vec3 relativePosition = light.position.xyz - inPosition;
-        float lightSquaredDistance = dot(relativePosition, relativePosition);
+        const vec3 relativePosition = light.position.xyz - inPosition;
+        const float lightSquaredDistance = dot(relativePosition, relativePosition);
+        const vec3 negativeLightDirection = relativePosition / sqrt(lightSquaredDistance);
 
-        float lightDistance = sqrt(lightSquaredDistance);
-        vec3 negativeLightDirection = normalize(relativePosition);
-        float lambertainCoefficient = clamp(dot(normal, negativeLightDirection), 0.0, 1.0);
+        if (texture(shadowMap, vec4(-negativeLightDirection, float(index))).r + EPSILON < lightSquaredDistance) {
+            continue;
+        }
 
-        float depth = texture(shadowMap, vec4(-relativePosition, float(index))).r;
-        float shadow = (lightDistance <= depth + EPSILON) ? 1.0 : 0.0;
-
-        cumulativeColour += albedo * shadow * lambertainCoefficient * light.colourIntensity.xyz / lightSquaredDistance;
+        const float lambertainCoefficient = clamp(dot(normal, negativeLightDirection), 0.0, 1.0);
+        cumulativeColour += albedo * lambertainCoefficient * light.colourIntensity.xyz / lightSquaredDistance;
     }
 
     cumulativeColour = max(cumulativeColour, albedo * pushConstant.ambientLight);

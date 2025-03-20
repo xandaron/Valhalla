@@ -51,8 +51,8 @@ void main() {
 
     vec4 position = vertexTransform * vec4(inPosition, 1.0);
     gl_Position = uniformBuffer.viewProjection * position;
-    outPosition = position.xyz / position.w;
 
+    outPosition = position.xyz / position.w;
     outUV = inUV;
     outNormal = normalize(mat3(vertexTransform) * inNormal);
     outAlbedoIndex = instanceBuffer.instanceInfo[gl_InstanceIndex].albedoSamplerOffset;

@@ -22,7 +22,7 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 - [X] Implement shadow mapping
 - [X] Fully featured GUI with scene save, load and editing with runtime asset import
 - [X] HDR support
-- [ ] Add precompute step
+- [X] Add precompute step
 - [ ] Raytracer
 - [ ] Implement my own file dialog (ImFileDialog is great but I have issues with it)
 
@@ -41,8 +41,8 @@ Run the following script to clone the repository, build the project and run the 
 ```sh
 git clone https://github.com/xandaron/valhalla.git
 cd valhalla
-odin build . -out:build/build.exe
-./build/build.exe
+odin build . -out:bin/build.exe
+./bin/build.exe
 ```
 
 > **Note:** On Linux, you will need to install the GLFW 3.4+ library separately. It's important you install GLFW 3.4 or later as anything earlier will cause crashes.
