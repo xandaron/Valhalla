@@ -12,16 +12,26 @@ import "vendor:glfw"
 
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 
+baseDir: string
+
+@(private = "file")
 frameCount: u16 = 0
+@(private = "file")
 fpsTimer := time.now()
 
 paused := false
+@(private = "file")
 delta: f64 = 0.0
+@(private = "file")
 lastFrameTime := time.now()
 
+@(private = "file")
 mouseMode := false
+@(private = "file")
 mousePos, mouseDelta: f64Vec2 = {0, 0}, {0, 0}
+@(private = "file")
 mouseSensitivity: f64 = 1
+@(private = "file")
 scrollDelta: f64Vec2 = {0, 0}
 
 cameraSpeed: f64 = 1
@@ -35,7 +45,6 @@ showMetrics := false
 
 EngineState :: struct {
 	graphicsContext: ^GraphicsContext,
-	inMenu:          bool,
 }
 
 engineState: EngineState
@@ -44,23 +53,20 @@ main :: proc() {
 	{
 		// Sets the current dir to the folder above the dir of the exe file
 		dashCount: u32 = 0
-		filePath, _ := filepath.abs(os.args[0])
-		for i := len(filePath) - 1; i >= 0; i -= 1 {
-			if filepath.is_separator(filePath[i]) {
-				dashCount += 1
-				if dashCount == 2 {
-					if err := os.set_current_directory(filePath[:i]); err != os.ERROR_NONE {
-						fmt.printfln(
-							"Failed to set current directory to '{}': {}",
-							filePath[:i],
-							err,
-						)
-					}
-					break
-				}
-			}
+		s0, _ := filepath.abs(os.args[0])
+		defer delete(s0)
+		s1 := filepath.dir(s0)
+		defer delete(s1)
+		baseDir = filepath.dir(s1)
+		if err := os.set_current_directory(baseDir); err != os.ERROR_NONE {
+			fmt.printfln(
+				"Failed to set current directory to '{}': {}",
+				baseDir,
+				err,
+			)
 		}
 	}
+	defer delete(baseDir)
 
 	when ODIN_DEBUG {
 		logPath := createLogPath()
@@ -167,7 +173,6 @@ main :: proc() {
 		drawFrame(&graphicsContext, delta if !paused else 0)
 		calcFrameRate(graphicsContext.window)
 
-		// I'm not using the temp allocator so this shouldn't do anything
 		free_all(context.temp_allocator)
 	}
 }
@@ -191,7 +196,6 @@ glfwKeyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, m
 	context = runtime.default_context()
 	context.logger = logger
 	using engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	if inMenu do return
 	switch key {
 	case glfw.KEY_ESCAPE:
 		glfw.SetWindowShouldClose(window, glfw.TRUE)
@@ -264,7 +268,6 @@ glfwKeyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, m
 
 glfwMouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	if engineState.inMenu do return
 	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
 		if mouseMode {
 			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
@@ -277,7 +280,6 @@ glfwMouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, 
 
 glfwCursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	if engineState.inMenu do return
 	newPos: f64Vec2 = {xpos, ypos} * mouseSensitivity
 	vector1 := mousePos
 	mouseDelta = newPos - vector1
@@ -286,7 +288,6 @@ glfwCursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 
 glfwScrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	if engineState.inMenu do return
 	scrollDelta = {xoffset, yoffset}
 }
 

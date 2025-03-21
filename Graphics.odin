@@ -1,6 +1,5 @@
 package Valhalla
 
-import ImFD "ImFileDialog"
 import "base:runtime"
 import "core:c"
 import "core:encoding/json"
@@ -8,10 +7,12 @@ import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "imgui"
 import implGLFW "imgui/imgui_impl_glfw"
 import implVulkan "imgui/imgui_impl_vulkan"
+import tinyfd "tinyfiledialogs"
 import "ufbx"
 import "vendor:glfw"
 import img "vendor:stb/image"
@@ -185,12 +186,6 @@ Image :: struct {
 	sampler: u32,
 }
 
-@(private = "file")
-ImFDImageData :: struct {
-	using image:   Image,
-	descriptorSet: vk.DescriptorSet,
-}
-
 // Use Vec4 becuse of alignment issues when using Vec3
 @(private = "file")
 LightData :: struct #align (16) {
@@ -244,7 +239,6 @@ ImguiData :: struct {
 	descriptorPool: vk.DescriptorPool,
 	renderPass:     vk.RenderPass,
 	colour:         Image,
-	imfdImages:     [dynamic]ImFDImageData,
 }
 
 @(private = "file")
@@ -2834,7 +2828,6 @@ loadScene :: proc(
 
 	scene: Scene = {
 		name         = sceneJson.name,
-		filePath     = sceneFile,
 		clearColour  = sceneJson.clear_colour,
 		ambientLight = sceneJson.ambient_light,
 		instances    = make([dynamic]Instance, len(sceneJson.instances)),
@@ -2847,6 +2840,7 @@ loadScene :: proc(
 		vertices     = make([dynamic]Vertex),
 		indices      = make([dynamic]u32),
 	}
+	scene.filePath, _ = filepath.abs(sceneFile)
 
 	for &instance, instanceIndex in sceneJson.instances {
 		scene.instances[instanceIndex] = {
@@ -4562,14 +4556,14 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 
 		viewmask: u32 = 0b00111111
 		multiview: vk.RenderPassMultiviewCreateInfo = {
-			sType = .RENDER_PASS_MULTIVIEW_CREATE_INFO,
-			pNext = nil,
-			subpassCount = 1,
-			pViewMasks = &viewmask,
-			dependencyCount = 0,
-			pViewOffsets = nil,
+			sType                = .RENDER_PASS_MULTIVIEW_CREATE_INFO,
+			pNext                = nil,
+			subpassCount         = 1,
+			pViewMasks           = &viewmask,
+			dependencyCount      = 0,
+			pViewOffsets         = nil,
 			correlationMaskCount = 1,
-			pCorrelationMasks = &viewmask,
+			pCorrelationMasks    = &viewmask,
 		}
 
 		renderPassInfo: vk.RenderPassCreateInfo = {
@@ -5392,107 +5386,6 @@ initImgui :: proc(using graphicsContext: ^GraphicsContext) {
 
 @(private = "file")
 updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
-	ImFDCreateImage: ImFD.CreateTexture : proc "system" (
-		data: ^c.uint8_t,
-		width, height: c.int,
-		format: c.char,
-	) -> rawptr {
-		context = runtime.default_context()
-		using graphicsContext := engineState.graphicsContext
-
-		imageData: ImFDImageData
-		imageData.format = .B8G8R8A8_SRGB if format == 0 else .R8G8B8A8_SRGB
-		createImage(
-			graphicsContext,
-			&imageData.image,
-			{},
-			.D2,
-			u32(width),
-			u32(height),
-			1,
-			{._1},
-			.OPTIMAL,
-			{.TRANSFER_DST, .SAMPLED},
-			{.DEVICE_LOCAL},
-			.EXCLUSIVE,
-			0,
-			nil,
-		)
-
-		imageData.view = createImageView(
-			graphicsContext,
-			imageData.vkImage,
-			.D2,
-			imageData.format,
-			{.COLOR},
-			1,
-		)
-
-		imageData.sampler = 0
-
-		imageData.descriptorSet = implVulkan.AddTexture(
-			samplers[imageData.image.sampler],
-			imageData.image.view,
-			.SHADER_READ_ONLY_OPTIMAL,
-		)
-
-		textureSize := int(width * height * 4)
-		stagingBuffer: Buffer
-		createBuffer(
-			graphicsContext,
-			textureSize,
-			{.TRANSFER_SRC},
-			{.HOST_VISIBLE, .HOST_COHERENT},
-			&stagingBuffer.buffer,
-			&stagingBuffer.memory,
-		)
-		defer {
-			cleanupBuffer(graphicsContext, &stagingBuffer)
-		}
-
-		bufferData: rawptr
-		vk.MapMemory(device, stagingBuffer.memory, 0, vk.DeviceSize(textureSize), {}, &bufferData)
-		mem.copy(bufferData, data, textureSize)
-		vk.UnmapMemory(device, stagingBuffer.memory)
-
-		commandBuffer := beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
-		transitionImageLayout(
-			graphicsContext,
-			commandBuffer,
-			imageData.image.vkImage,
-			.UNDEFINED,
-			.TRANSFER_DST_OPTIMAL,
-			{.COLOR},
-			1,
-		)
-
-		copyBufferToImage(
-			graphicsContext,
-			commandBuffer,
-			stagingBuffer.buffer,
-			imageData.image.vkImage,
-			u32(width),
-			u32(height),
-		)
-
-		transitionImageLayout(
-			graphicsContext,
-			commandBuffer,
-			imageData.image.vkImage,
-			.TRANSFER_DST_OPTIMAL,
-			.SHADER_READ_ONLY_OPTIMAL,
-			{.COLOR},
-			1,
-		)
-		endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
-
-		append(&imguiData.imfdImages, imageData)
-
-		return (rawptr)((uintptr)(imageData.descriptorSet))
-	}
-
-	ImFDDeleteImage: ImFD.DeleteTexture : proc "system" (descriptorPtr: rawptr) {}
-
 	imguiData.uiContext = imgui.CreateContext()
 	io := imgui.GetIO()
 	when !ODIN_DEBUG {
@@ -5653,22 +5546,10 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 		log.log(.Fatal, "Failed to init vulkan impl.")
 		panic("Failed to init vulkan impl.")
 	}
-
-	ImFD.Init(ImFDCreateImage, ImFDDeleteImage)
-	imguiData.imfdImages = make([dynamic]ImFDImageData)
 }
 
 @(private = "file")
 cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
-	// This should probably be in ImFDDeleteImage but that causes issues so this is the best solution I have at the moment
-	for &imageData, index in imguiData.imfdImages {
-		cleanupImage(graphicsContext, &imageData.image)
-		implVulkan.RemoveTexture(imageData.descriptorSet)
-	}
-	delete(imguiData.imfdImages)
-	// ------------------------------------------------------------
-
-	ImFD.Shutdown()
 	implVulkan.Shutdown()
 	implGLFW.Shutdown()
 	imgui.DestroyContext(imguiData.uiContext)
@@ -6520,36 +6401,61 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				setActiveScene(graphicsContext, u32(len(scenes) - 1))
 			}
 			if imgui.MenuItem("Load") {
-				ImFD.Open(
-					"SceneOpenDialog",
-					"Open a scene",
-					"JSON file (*.json){.json},.*",
-					true,
-					"./assets/scenes/",
+				filterPatterns := []cstring{"*.json"}
+				path, _ := filepath.abs("./assets/scenes/")
+				defer delete(path)
+				file, _ := filepath.rel(
+					baseDir,
+					string(
+						tinyfd.openFileDialog(
+							"Load Scene",
+							fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+							i32(len(filterPatterns)),
+							raw_data(filterPatterns),
+							".json",
+							0,
+						),
+					),
 				)
-				engineState.inMenu = true
+				defer delete(file)
+
+				extension := filepath.ext(file)
+				if file != "" && extension[1:] == "json" {
+					_, _ = loadScene(graphicsContext, file)
+				}
 			}
 			if imgui.MenuItem("Save") {
 				if scene.filePath == "" {
-					ImFD.Save(
-						"SceneSaveDialog",
-						"Save Scene",
-						"JSON file (*.json){.json},.*",
-						"./assets/scenes/",
+					filterPatterns := []cstring{"*.json"}
+					path, _ := filepath.abs("./assets/scenes/")
+					defer delete(path)
+					scene.filePath = string(
+						tinyfd.saveFileDialog(
+							"Save Scene",
+							fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+							i32(len(filterPatterns)),
+							raw_data(filterPatterns),
+							".json",
+						),
 					)
-					engineState.inMenu = true
-				} else {
-					saveScene(graphicsContext, activeScene)
 				}
+				saveScene(graphicsContext, activeScene)
 			}
 			if imgui.MenuItem("Save AS...") {
-				ImFD.Save(
-					"SceneSaveDialog",
-					"Save Scene",
-					"JSON file (*.json){.json},.*",
-					"./assets/scenes/",
+				filterPatterns := []cstring{"*.json"}
+				path := string(
+					tinyfd.saveFileDialog(
+						"Save Scene",
+						strings.clone_to_cstring(scene.filePath, context.temp_allocator),
+						i32(len(filterPatterns)),
+						raw_data(filterPatterns),
+						".json",
+					),
 				)
-				engineState.inMenu = true
+				if path != "" {
+					scene.filePath = path
+					saveScene(graphicsContext, activeScene)
+				}
 			}
 			if imgui.MenuItem("Close") {
 				closeScene(graphicsContext, activeScene)
@@ -6558,34 +6464,127 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			imgui.SeparatorText("Assets")
 			if imgui.BeginMenu("Import") {
 				if imgui.MenuItem("Model") {
-					ImFD.Open(
-						"LoadModelDialog",
-						"Load Model",
-						"FBX file (*.fbx){.fbx},OBJ file (*.obj){.obj},.*",
-						true,
-						"./assets/models/",
+					filterPatterns := []cstring{"*.fbx", "*.obj"}
+					path, _ := filepath.abs("./assets/models/")
+					defer delete(path)
+					file, err := filepath.rel(
+						baseDir,
+						strings.clone(
+							string(
+								tinyfd.openFileDialog(
+									"Load Model",
+									fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+									i32(len(filterPatterns)),
+									raw_data(filterPatterns),
+									".fbx .obj",
+									0,
+								),
+							),
+							context.temp_allocator,
+						),
 					)
-					engineState.inMenu = true
+					defer delete(file)
+
+					extension := filepath.ext(file)
+					if file != "" && extension[1:] == "fbx" || extension[1:] == "obj" {
+						alreadyLoaded := false
+						for &loadedFile in scene.modelPaths {
+							if file == string(loadedFile) {
+								alreadyLoaded = true
+								break
+							}
+						}
+
+						if !alreadyLoaded {
+							f := strings.clone_to_cstring(file)
+							loadModels(graphicsContext, activeScene, {f})
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Failed to wait for device idle?")
+							}
+							updateSceneModels(graphicsContext, activeScene)
+							append(&scene.modelPaths, f)
+						}
+					}
 				}
 				if imgui.MenuItem("Texture") {
-					ImFD.Open(
-						"LoadTextureDialog",
-						"Load Texture",
-						"Image file (*.jpg, *.png){.jpg,.png},.*",
-						true,
-						"./assets/textures/",
+					filterPatterns := []cstring{"*.jpg", "*.png"}
+					path, _ := filepath.abs("./assets/textures/")
+					defer delete(path)
+					file, err := filepath.rel(
+						".",
+						string(
+							tinyfd.openFileDialog(
+								"Load Texture",
+								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+								i32(len(filterPatterns)),
+								raw_data(filterPatterns),
+								".jpg .png",
+								0,
+							),
+						),
 					)
-					engineState.inMenu = true
+					defer delete(file)
+
+					extension := filepath.ext(file)
+					if file != "" && extension[1:] == "png" ||
+					   extension[1:] == "jpg" ||
+					   extension[1:] == "jpeg" {
+						alreadyLoaded := false
+						for &loadedFile in scene.texturePaths {
+							if file == string(loadedFile) {
+								alreadyLoaded = true
+								break
+							}
+						}
+
+						if !alreadyLoaded {
+							f := strings.clone_to_cstring(file)
+							addImages(graphicsContext, &scene.textures, scene.textureCount, {f})
+							updateSceneTextures(graphicsContext, activeScene)
+							append(&scene.texturePaths, f)
+							scene.textureCount += 1
+						}
+					}
 				}
 				if imgui.MenuItem("Normal Map") {
-					ImFD.Open(
-						"LoadNormalDialog",
-						"Load Normal Map",
-						"Image file (*.jpg *.png){.jpg .png},.*",
-						true,
-						"./assets/textures/",
+					filterPatterns := []cstring{"*.jpg", "*.png"}
+					path, _ := filepath.abs("./assets/textures/")
+					defer delete(path)
+					file, _ := filepath.rel(
+						".",
+						string(
+							tinyfd.openFileDialog(
+								"Load Normal",
+								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+								i32(len(filterPatterns)),
+								raw_data(filterPatterns),
+								".jpg .png",
+								0,
+							),
+						),
 					)
-					engineState.inMenu = true
+					defer delete(file)
+
+					extension := filepath.ext(file)
+					if file != "" && extension[1:] == "png" ||
+					   extension[1:] == "jpg" ||
+					   extension[1:] == "jpeg" {
+						alreadyLoaded := false
+						for &loadedFile in scene.texturePaths {
+							if file == string(loadedFile) {
+								alreadyLoaded = true
+								break
+							}
+						}
+
+						if !alreadyLoaded {
+							f := strings.clone_to_cstring(file)
+							addImages(graphicsContext, &scene.normals, scene.normalCount, {f})
+							updateSceneNormals(graphicsContext, activeScene)
+							append(&scene.normalPaths, f)
+							scene.normalCount += 1
+						}
+					}
 				}
 				imgui.EndMenu()
 			}
@@ -6872,132 +6871,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 		constructSceneEditor(graphicsContext)
 	}
 	imgui.End()
-
-	scene := &scenes[activeScene]
-
-	if ImFD.IsDone("SceneOpenDialog") {
-		if ImFD.HasResult() {
-			file := ImFD.GetResult()
-			index, err := loadScene(graphicsContext, string(file))
-			setActiveScene(graphicsContext, index)
-		}
-		ImFD.Close()
-		engineState.inMenu = false
-	}
-	if ImFD.IsDone("SceneSaveDialog") {
-		if ImFD.HasResult() {
-			file := ImFD.GetResult()
-			scene.filePath = string(file)
-			saveScene(graphicsContext, activeScene)
-		}
-		ImFD.Close()
-		engineState.inMenu = false
-	}
-	if ImFD.IsDone("LoadModelDialog") {
-		fileCount: c.int
-		if ImFD.HasResult() {
-			files := ImFD.GetResults(&fileCount)
-			defer ImFD.FreeResults()
-			newFilepaths := make([]cstring, fileCount)
-			defer delete(newFilepaths)
-			count := 0
-			modelInner: for index in 0 ..< fileCount {
-				file := files[index]
-				for &loadedFile in scene.texturePaths {
-					if file == loadedFile {
-						continue modelInner
-					}
-				}
-				stringLen := len(file) + 1
-				// Is this the proper way to clone a cstring?
-				memPtr, err := mem.alloc(stringLen)
-				mem.copy(memPtr, (rawptr)(file), stringLen)
-				newFilepaths[count] = (cstring)(memPtr)
-				count += 1
-			}
-			if count != 0 {
-				loadModels(graphicsContext, activeScene, newFilepaths[:count])
-				if vk.DeviceWaitIdle(device) != .SUCCESS {
-					panic("Failed to wait for device idle?")
-				}
-				updateSceneModels(graphicsContext, activeScene)
-				append(&scene.modelPaths, ..newFilepaths[:count])
-			}
-		}
-		ImFD.Close()
-		engineState.inMenu = false
-	}
-	if ImFD.IsDone("LoadTextureDialog") {
-		if ImFD.HasResult() {
-			fileCount: c.int
-			files := ImFD.GetResults(&fileCount)
-			defer ImFD.FreeResults()
-			newFilepaths := make([]cstring, fileCount)
-			defer delete(newFilepaths)
-			count: u32 = 0
-			textureInner: for index in 0 ..< fileCount {
-				file := files[index]
-				for &loadedFile in scene.modelPaths {
-					if file == loadedFile {
-						continue textureInner
-					}
-				}
-				stringLen := len(file) + 1
-				// Is this the proper way to clone a cstring?
-				memPtr, err := mem.alloc(stringLen)
-				mem.copy(memPtr, (rawptr)(file), stringLen)
-				newFilepaths[count] = (cstring)(memPtr)
-				count += 1
-			}
-			if count != 0 {
-				addImages(
-					graphicsContext,
-					&scene.textures,
-					scene.textureCount,
-					newFilepaths[:count],
-				)
-				updateSceneTextures(graphicsContext, activeScene)
-				append(&scene.texturePaths, ..newFilepaths[:count])
-				scene.textureCount += count
-			}
-		}
-		ImFD.Close()
-		engineState.inMenu = false
-	}
-	if ImFD.IsDone("LoadNormalDialog") {
-		if ImFD.HasResult() {
-			fileCount: c.int
-			files := ImFD.GetResults(&fileCount)
-			defer ImFD.FreeResults()
-			newFilepaths := make([]cstring, fileCount)
-			defer delete(newFilepaths)
-			count: u32 = 0
-			normalInner: for index in 0 ..< fileCount {
-				file := files[index]
-				foundMatch := false
-				for &loadedFile in scene.normalPaths {
-					if file == loadedFile {
-						foundMatch = true
-						continue normalInner
-					}
-				}
-				stringLen := len(file) + 1
-				// Is this the proper way to clone a cstring?
-				memPtr, err := mem.alloc(stringLen)
-				mem.copy(memPtr, (rawptr)(file), stringLen)
-				newFilepaths[count] = (cstring)(memPtr)
-				count += 1
-			}
-			if count != 0 {
-				addImages(graphicsContext, &scene.normals, scene.normalCount, newFilepaths[:count])
-				updateSceneNormals(graphicsContext, activeScene)
-				append(&scene.normalPaths, ..newFilepaths[:count])
-				scene.normalCount += count
-			}
-		}
-		ImFD.Close()
-		engineState.inMenu = false
-	}
 }
 
 drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {

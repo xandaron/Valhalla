@@ -24,7 +24,6 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 - [X] HDR support
 - [X] Add precompute step
 - [ ] Raytracer
-- [ ] Implement my own file dialog (ImFileDialog is great but I have issues with it)
 
 ## Getting Started
 
