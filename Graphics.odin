@@ -4157,6 +4157,37 @@ updateSceneModels :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u
 		&scene.indexBuffer,
 		.INDEX_BUFFER,
 	)
+
+	vertexBufferInfo: vk.DescriptorBufferInfo = {
+		buffer = scene.vertexBuffer.buffer,
+		offset = 0,
+		range  = vk.DeviceSize(size_of(Vertex) * len(scene.vertices)),
+	}
+
+	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		descriptorWrites: []vk.WriteDescriptorSet = {
+			{
+				sType = .WRITE_DESCRIPTOR_SET,
+				pNext = nil,
+				dstSet = pipelines[PipelineIndex.PRECOMPUTE].descriptorSets[index],
+				dstBinding = 0,
+				dstArrayElement = 0,
+				descriptorCount = 1,
+				descriptorType = .STORAGE_BUFFER,
+				pImageInfo = nil,
+				pBufferInfo = &vertexBufferInfo,
+				pTexelBufferView = nil,
+			},
+		}
+
+		vk.UpdateDescriptorSets(
+			device,
+			u32(len(descriptorWrites)),
+			raw_data(descriptorWrites),
+			0,
+			nil,
+		)
+	}
 }
 
 @(private = "file")
