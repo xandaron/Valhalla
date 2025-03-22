@@ -34,8 +34,11 @@ mouseSensitivity: f64 = 1
 @(private = "file")
 scrollDelta: f64Vec2 = {0, 0}
 
-cameraSpeed: f64 = 1
-cameraMoveSpeed: f32 = 0.0003
+@(private = "file")
+cameraAngleSpeed: f64 = 1
+@(private = "file")
+cameraMoveSpeed: f32 = 0.25
+@(private = "file")
 cameraMove: Vec3 = {0, 0, 0}
 
 // Debug
@@ -73,7 +76,7 @@ main :: proc() {
 		if logHandle, err := os.open(logPath, os.O_WRONLY | os.O_CREATE); err == 0 {
 			logger = log.create_multi_logger(
 				log.create_console_logger(),
-				log.create_file_logger(logHandle),
+				// log.create_file_logger(logHandle),
 			)
 		} else {
 			logger = log.create_multi_logger(log.create_console_logger())
@@ -139,7 +142,7 @@ main :: proc() {
 				} else if mouseDelta.y < 0 {
 					axis -= cross(camera.up, forward)
 				}
-				rotation := rotation3(f32(radians(cameraSpeed)), axis)
+				rotation := rotation3(f32(radians(cameraAngleSpeed)), axis)
 				forward =  rotation * forward
 				camera.eye = camera.center - forward
 				mouseDelta = {0, 0}
@@ -289,9 +292,4 @@ glfwCursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 glfwScrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
 	scrollDelta = {xoffset, yoffset}
-}
-
-framebufferResizeCallback :: proc "c" (window: glfw.WindowHandle, width: i32, height: i32) {
-	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	engineState.graphicsContext.framebufferResized = true
 }

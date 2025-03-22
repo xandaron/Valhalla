@@ -26,7 +26,7 @@
             "name": "Linux Debug",
             "type": "cppdbg",
             "request": "launch",
-            "preLaunchTask": "Build Linux",
+            "preLaunchTask": "Debug Linux",
             "program": "${workspaceFolder}/bin/debug.exe",
             "args": [],
             "cwd": "${workspaceFolder}",

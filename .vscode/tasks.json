@@ -63,7 +63,6 @@
             "label": "Debug Linux",
             "dependsOn": [
                 "Linux mkdir",
-                "compile shaders linux",
                 "debug"
             ]
         },

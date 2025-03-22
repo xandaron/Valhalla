@@ -1,6 +1,6 @@
 #version 460
 
-#extension GL_EXT_multiview : enable
+#extension GL_ARB_shader_viewport_layer_array : enable
 
 struct InstanceInfo {
     mat4 model;
@@ -29,7 +29,7 @@ layout(binding = 2) readonly buffer TransformBuffer {
 
 layout(push_constant) uniform PushConstants {
     uint vertexOffset;
-    uint lightIndex;
+    uint layerIndex;
 } pushConstants;
 
 layout(location = 0) in vec3 inPosition;
@@ -52,29 +52,35 @@ layout(location = 0) out float outColour;
 #define negativeZ (projection * mat4(vec4(-1, 0, 0, 0), vec4(0, -1, 0, 0), vec4(0, 0, 1, 0), vec4(light.position.x, light.position.y, -light.position.z, 1)))
 
 void main() {
-    const Light light = lightBuffer.lights[pushConstants.lightIndex];
+    const Light light = lightBuffer.lights[pushConstants.layerIndex / 6];
 
     const vec4 vertexPosition = transformBuffer.vertexTransforms[gl_VertexIndex - gl_BaseVertex + pushConstants.vertexOffset] * vec4(inPosition, 1.0);
 
     // +x = 0, -x = 1, +y = 2, -y = 3, +z = 4, -z = 5
-    switch(gl_ViewIndex) {
+    switch(pushConstants.layerIndex % 6) {
         case 0:
             gl_Position = positiveX * vertexPosition;
+            gl_Layer = int(pushConstants.layerIndex);
             break;
         case 1:
             gl_Position = negativeX * vertexPosition;
+            gl_Layer = int(pushConstants.layerIndex);
             break;
         case 2:
             gl_Position = positiveY * vertexPosition;
+            gl_Layer = int(pushConstants.layerIndex);
             break;
         case 3:
             gl_Position = negativeY * vertexPosition;
+            gl_Layer = int(pushConstants.layerIndex);
             break;
         case 4:
             gl_Position = positiveZ * vertexPosition;
+            gl_Layer = int(pushConstants.layerIndex);
             break;
         case 5:
             gl_Position = negativeZ * vertexPosition;
+            gl_Layer = int(pushConstants.layerIndex);
             break;
     }
 

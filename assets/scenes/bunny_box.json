@@ -59,11 +59,12 @@
 				0.20000000,
 				-0.34999999
 			],
-			"colourIntensity": [
+			"colour": [
 				0.00000000,
 				0.00000000,
-				0.50000000
+				1.00000000
 			],
+			"intensity": 1.00000000,
 			"rotationAngle": 10.00000000,
 			"rotationAxis": [
 				0.00000000,
@@ -78,11 +79,12 @@
 				0.20000000,
 				-0.34999999
 			],
-			"colourIntensity": [
-				0.50000000,
+			"colour": [
+				1.00000000,
 				0.00000000,
 				0.00000000
 			],
+			"intensity": 1.00000000,
 			"rotationAngle": 10.00000000,
 			"rotationAxis": [
 				0.00000000,
@@ -97,11 +99,12 @@
 				0.20000000,
 				0.69999999
 			],
-			"colourIntensity": [
+			"colour": [
 				0.00000000,
-				0.50000000,
+				1.00000000,
 				0.00000000
 			],
+			"intensity": 1.00000000,
 			"rotationAngle": 10.00000000,
 			"rotationAxis": [
 				0.00000000,
@@ -111,7 +114,7 @@
 		}
 	],
 	"models": [
-		"./assets/models/bunny/bunny.fbx",
+		"./assets/models/bunny/Stanford_Bunny.fbx",
 		"./assets/models/cube/cube_inverted.fbx"
 	],
 	"textures": [
