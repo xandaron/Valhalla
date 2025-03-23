@@ -11,9 +11,9 @@
 		{
 			"name": "Main",
 			"eye": [
-				0.78489518,
-				0.50233322,
-				3.32056880
+				0.15910372,
+				0.27151012,
+				2.50948453
 			],
 			"center": [
 				0.00000000,
@@ -27,7 +27,7 @@
 			],
 			"near": 0.00000000,
 			"far": 0.00000000,
-			"distance": 198.69564819,
+			"distance": 145.70802307,
 			"fov": 45.00000000,
 			"mode": 0
 		}
@@ -55,7 +55,7 @@
 		}
 	],
 	"models": [
-		"./assets/models/bunny/Stanford_Bunny.fbx",
+		"./assets/models/bunny/Stanford_Bunny.obj",
 		"./assets/models/cube/cube_inverted.fbx"
 	],
 	"textures": [
@@ -94,8 +94,8 @@
 			"normal": -1,
 			"position": [
 				0.00000000,
-				-0.11900000,
-				-0.11100000
+				-0.05100000,
+				-0.14900000
 			],
 			"rotation": [
 				0.00000000,

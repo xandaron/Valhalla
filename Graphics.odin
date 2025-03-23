@@ -10,6 +10,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "imgui"
+import "vendor:cgltf"
 import implGLFW "imgui/imgui_impl_glfw"
 import implVulkan "imgui/imgui_impl_vulkan"
 import tinyfd "tinyfiledialogs"
@@ -166,6 +167,7 @@ Animation :: struct {
 	duration: f64,
 }
 
+// TODO: Models could contain multiple meshes each with their own textures...  There should be a way to represent that.
 @(private = "file")
 Model :: struct {
 	name:         cstring,
@@ -2166,6 +2168,23 @@ loadModels :: proc(
 		}
 	}
 
+	loadGLTF :: proc(graphicsContext: ^GraphicsContext, model: ^Model, filename: cstring) {
+		options: cgltf.options = {}
+		data, res := cgltf.parse_file(options, filename)
+		defer cgltf.free(data)
+
+		if res != .success {
+			log.log(.Error, "Failed to load gltf file!")
+			panic("Failed to load gltf file!")
+		}
+
+		mesh := data.meshes[0]
+
+		if mesh.name == "" {
+			log.log(.Info, "hello")
+		}		
+	}
+
 	scene := &scenes[sceneIndex]
 
 	modelOffset := len(scene.models)
@@ -2177,7 +2196,17 @@ loadModels :: proc(
 		scene.models[modelIndex].vertexOffset = u32(len(scene.vertices))
 		scene.models[modelIndex].indexOffset = u32(len(scene.indices))
 
-		loadFBX(graphicsContext, &scene.models[modelIndex], path)
+		switch filepath.ext(string(path))[1:] {
+			case "obj":
+				fallthrough
+			case "fbx":
+				loadFBX(graphicsContext, &scene.models[modelIndex], path)
+			case "gltf":
+				fallthrough
+			case "glb":
+				loadGLTF(graphicsContext, &scene.models[modelIndex], path)
+
+		}
 
 		append(&scene.vertices, ..scene.models[modelIndex].vertices)
 		append(&scene.indices, ..scene.models[modelIndex].indices)
@@ -6507,7 +6536,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			imgui.SeparatorText("Assets")
 			if imgui.BeginMenu("Import") {
 				if imgui.MenuItem("Model") {
-					filterPatterns := []cstring{"*.fbx", "*.obj"}
+					filterPatterns := []cstring{"*.gltf", "*.glb", "*.fbx", "*.obj"}
 					path, _ := filepath.abs("./assets/models/")
 					defer delete(path)
 					file, err := filepath.rel(
@@ -6519,7 +6548,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 									fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
 									i32(len(filterPatterns)),
 									raw_data(filterPatterns),
-									".fbx .obj",
+									".gltf .glb .fbx .obj",
 									0,
 								),
 							),
@@ -6528,8 +6557,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					)
 					defer delete(file)
 
-					extension := filepath.ext(file)
-					if file != "" && extension[1:] == "fbx" || extension[1:] == "obj" {
+					extension := filepath.ext(file)[1:]
+					if file != "" && extension == "gltf" || extension == "glb" || extension == "fbx" || extension == "obj" {
 						alreadyLoaded := false
 						for &loadedFile in scene.modelPaths {
 							if file == string(loadedFile) {

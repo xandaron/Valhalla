@@ -114,7 +114,7 @@
 		}
 	],
 	"models": [
-		"./assets/models/bunny/Stanford_Bunny.fbx",
+		"./assets/models/bunny/Stanford_Bunny.obj",
 		"./assets/models/cube/cube_inverted.fbx"
 	],
 	"textures": [
