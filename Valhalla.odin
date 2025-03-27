@@ -37,7 +37,7 @@ scrollDelta: f64Vec2 = {0, 0}
 @(private = "file")
 cameraAngleSpeed: f64 = 1
 @(private = "file")
-cameraMoveSpeed: f32 = 0.25
+cameraMoveSpeed: f32 = 1
 @(private = "file")
 cameraMove: Vec3 = {0, 0, 0}
 
@@ -108,7 +108,7 @@ main :: proc() {
 
 	graphicsContext: GraphicsContext
 	engineState.graphicsContext = &graphicsContext
-	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/omni_light_demo.json") {
+	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/dragon_box.json") {
 	case .FailedToLoadSceneFile, .FailedToParseJson:
 		log.log(.Warning, "Failed to load scene file")
 	case .FailedToLoadModel:
@@ -171,7 +171,6 @@ main :: proc() {
 			camera.eye += movement
 			camera.center += movement
 		}
-		// camera.up = Vec3{0, 1, 0}
 
 		drawFrame(&graphicsContext, delta if !paused else 0)
 		calcFrameRate(graphicsContext.window)

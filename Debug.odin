@@ -11,10 +11,11 @@ import dt "core:time/datetime"
 import vk "vendor:vulkan"
 
 
+@(private = "package")
 createLogPath :: proc() -> string {
 	if !os.exists("./logs") do os.make_directory("./logs")
-	
-	//TODO: There has to be a better way of doing this. Maybe I can check how many files are in the directory and then create a new file with the next number.
+
+	// Maybe I can check how many files are in the directory and then create a new file with the next number.
 	now := t.now()
 	year, month, day := t.date(now)
 	dateTime: dt.DateTime = {
@@ -46,6 +47,7 @@ createLogPath :: proc() -> string {
 //########################################################//
 
 
+@(private = "package")
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
 	context = runtime.default_context()
 	context.logger = logger
@@ -57,7 +59,8 @@ glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
 //                         Vulkan                         //
 //########################################################//
 
-// TODO: There has to be a better way of doing this.
+
+@(private = "package")
 vkDebugCallback :: proc "system" (
 	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
 	messageType: vk.DebugUtilsMessageTypeFlagsEXT,
@@ -75,6 +78,7 @@ vkDebugCallback :: proc "system" (
 	return false
 }
 
+@(private = "package")
 vkDecodeSeverity :: proc(
 	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
 ) -> runtime.Logger_Level {
@@ -93,6 +97,7 @@ vkDecodeSeverity :: proc(
 	panic("Unknown severity type!")
 }
 
+@(private = "package")
 vkDecodeSeverityString :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT) -> string {
 	if vk.DebugUtilsMessageSeverityFlagEXT.VERBOSE in messageSeverity {
 		return "Info"
@@ -109,6 +114,7 @@ vkDecodeSeverityString :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlag
 	panic("Unknown severity type!")
 }
 
+@(private = "package")
 vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -> string {
 	if .GENERAL in messageType {
 		return "General"
@@ -122,6 +128,7 @@ vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -
 	return "Unknown"
 }
 
+@(private = "package")
 vkSetupDebugMessenger :: proc(graphicsContext: ^GraphicsContext) {
 	createInfo := vkPopulateDebugMessengerCreateInfo()
 	if vk.CreateDebugUtilsMessengerEXT(
@@ -135,6 +142,7 @@ vkSetupDebugMessenger :: proc(graphicsContext: ^GraphicsContext) {
 	}
 }
 
+@(private = "package")
 vkPopulateDebugMessengerCreateInfo :: proc() -> (createInfo: vk.DebugUtilsMessengerCreateInfoEXT) {
 	createInfo = {
 		sType           = vk.StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
@@ -153,8 +161,10 @@ vkPopulateDebugMessengerCreateInfo :: proc() -> (createInfo: vk.DebugUtilsMessen
 //########################################################//
 
 
+@(private = "package")
 imguiCheckVkResult :: proc "c" (err: vk.Result) {
 	context = runtime.default_context()
+	logger = context.logger
 	if int(err) == 0 { return }
 	if int(err) < 0 {
 		log.logf(.Fatal, "Imgui-Vulkan: VkResult = {}", err)

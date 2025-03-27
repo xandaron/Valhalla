@@ -30,6 +30,7 @@ layout(push_constant) uniform PushConstants {
     float exposure;
     float tonemapper;
     float gamma;
+    bool drawLights;
 } pushConstants;
 
 // x * y * z <= 1024; must be true
@@ -51,12 +52,16 @@ void main() {
     vec2 screenPosition = vec2(x, y) / imageSize(inImage);
 
     // Light halo effect
-    for (uint i = 0; i < uniformBuffer.lightCount; i++) {
-        vec4 lightPosition = uniformBuffer.viewProjection * lightBuffer.lights[i].position;
-        lightPosition /= lightPosition.w;
-        if (lightPosition.z <= texture(sceneDepth, screenPosition).r && lightPosition.z >= 0) {
-            float distanceFromLight = (1 - lightPosition.z) / length(lightPosition.xy - (2 * screenPosition - 1));
-            colour += lightBuffer.lights[i].colourIntensity.xyz * distanceFromLight;
+    if (pushConstants.drawLights) {
+        for (uint i = 0; i < uniformBuffer.lightCount; i++) {
+            vec4 lightPosition = uniformBuffer.viewProjection * lightBuffer.lights[i].position;
+            lightPosition /= lightPosition.w;
+            if (lightPosition.z <= texture(sceneDepth, screenPosition).r && lightPosition.z >= 0) {
+                float distanceFromLight = (1 - lightPosition.z) / length(lightPosition.xy - (2 * screenPosition - 1));
+                if (distanceFromLight < 1.0) {
+                    colour += lightBuffer.lights[i].colourIntensity.xyz * distanceFromLight;
+                }
+            }
         }
     }
 
@@ -65,7 +70,6 @@ void main() {
 
     float grayscale = dot(colour, vec3(0.299, 0.587, 0.114));
     colour = mix(vec3(grayscale), colour, pushConstants.saturation);
-
     colour *= pushConstants.exposure;
 
     switch (int(pushConstants.tonemapper)) {

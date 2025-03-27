@@ -35,7 +35,7 @@ layout(push_constant) uniform PushConstants {
 	float ambientLight;
 } pushConstant;
 
-#define EPSILON 0.0015 // Shadows are noisy without this
+#define EPSILON 0.015 // Shadows are noisy without this
 
 void main() {
     vec3 cumulativeColour = vec3(0.0);
@@ -47,14 +47,16 @@ void main() {
 
         const vec3 relativePosition = light.position.xyz - inPosition;
         const float lightSquaredDistance = dot(relativePosition, relativePosition);
-        const vec3 negativeLightDirection = relativePosition / sqrt(lightSquaredDistance);
+        const float lightDistance = sqrt(lightSquaredDistance);
+        const vec3 negativeLightDirection = relativePosition / lightDistance;
 
         if (texture(shadowMap, vec4(-negativeLightDirection, float(index))).r + EPSILON < lightSquaredDistance) {
             continue;
         }
 
         const float lambertainCoefficient = clamp(dot(normal, negativeLightDirection), 0.0, 1.0);
-        cumulativeColour += albedo * lambertainCoefficient * light.colourIntensity.xyz / lightSquaredDistance;
+        // Should be devided by lightSquaredDistance but the light drops off too quickly and looks too dark
+        cumulativeColour += albedo * lambertainCoefficient * light.colourIntensity.xyz / lightDistance;
     }
 
     cumulativeColour = max(cumulativeColour, albedo * pushConstant.ambientLight);

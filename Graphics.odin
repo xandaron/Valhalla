@@ -10,11 +10,11 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "imgui"
-import "vendor:cgltf"
 import implGLFW "imgui/imgui_impl_glfw"
 import implVulkan "imgui/imgui_impl_vulkan"
 import tinyfd "tinyfiledialogs"
 import "ufbx"
+import "vendor:cgltf"
 import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -167,7 +167,7 @@ Animation :: struct {
 	duration: f64,
 }
 
-// TODO: Models could contain multiple meshes each with their own textures...  There should be a way to represent that.
+// TODO: Models could contain multiple meshes each with their own textures... There should be a way to represent that.
 @(private = "file")
 Model :: struct {
 	name:         cstring,
@@ -414,6 +414,7 @@ GraphicsContext :: struct {
 	exposure:                  f32,
 	tonemapper:                f32,
 	gamma:                     f32,
+	drawLights:                bool,
 }
 
 
@@ -1536,7 +1537,7 @@ loadBufferToGPU :: proc(
 	cleanupBuffer(graphicsContext, &stagingBuffer)
 }
 
-// Useful to have a function for this so I can update allocators easily in the future. 
+// Useful to have a function for this so I can update allocators easily in the future.
 @(private = "file")
 cleanupBuffer :: proc(using graphicsContext: ^GraphicsContext, buffer: ^Buffer) {
 	vk.DestroyBuffer(device, buffer.buffer, nil)
@@ -1931,7 +1932,7 @@ loadModels :: proc(
 	sceneIndex: u32,
 	modelPaths: []cstring,
 ) {
-	loadFBX :: proc(graphicsContext: ^GraphicsContext, model: ^Model, filename: cstring) {
+	loadFBX :: proc(graphicsContext: ^GraphicsContext, filename: cstring, model: ^Model) {
 		opts: ufbx.Load_Opts = {
 			target_axes = ufbx.Coordinate_Axes {
 				right = .POSITIVE_X,
@@ -2168,21 +2169,85 @@ loadModels :: proc(
 		}
 	}
 
-	loadGLTF :: proc(graphicsContext: ^GraphicsContext, model: ^Model, filename: cstring) {
+	loadGLTF :: proc(graphicsContext: ^GraphicsContext, filename: cstring, model: ^Model) {
+		copyData :: proc(accessor: ^cgltf.accessor, dst: rawptr) {
+			bufferView := accessor.buffer_view
+			data := bufferView.data
+			if data == nil {
+				data = bufferView.buffer.data
+			}
+			mem.copy(dst, rawptr(uintptr(data) + uintptr(bufferView.offset)), int(bufferView.size))
+		}
+
 		options: cgltf.options = {}
-		data, res := cgltf.parse_file(options, filename)
-		defer cgltf.free(data)
+		file, res := cgltf.parse_file(options, filename)
+		defer cgltf.free(file)
 
 		if res != .success {
 			log.log(.Error, "Failed to load gltf file!")
 			panic("Failed to load gltf file!")
 		}
 
-		mesh := data.meshes[0]
+		if cgltf.load_buffers(options, file, filename) != .success {
+			log.log(.Error, "Failed to load buffer gltf file!")
+			panic("Failed to load buffer gltf file!")
+		}
 
-		if mesh.name == "" {
-			log.log(.Info, "hello")
-		}		
+		if cgltf.validate(file) != .success {
+			log.log(.Error, "Failed to validate gltf file!")
+			panic("Failed to validate gltf file!")
+		}
+
+		model.name = fmt.caprint(file.meshes[0].name)
+
+		vertices: #soa[]Vertex
+		defer delete(vertices)
+		for &primative in file.meshes[0].primitives {
+			if primative.type != .triangles {
+				continue
+			}
+
+			model.indices = make([]u32, int(primative.indices.count))
+
+			if primative.indices.component_type == .r_32u {
+				copyData(primative.indices, &model.indices[0])
+			} else if primative.indices.component_type == .r_16u {
+				data := make([]u16, int(primative.indices.count))
+				copyData(primative.indices, &data[0])
+				for &indice, index in model.indices {
+					indice = u32(data[index])
+				}
+				delete(data)
+			} else if primative.indices.component_type == .r_8u {
+				data := make([]u8, int(primative.indices.count))
+				copyData(primative.indices, &data[0])
+				for &indice, index in model.indices {
+					indice = u32(data[index])
+				}
+				delete(data)
+			}
+
+			vertices = make(#soa[]Vertex, primative.attributes[0].data.count)
+			for &attribute in primative.attributes {
+				#partial switch attribute.type {
+				case .position:
+					copyData(attribute.data, &vertices[0].position)
+				case .texcoord:
+					copyData(attribute.data, &vertices[0].texCoord)
+				case .normal:
+					copyData(attribute.data, &vertices[0].normal)
+				}
+			}
+		}
+
+		model.vertices = make([]Vertex, len(vertices))
+		for &vertex, index in model.vertices {
+			vertex.position = vertices[index].position
+			vertex.texCoord = vertices[index].texCoord
+			vertex.normal = vertices[index].normal
+			vertex.bones = vertices[index].bones
+			vertex.weights = {1, 0, 0, 0}
+		}
 	}
 
 	scene := &scenes[sceneIndex]
@@ -2197,15 +2262,14 @@ loadModels :: proc(
 		scene.models[modelIndex].indexOffset = u32(len(scene.indices))
 
 		switch filepath.ext(string(path))[1:] {
-			case "obj":
-				fallthrough
-			case "fbx":
-				loadFBX(graphicsContext, &scene.models[modelIndex], path)
-			case "gltf":
-				fallthrough
-			case "glb":
-				loadGLTF(graphicsContext, &scene.models[modelIndex], path)
-
+		case "obj":
+			fallthrough
+		case "fbx":
+			loadFBX(graphicsContext, path, &scene.models[modelIndex])
+		case "gltf":
+			fallthrough
+		case "glb":
+			loadGLTF(graphicsContext, path, &scene.models[modelIndex])
 		}
 
 		append(&scene.vertices, ..scene.models[modelIndex].vertices)
@@ -2363,6 +2427,7 @@ loadImages :: proc(using graphicsContext: ^GraphicsContext, image: ^Image, image
 	image.sampler = 1
 }
 
+@(private = "file")
 addImages :: proc(
 	using graphicsContext: ^GraphicsContext,
 	image: ^Image,
@@ -2562,7 +2627,7 @@ addImages :: proc(
 	)
 }
 
-// Useful to have a function for this so I can update allocators easily in the future. 
+// Useful to have a function for this so I can update allocators easily in the future.
 @(private = "file")
 cleanupImage :: proc(using graphicsContext: ^GraphicsContext, image: ^Image) {
 	vk.DestroyImageView(device, image.view, nil)
@@ -4688,6 +4753,7 @@ createMainFramebuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
+@(private = "file")
 createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	scene := &scenes[activeScene]
 
@@ -4791,6 +4857,7 @@ createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
+@(private = "file")
 updateShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	for index in 0 ..< swapchainImageCount {
 		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
@@ -5265,7 +5332,7 @@ createComputePipelines :: proc(
 	postPushConstants: vk.PushConstantRange = {
 		stageFlags = {.COMPUTE},
 		offset     = 0,
-		size       = 6 * size_of(f32),
+		size       = 6 * size_of(f32) + size_of(b32),
 	}
 
 	postPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -5594,7 +5661,7 @@ updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 			position        = Vec4{light.position.x, light.position.y, light.position.z, 1},
 			colourIntensity = Vec4{colourIntensity.x, colourIntensity.y, colourIntensity.z, 0},
 			near            = 0.01,
-			far             = 5.0,
+			far             = 1000.0,
 		}
 	}
 	mem.copy(
@@ -5652,7 +5719,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 		instanceData[instanceIndex] = {
 			model                = translate(
 				instance.position,
-			) * quatToRotation(quatFromX(radians(instance.rotation.x)) * quatFromY(radians(instance.rotation.y)) * quatFromZ(radians(instance.rotation.x))) * scale(instance.scale),
+			) * quatToRotation(quatFromX(radians(instance.rotation.x)) * quatFromY(radians(instance.rotation.y)) * quatFromZ(radians(instance.rotation.z))) * scale(instance.scale),
 			boneOffset           = boneOffset,
 			textureSamplerOffset = f32(instance.textureID),
 			normalsSamplerOffset = f32(instance.normalID),
@@ -5802,13 +5869,18 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 	)
 }
 
+@(private = "file")
 updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
+	if vk.DeviceWaitIdle(device) != .SUCCESS {
+		panic("Failed to wait device idle?")
+	}
+
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.ResetCommandBuffer(preComputeCommandBuffers[bufferIndex], {})
+		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
+		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
 
 
 		recordPreComputeBuffer(graphicsContext, bufferIndex)
@@ -6265,15 +6337,51 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 		nil,
 	)
 
-	vk.CmdPushConstants(
+	// vk.CmdPushConstants(
+	// 	postComputeCommandBuffers[index],
+	// 	pipelines[PipelineIndex.POST].layout,
+	// 	{.COMPUTE},
+	// 	0,
+	// 	6 * size_of(f32),
+	// 	raw_data(
+	// 		[]f32{contrast, brightness, saturation, pow(f32(2.0), exposure), tonemapper, gamma},
+	// 	),
+	// )
+
+	vk.CmdPushConstants2(
 		postComputeCommandBuffers[index],
-		pipelines[PipelineIndex.POST].layout,
-		{.COMPUTE},
-		0,
-		6 * size_of(f32),
-		raw_data(
-			[]f32{contrast, brightness, saturation, pow(f32(2.0), exposure), tonemapper, gamma},
-		),
+		&vk.PushConstantsInfo {
+			sType = .PUSH_CONSTANTS_INFO,
+			pNext = nil,
+			layout = pipelines[PipelineIndex.POST].layout,
+			stageFlags = {.COMPUTE},
+			offset = 0,
+			size = 6 * size_of(f32),
+			pValues = raw_data(
+				[]f32{
+					contrast,
+					brightness,
+					saturation,
+					pow(f32(2.0), exposure),
+					tonemapper,
+					gamma,
+				},
+			),
+		},
+	)
+
+	boolean := b32(drawLights)
+	vk.CmdPushConstants2(
+		postComputeCommandBuffers[index],
+		&vk.PushConstantsInfo{
+			sType = .PUSH_CONSTANTS_INFO,
+			pNext = nil,
+			layout = pipelines[PipelineIndex.POST].layout,
+			stageFlags = {.COMPUTE},
+			offset = 6 * size_of(f32),
+			size = size_of(b32),
+			pValues = &boolean,
+		}
 	)
 
 	vk.CmdBindPipeline(
@@ -6499,17 +6607,21 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			if imgui.MenuItem("Save") {
 				if scene.filePath == "" {
 					filterPatterns := []cstring{"*.json"}
-					path, _ := filepath.abs("./assets/scenes/")
-					defer delete(path)
-					scene.filePath = string(
+					path := strings.clone_from_cstring(
 						tinyfd.saveFileDialog(
 							"Save Scene",
-							fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+							fmt.caprintf(
+								"{}{}",
+								filepath.abs("./assets/scenes/"),
+								filepath.SEPARATOR,
+								allocator = context.temp_allocator,
+							),
 							i32(len(filterPatterns)),
 							raw_data(filterPatterns),
 							".json",
 						),
 					)
+					scene.filePath = path
 				}
 				saveScene(graphicsContext, activeScene)
 			}
@@ -6541,24 +6653,25 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					defer delete(path)
 					file, err := filepath.rel(
 						baseDir,
-						strings.clone(
-							string(
-								tinyfd.openFileDialog(
-									"Load Model",
-									fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
-									i32(len(filterPatterns)),
-									raw_data(filterPatterns),
-									".gltf .glb .fbx .obj",
-									0,
-								),
+						string(
+							tinyfd.openFileDialog(
+								"Load Model",
+								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+								i32(len(filterPatterns)),
+								raw_data(filterPatterns),
+								".gltf .glb .fbx .obj",
+								0,
 							),
-							context.temp_allocator,
 						),
 					)
 					defer delete(file)
 
 					extension := filepath.ext(file)[1:]
-					if file != "" && extension == "gltf" || extension == "glb" || extension == "fbx" || extension == "obj" {
+					if file != "" &&
+					   (extension == "gltf" ||
+							   extension == "glb" ||
+							   extension == "fbx" ||
+							   extension == "obj") {
 						alreadyLoaded := false
 						for &loadedFile in scene.modelPaths {
 							if file == string(loadedFile) {
@@ -6570,37 +6683,38 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 						if !alreadyLoaded {
 							f := strings.clone_to_cstring(file)
 							loadModels(graphicsContext, activeScene, {f})
+							append(&scene.modelPaths, f)
 							if vk.DeviceWaitIdle(device) != .SUCCESS {
 								panic("Failed to wait for device idle?")
 							}
 							updateSceneModels(graphicsContext, activeScene)
-							append(&scene.modelPaths, f)
+							updateCommandBuffers(graphicsContext)
 						}
 					}
 				}
 				if imgui.MenuItem("Texture") {
-					filterPatterns := []cstring{"*.jpg", "*.png"}
+					filterPatterns := []cstring{"*.jpg", "*.jpeg", "*.png"}
 					path, _ := filepath.abs("./assets/textures/")
 					defer delete(path)
 					file, err := filepath.rel(
-						".",
+						baseDir,
 						string(
 							tinyfd.openFileDialog(
 								"Load Texture",
 								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
 								i32(len(filterPatterns)),
 								raw_data(filterPatterns),
-								".jpg .png",
+								".jpg .jpeg .png",
 								0,
 							),
 						),
 					)
 					defer delete(file)
 
-					extension := filepath.ext(file)
-					if file != "" && extension[1:] == "png" ||
-					   extension[1:] == "jpg" ||
-					   extension[1:] == "jpeg" {
+					extension := filepath.ext(file)[1:]
+					if file != "" && extension == "png" ||
+					   extension == "jpg" ||
+					   extension == "jpeg" {
 						alreadyLoaded := false
 						for &loadedFile in scene.texturePaths {
 							if file == string(loadedFile) {
@@ -6615,32 +6729,36 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 							updateSceneTextures(graphicsContext, activeScene)
 							append(&scene.texturePaths, f)
 							scene.textureCount += 1
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Idle?")
+							}
+							updateCommandBuffers(graphicsContext)
 						}
 					}
 				}
 				if imgui.MenuItem("Normal Map") {
-					filterPatterns := []cstring{"*.jpg", "*.png"}
+					filterPatterns := []cstring{"*.jpg", "*.jpeg", "*.png"}
 					path, _ := filepath.abs("./assets/textures/")
 					defer delete(path)
 					file, _ := filepath.rel(
-						".",
+						baseDir,
 						string(
 							tinyfd.openFileDialog(
 								"Load Normal",
 								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
 								i32(len(filterPatterns)),
 								raw_data(filterPatterns),
-								".jpg .png",
+								".jpg .jpeg, .png",
 								0,
 							),
 						),
 					)
 					defer delete(file)
 
-					extension := filepath.ext(file)
-					if file != "" && extension[1:] == "png" ||
-					   extension[1:] == "jpg" ||
-					   extension[1:] == "jpeg" {
+					extension := filepath.ext(file)[1:]
+					if file != "" && extension == "png" ||
+					   extension == "jpg" ||
+					   extension == "jpeg" {
 						alreadyLoaded := false
 						for &loadedFile in scene.texturePaths {
 							if file == string(loadedFile) {
@@ -6655,6 +6773,10 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 							updateSceneNormals(graphicsContext, activeScene)
 							append(&scene.normalPaths, f)
 							scene.normalCount += 1
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Idle?")
+							}
+							updateCommandBuffers(graphicsContext)
 						}
 					}
 				}
@@ -6717,12 +6839,13 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			imgui.DragFloat3("Axis", &light.rotationAxis, 0.001)
 			imgui.BeginDisabled(len(scene.pointLights) == 1)
 			if imgui.Button("Delete") {
+				delete(light.name)
+				unordered_remove(&scene.pointLights, index)
 				if vk.DeviceWaitIdle(device) != .SUCCESS {
 					panic("Failed to wait for device?")
 				}
-				delete(light.name)
-				unordered_remove(&scene.pointLights, index)
 				updateSceneLights(graphicsContext, activeScene)
+				updateCommandBuffers(graphicsContext)
 			}
 			imgui.EndDisabled()
 			imgui.TreePop()
@@ -6737,8 +6860,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			if !imgui.TreeNode(instance.name) {
 				continue
 			}
-			imgui.DragFloat3("Position", &instance.position, 0.001)
-			imgui.DragFloat3("Rotation", &instance.rotation, 0.001)
+			imgui.DragFloat3("Position", &instance.position, 0.01)
+			imgui.DragFloat3("Rotation", &instance.rotation, 5)
 			imgui.DragFloat3("Scale", &instance.scale, 0.001)
 			if imgui.BeginCombo("Model", scene.models[instance.modelID].name) {
 				for &model, i in scene.models {
@@ -6763,10 +6886,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 							panic("Failed to wait for device idle?")
 						}
 						updateSceneInstanceModel(graphicsContext, activeScene)
-
-						updatePreComputeBuffers(graphicsContext)
-						updateShadowMapBuffers(graphicsContext)
-						updateSceneBuffers(graphicsContext)
+						updateCommandBuffers(graphicsContext)
 					}
 				}
 				imgui.EndCombo()
@@ -6814,10 +6934,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					panic("Failed to wait for device idle?")
 				}
 				updateSceneInstanceBuffer(graphicsContext, activeScene)
-
-				updatePreComputeBuffers(graphicsContext)
-				updateShadowMapBuffers(graphicsContext)
-				updateSceneBuffers(graphicsContext)
+				updateCommandBuffers(graphicsContext)
 			}
 			imgui.EndDisabled()
 			imgui.TreePop()
@@ -6836,11 +6953,31 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			paused = !paused
 		}
 
-		imgui.DragFloat("Contrast", &contrast, 0.01)
-		imgui.DragFloat("Brightness", &brightness, 0.01)
-		imgui.DragFloat("Saturation", &saturation, 0.01)
-		imgui.DragFloat("Exposure", &exposure, 0.01)
-		imgui.DragFloat("Gamma", &gamma, 0.01)
+		// These all have to be seperate otherwise the ui will gain and loose options as the user interacts with them
+		if imgui.DragFloat("Contrast", &contrast, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Brightness", &brightness, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Saturation", &saturation, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Exposure", &exposure, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Gamma", &gamma, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragInt4("Clear Colour", &scene.clearColour) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Ambient Light", &scene.ambientLight, 0.0001) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.Checkbox("Draw Light Sources", &drawLights) {
+			updateCommandBuffers(graphicsContext)
+		}
 
 		if imgui.BeginCombo("Scene Selection", scene.name) {
 			for &s, index in scenes {
@@ -6851,10 +6988,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			}
 			imgui.EndCombo()
 		}
-
-		imgui.DragInt4("Clear Colour", &scene.clearColour)
-
-		imgui.DragFloat("Ambient Light", &scene.ambientLight, 0.0001)
 
 		if imgui.CollapsingHeader("Cameras") {
 			constructCamerasHeader(graphicsContext)
@@ -6985,7 +7118,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 		updatePostComputeBuffers(graphicsContext)
 		return
 	} else if result != .SUCCESS && result != .SUBOPTIMAL_KHR {
-		log.log(.Error, "Failed to aquire swapchain image!")
+		log.logf(.Error, "Failed to aquire swapchain image! {}", result)
 		panic("Failed to aquire swapchain image!")
 	}
 	vk.ResetFences(device, 1, &inFlightFrames[currentFrame])
@@ -6995,8 +7128,8 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	updateInstanceBuffer(graphicsContext, delta)
 
 	when UI_ENABLED {
-		vk.ResetCommandBuffer(uiCommandBuffers[currentFrame], {})
 		drawUI(graphicsContext)
+		vk.ResetCommandBuffer(uiCommandBuffers[currentFrame], {})
 		recordUIBuffer(graphicsContext, currentFrame)
 	}
 
@@ -7033,7 +7166,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	}
 
 	if res := vk.QueueSubmit2(computeQueue, 1, &submitInfo, 0); res != .SUCCESS {
-		log.log(.Error, "Failed to submit pre command buffer!")
+		log.logf(.Error, "Failed to submit pre command buffer! {}", res)
 		panic("Failed to submit pre command buffer!")
 	}
 
@@ -7081,7 +7214,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	}
 
 	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, 0); res != .SUCCESS {
-		log.log(.Error, "Failed to submit main command buffer!")
+		log.logf(.Error, "Failed to submit main command buffer! {}", res)
 		panic("Failed to submit main command buffer!")
 	}
 
@@ -7156,7 +7289,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	}
 
 	if res := vk.QueueSubmit2(computeQueue, 1, &submitInfo, fence); res != .SUCCESS {
-		log.log(.Error, "Failed to submit post command buffer!")
+		log.logf(.Error, "Failed to submit post command buffer! {}", res)
 		panic("Failed to submit post command buffer!")
 	}
 
@@ -7212,9 +7345,9 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 			),
 		}
 
-		if vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, inFlightFrames[currentFrame]) !=
-		   .SUCCESS {
-			log.log(.Error, "Failed to submit ui command buffer!")
+		if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, inFlightFrames[currentFrame]);
+		   res != .SUCCESS {
+			log.logf(.Error, "Failed to submit ui command buffer! {}", res)
 			panic("Failed to submit ui command buffer!")
 		}
 
@@ -7241,7 +7374,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 		recreateSwapchain(graphicsContext)
 		updatePostComputeBuffers(graphicsContext)
 	} else if result != .SUCCESS {
-		log.log(.Error, "Failed to present swapchain image!")
+		log.logf(.Error, "Failed to present swapchain image! {}", result)
 		panic("Failed to present swapchain image!")
 	}
 
