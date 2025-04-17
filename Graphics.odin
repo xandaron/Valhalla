@@ -1977,8 +1977,13 @@ loadModels :: proc(
 		model.vertices = make([]Vertex, vertexCount)
 		model.indices = make([]u32, indexCount)
 
-		// TODO: Surely there is a way to copy a cstring better than this. Might have to copy the data?
-		model.name = strings.clone_to_cstring(string(scene.meshes.data[0].element.name.data))
+		// Originally was
+		// model.name = strings.clone_to_cstring(string(scene.meshes.data[0].element.name.data))
+		// Which seemed horrific. Has been changed to bellow but still not sure if this is really the most correct method
+		strLen := int(scene.meshes.data[0].element.name.length + 1) // +1 to capture null terminator
+		memPtr, _ := mem.alloc(size_of(c.char) * strLen)
+		mem.copy(memPtr, rawptr(scene.meshes.data[0].element.name.data), strLen)
+		model.name = cstring(memPtr)
 
 		vertexOffset, indiceOffset, meshIndexOffset: u32 = 0, 0, 0
 		for meshIndex in 0 ..< scene.meshes.count {
