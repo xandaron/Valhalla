@@ -151,10 +151,10 @@ KeyQuat :: struct {
 
 @(private = "file")
 AnimationNode :: struct {
-	bone:            u32,
-	keyPositions:    []KeyVector,
-	keyRotations:    []KeyQuat,
-	keyScales:       []KeyVector,
+	bone:         u32,
+	keyPositions: []KeyVector,
+	keyRotations: []KeyQuat,
+	keyScales:    []KeyVector,
 }
 
 @(private = "file")
@@ -171,7 +171,7 @@ Model :: struct {
 	vertices:     []Vertex,
 	vertexOffset: u32,
 	indices:      []u32,
-	indiceOffset:  u32,
+	indiceOffset: u32,
 	skeleton:     Skeleton,
 	animations:   []Animation,
 }
@@ -6352,7 +6352,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 			offset = 0,
 			size = 6 * size_of(f32),
 			pValues = raw_data(
-				[]f32{
+				[]f32 {
 					contrast,
 					brightness,
 					saturation,
@@ -6367,7 +6367,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 	boolean := b32(drawLights)
 	vk.CmdPushConstants2(
 		postComputeCommandBuffers[index],
-		&vk.PushConstantsInfo{
+		&vk.PushConstantsInfo {
 			sType = .PUSH_CONSTANTS_INFO,
 			pNext = nil,
 			layout = pipelines[PipelineIndex.POST].layout,
@@ -6375,7 +6375,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 			offset = 6 * size_of(f32),
 			size = size_of(b32),
 			pValues = &boolean,
-		}
+		},
 	)
 
 	vk.CmdBindPipeline(
