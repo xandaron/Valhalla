@@ -128,7 +128,6 @@ Vertex :: struct #min_field_align (16) {
 
 @(private = "file")
 Bone :: struct {
-	name:        cstring,
 	parentIndex: u32,
 	inverseBind: Mat4,
 }
@@ -1945,7 +1944,12 @@ loadModels :: proc(
 		defer ufbx.free_scene(scene)
 
 		model.skeleton = make([]Bone, scene.bones.count)
-		boneIndex := 0
+
+		boneMap := make(map[cstring]u32, scene.bones.count)
+		defer delete(boneMap)
+
+		// Why am I loading each bone one at a time? Each bone links to its child bone so cant I just find the root bone and then load all of them at once?
+		boneIndex: u32 = 0
 		for index in 0 ..< scene.nodes.count {
 			node := scene.nodes.data[index]
 			if node.attrib_type != .BONE {
@@ -1954,17 +1958,12 @@ loadModels :: proc(
 
 			parentIndex: u32 = 0
 			if !node.parent.is_root {
-				for bone, index in model.skeleton {
-					if bone.name == node.parent.element.name.data {
-						parentIndex = u32(index)
-						break
-					}
-				}
+				parentIndex = boneMap[node.parent.element.name.data]
 			}
 			model.skeleton[boneIndex] = {
-				name        = node.bone.element.name.data,
 				parentIndex = parentIndex,
 			}
+			boneMap[node.element.name.data] = boneIndex
 			boneIndex += 1
 		}
 
@@ -2044,14 +2043,8 @@ loadModels :: proc(
 						boneName :=
 							deformer.clusters.data[skinWeight.cluster_index].bone_node.element.name
 
-						for &bone, boneIndex in model.skeleton {
-							if bone.name == boneName.data {
-								model.vertices[indiceIndex + vertexOffset].bones[weightIndex] =
-									u32(boneIndex)
-								break
-							}
-						}
-
+						model.vertices[indiceIndex + vertexOffset].bones[weightIndex] =
+							boneMap[boneName.data]
 						model.vertices[indiceIndex + vertexOffset].weights[weightIndex] = f32(
 							skinWeight.weight,
 						)
@@ -2070,32 +2063,26 @@ loadModels :: proc(
 		}
 
 		for clusterIndex in 0 ..< scene.skin_cluster.count {
-			skinCluster := scene.skin_cluster.data[clusterIndex]^
-			for &bone in model.skeleton {
-				if bone.name != skinCluster.bone_node.element.name.data {
-					continue
-				}
-
-				m := skinCluster.geometry_to_bone.cols
-				bone.inverseBind = {
-					f32(m[0][0]),
-					f32(m[1][0]),
-					f32(m[2][0]),
-					f32(m[3][0]),
-					f32(m[0][1]),
-					f32(m[1][1]),
-					f32(m[2][1]),
-					f32(m[3][1]),
-					f32(m[0][2]),
-					f32(m[1][2]),
-					f32(m[2][2]),
-					f32(m[3][2]),
-					0,
-					0,
-					0,
-					1,
-				}
-				break
+			skinCluster := scene.skin_cluster.data[clusterIndex]
+			bone := &model.skeleton[boneMap[skinCluster.bone_node.element.name.data]]
+			m := skinCluster.geometry_to_bone.cols
+			bone.inverseBind = {
+				f32(m[0][0]),
+				f32(m[1][0]),
+				f32(m[2][0]),
+				f32(m[3][0]),
+				f32(m[0][1]),
+				f32(m[1][1]),
+				f32(m[2][1]),
+				f32(m[3][1]),
+				f32(m[0][2]),
+				f32(m[1][2]),
+				f32(m[2][2]),
+				f32(m[3][2]),
+				0,
+				0,
+				0,
+				1,
 			}
 		}
 
@@ -2121,41 +2108,35 @@ loadModels :: proc(
 				bakedNode := bakedAnim.nodes.data[bakedIndex]
 				sceneNode := scene.nodes.data[bakedNode.typed_id]
 
-				for bone, boneIndex in model.skeleton {
-					if bone.name != sceneNode.element.name.data {
-						continue
-					}
-					animNode := &animation.nodes[bakedIndex]
-					animNode.bone = u32(boneIndex)
-					animNode.keyPositions = make([]KeyVector, bakedNode.translation_keys.count)
-					animNode.keyRotations = make([]KeyQuat, bakedNode.rotation_keys.count)
-					animNode.keyScales = make([]KeyVector, bakedNode.scale_keys.count)
+				animNode := &animation.nodes[bakedIndex]
+				animNode.bone = boneMap[sceneNode.element.name.data]
+				animNode.keyPositions = make([]KeyVector, bakedNode.translation_keys.count)
+				animNode.keyRotations = make([]KeyQuat, bakedNode.rotation_keys.count)
+				animNode.keyScales = make([]KeyVector, bakedNode.scale_keys.count)
 
-					for index in 0 ..< bakedNode.translation_keys.count {
-						data := bakedNode.translation_keys.data[index]
-						animNode.keyPositions[index].time = data.time
-						animNode.keyPositions[index].value.x = f32(data.value[0])
-						animNode.keyPositions[index].value.y = f32(data.value[1])
-						animNode.keyPositions[index].value.z = f32(data.value[2])
-					}
+				for index in 0 ..< bakedNode.translation_keys.count {
+					data := bakedNode.translation_keys.data[index]
+					animNode.keyPositions[index].time = data.time
+					animNode.keyPositions[index].value.x = f32(data.value[0])
+					animNode.keyPositions[index].value.y = f32(data.value[1])
+					animNode.keyPositions[index].value.z = f32(data.value[2])
+				}
 
-					for index in 0 ..< bakedNode.rotation_keys.count {
-						data := bakedNode.rotation_keys.data[index]
-						animNode.keyRotations[index].time = data.time
-						animNode.keyRotations[index].value.x = f32(data.value[0])
-						animNode.keyRotations[index].value.y = f32(data.value[1])
-						animNode.keyRotations[index].value.z = f32(data.value[2])
-						animNode.keyRotations[index].value.w = f32(data.value[3])
-					}
+				for index in 0 ..< bakedNode.rotation_keys.count {
+					data := bakedNode.rotation_keys.data[index]
+					animNode.keyRotations[index].time = data.time
+					animNode.keyRotations[index].value.x = f32(data.value[0])
+					animNode.keyRotations[index].value.y = f32(data.value[1])
+					animNode.keyRotations[index].value.z = f32(data.value[2])
+					animNode.keyRotations[index].value.w = f32(data.value[3])
+				}
 
-					for index in 0 ..< bakedNode.scale_keys.count {
-						data := bakedNode.scale_keys.data[index]
-						animNode.keyScales[index].time = data.time
-						animNode.keyScales[index].value.x = f32(data.value[0])
-						animNode.keyScales[index].value.y = f32(data.value[1])
-						animNode.keyScales[index].value.z = f32(data.value[2])
-					}
-					break
+				for index in 0 ..< bakedNode.scale_keys.count {
+					data := bakedNode.scale_keys.data[index]
+					animNode.keyScales[index].time = data.time
+					animNode.keyScales[index].value.x = f32(data.value[0])
+					animNode.keyScales[index].value.y = f32(data.value[1])
+					animNode.keyScales[index].value.z = f32(data.value[2])
 				}
 			}
 		}
