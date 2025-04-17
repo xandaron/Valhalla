@@ -21,17 +21,17 @@ f64Vec4 :: linalg.Vector4f64
 Quat :: linalg.Quaternionf32
 IQuat :: linalg.QUATERNIONF32_IDENTITY
 
-quatFromX :: linalg.quaternion_from_euler_angle_x_f32
-quatFromY :: linalg.quaternion_from_euler_angle_y_f32
-quatFromZ :: linalg.quaternion_from_euler_angle_z_f32
+quatFromX :: linalg.quaternion_from_euler_angle_x
+quatFromY :: linalg.quaternion_from_euler_angle_y
+quatFromZ :: linalg.quaternion_from_euler_angle_z
 
 Mat2 :: linalg.Matrix2f32
 Mat3 :: linalg.Matrix3f32
 Mat4 :: linalg.Matrix4f32
 
-IMat2 :: linalg.MATRIX2F32_IDENTITY
-IMat3 :: linalg.MATRIX3F32_IDENTITY
-IMat4 :: linalg.MATRIX4F32_IDENTITY
+IMAT2 :: linalg.MATRIX2F32_IDENTITY
+IMAT3 :: linalg.MATRIX3F32_IDENTITY
+IMAT4 :: linalg.MATRIX4F32_IDENTITY
 
 radians :: linalg.to_radians
 
@@ -48,17 +48,18 @@ cross :: linalg.cross
 
 dot :: linalg.dot
 
-translate :: linalg.matrix4_translate_f32
+translate :: linalg.matrix4_translate
 
-scale :: linalg.matrix4_scale_f32
+scale :: linalg.matrix4_scale
 
 rotation3 :: linalg.matrix3_rotate
 rotation4 :: linalg.matrix4_rotate
-quatToRotation :: linalg.matrix4_from_quaternion_f32
+quatToRotation :: linalg.matrix4_from_quaternion
 
-invert :: linalg.matrix4_inverse_f32
+invert :: linalg.matrix4_inverse
 
-quatLurp :: linalg.quaternion_nlerp_f32
+lerp :: linalg.lerp
+quatLerp :: linalg.quaternion_nlerp
 
 pow :: linalg.pow
 

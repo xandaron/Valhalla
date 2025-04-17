@@ -5691,7 +5691,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 	instanceData := make([]InstanceInfo, len(scene.instances))
 	defer delete(finalBoneTransforms)
 	defer delete(instanceData)
-	finalBoneTransforms[0] = IMat4
+	finalBoneTransforms[0] = IMAT4
 	boneOffset: u32 = 1
 	for &instance, instanceIndex in scene.instances {
 		instanceData[instanceIndex] = {
@@ -5716,7 +5716,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 		defer delete(localBoneTransforms)
 
 		for index in 0 ..< len(skeleton) {
-			localBoneTransforms[index] = IMat4
+			localBoneTransforms[index] = IMAT4
 		}
 
 		if len(model.animations) != 0 {
@@ -5781,7 +5781,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 						(node.keyRotations[instance.rotationKeys[nodeIndex] + 1].time -
 								node.keyRotations[instance.rotationKeys[nodeIndex]].time)
 					localBoneTransforms[node.bone] *= quatToRotation(
-						quatLurp(
+						quatLerp(
 							node.keyRotations[instance.rotationKeys[nodeIndex]].value,
 							node.keyRotations[instance.rotationKeys[nodeIndex] + 1].value,
 							f32(timeDiff),
@@ -5820,7 +5820,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 		}
 
 		finalBoneTransforms[boneOffset] = localBoneTransforms[0]
-		if localBoneTransforms[0] != IMat4 {
+		if localBoneTransforms[0] != IMAT4 {
 			finalBoneTransforms[boneOffset] *= skeleton[0].inverseBind
 		}
 		for boneIndex in 1 ..< u32(len(skeleton)) {
@@ -5828,7 +5828,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 			localBoneTransforms[boneIndex] =
 				localBoneTransforms[parentIndex] * localBoneTransforms[boneIndex]
 			finalBoneTransforms[boneOffset + boneIndex] = localBoneTransforms[boneIndex]
-			if localBoneTransforms[boneIndex] != IMat4 {
+			if localBoneTransforms[boneIndex] != IMAT4 {
 				finalBoneTransforms[boneOffset + boneIndex] *= skeleton[boneIndex].inverseBind
 			}
 		}
