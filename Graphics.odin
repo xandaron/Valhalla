@@ -5819,18 +5819,13 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 			}
 		}
 
-		finalBoneTransforms[boneOffset] = localBoneTransforms[0]
-		if localBoneTransforms[0] != IMAT4 {
-			finalBoneTransforms[boneOffset] *= skeleton[0].inverseBind
-		}
+		finalBoneTransforms[boneOffset] = localBoneTransforms[0] * skeleton[0].inverseBind
 		for boneIndex in 1 ..< u32(len(skeleton)) {
-			parentIndex := skeleton[boneIndex].parentIndex
 			localBoneTransforms[boneIndex] =
-				localBoneTransforms[parentIndex] * localBoneTransforms[boneIndex]
-			finalBoneTransforms[boneOffset + boneIndex] = localBoneTransforms[boneIndex]
-			if localBoneTransforms[boneIndex] != IMAT4 {
-				finalBoneTransforms[boneOffset + boneIndex] *= skeleton[boneIndex].inverseBind
-			}
+				localBoneTransforms[skeleton[boneIndex].parentIndex] *
+				localBoneTransforms[boneIndex]
+			finalBoneTransforms[boneOffset + boneIndex] =
+				localBoneTransforms[boneIndex] * skeleton[boneIndex].inverseBind
 		}
 		boneOffset += u32(len(skeleton))
 	}
