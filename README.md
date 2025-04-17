@@ -6,7 +6,7 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 
 - Basic 3D scene rendering
 - Customizable rendering settings
-- Support for OBJ and FBX file formats
+- Support for OBJ, FBX and GLTF file formats
 - Support for rigged 3D models and animations
 - Support for multiple light sources
 - Custom shaders
@@ -14,16 +14,6 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 - Real-time rendering
 - Cross-platform support (Windows, Linux)
 - Integration with Vulkan API
-
-## Roadmap
-
-- [X] Implement basic rendering pipeline
-- [X] Implement basic lighting
-- [X] Implement shadow mapping
-- [X] Fully featured GUI with scene save, load and editing with runtime asset import
-- [X] HDR support
-- [X] Add precompute step
-- [ ] Raytracer
 
 ## Getting Started
 
