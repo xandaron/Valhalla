@@ -174,7 +174,7 @@ Model :: struct {
 	vertices:     []Vertex,
 	vertexOffset: u32,
 	indices:      []u32,
-	indexOffset:  u32,
+	indiceOffset:  u32,
 	skeleton:     Skeleton,
 	animations:   []Animation,
 }
@@ -1986,7 +1986,7 @@ loadModels :: proc(
 		// TODO: Surely there is a way to copy a cstring better than this. Might have to copy the data?
 		model.name = strings.clone_to_cstring(string(scene.meshes.data[0].element.name.data))
 
-		vertexOffset, indexOffset, meshIndexOffset: u32 = 0, 0, 0
+		vertexOffset, indiceOffset, meshIndexOffset: u32 = 0, 0, 0
 		for meshIndex in 0 ..< scene.meshes.count {
 			mesh := scene.meshes.data[meshIndex]
 			for faceIndex in 0 ..< mesh.faces.count {
@@ -1996,7 +1996,7 @@ loadModels :: proc(
 				err: ufbx.Panic
 				tris := ufbx.catch_triangulate_face(
 					&err,
-					raw_data(model.indices[indexOffset:indexOffset + triangulatedIndexCount]),
+					raw_data(model.indices[indiceOffset:indiceOffset + triangulatedIndexCount]),
 					uint(triangulatedIndexCount),
 					mesh,
 					face,
@@ -2008,10 +2008,10 @@ loadModels :: proc(
 					panic(errMessage)
 				}
 
-				for &index in model.indices[indexOffset:indexOffset + triangulatedIndexCount] {
+				for &index in model.indices[indiceOffset:indiceOffset + triangulatedIndexCount] {
 					index += meshIndexOffset
 				}
-				indexOffset += triangulatedIndexCount
+				indiceOffset += triangulatedIndexCount
 			}
 
 			for indiceIndex in 0 ..< mesh.num_indices {
@@ -2071,7 +2071,7 @@ loadModels :: proc(
 			}
 
 			vertexOffset += u32(mesh.num_indices)
-			meshIndexOffset = indexOffset
+			meshIndexOffset = indiceOffset
 		}
 
 		for clusterIndex in 0 ..< scene.skin_cluster.count {
@@ -2259,7 +2259,7 @@ loadModels :: proc(
 		modelIndex := modelOffset + index
 
 		scene.models[modelIndex].vertexOffset = u32(len(scene.vertices))
-		scene.models[modelIndex].indexOffset = u32(len(scene.indices))
+		scene.models[modelIndex].indiceOffset = u32(len(scene.indices))
 
 		switch filepath.ext(string(path))[1:] {
 		case "obj":
@@ -6152,7 +6152,7 @@ recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u3
 				shadowMapCommandBuffers[index],
 				u32(len(scene.models[inst.modelID].indices)),
 				1,
-				scene.models[inst.modelID].indexOffset,
+				scene.models[inst.modelID].indiceOffset,
 				i32(scene.models[inst.modelID].vertexOffset),
 				u32(instanceIndex),
 			)
@@ -6248,7 +6248,7 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 			sceneCommandBuffers[index],
 			u32(len(scene.models[inst.modelID].indices)),
 			1,
-			scene.models[inst.modelID].indexOffset,
+			scene.models[inst.modelID].indiceOffset,
 			i32(scene.models[inst.modelID].vertexOffset),
 			u32(instanceIndex),
 		)
