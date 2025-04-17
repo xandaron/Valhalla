@@ -129,7 +129,6 @@ Vertex :: struct #min_field_align (16) {
 @(private = "file")
 Bone :: struct {
 	name:        cstring,
-	isRoot:      bool,
 	parentIndex: u32,
 	inverseBind: Mat4,
 }
@@ -1964,7 +1963,6 @@ loadModels :: proc(
 			}
 			model.skeleton[boneIndex] = {
 				name        = node.bone.element.name.data,
-				isRoot      = node.parent.is_root,
 				parentIndex = parentIndex,
 			}
 			boneIndex += 1
