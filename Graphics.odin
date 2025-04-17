@@ -155,9 +155,6 @@ AnimationNode :: struct {
 	keyPositions:    []KeyVector,
 	keyRotations:    []KeyQuat,
 	keyScales:       []KeyVector,
-	numKeyPositions: u32,
-	numKeyRotations: u32,
-	numKeyScales:    u32,
 }
 
 @(private = "file")
@@ -2135,9 +2132,6 @@ loadModels :: proc(
 					animNode.keyPositions = make([]KeyVector, bakedNode.translation_keys.count)
 					animNode.keyRotations = make([]KeyQuat, bakedNode.rotation_keys.count)
 					animNode.keyScales = make([]KeyVector, bakedNode.scale_keys.count)
-					animNode.numKeyPositions = bakedNode.translation_keys.count
-					animNode.numKeyRotations = bakedNode.rotation_keys.count
-					animNode.numKeyScales = bakedNode.scale_keys.count
 
 					for index in 0 ..< bakedNode.translation_keys.count {
 						data := bakedNode.translation_keys.data[index]
@@ -5750,9 +5744,9 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 			for &node, nodeIndex in animation.nodes {
 				// a *= b == a = a * b
 				// therefore I *= T *= R *= S == aT = I * T * R * S
-				if node.numKeyPositions == 1 {
+				if len(node.keyPositions) == 1 {
 					localBoneTransforms[node.bone] *= translate(node.keyPositions[0].value)
-				} else if node.numKeyPositions != 0 {
+				} else if len(node.keyPositions) != 0 {
 					id := instance.positionKeys[nodeIndex]
 					for true {
 						if node.keyPositions[id].time <= instance.animTimer &&
@@ -5761,7 +5755,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 							break
 						}
 						id += 1
-						if id == node.numKeyPositions - 1 {
+						if id == u32(len(node.keyPositions)) - 1 {
 							id = 0
 						}
 					}
@@ -5779,9 +5773,9 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 					localBoneTransforms[node.bone] *= translate(value)
 				}
 
-				if node.numKeyRotations == 1 {
+				if len(node.keyRotations) == 1 {
 					localBoneTransforms[node.bone] *= quatToRotation(node.keyRotations[0].value)
-				} else if node.numKeyRotations != 0 {
+				} else if len(node.keyRotations) != 0 {
 					id := instance.rotationKeys[nodeIndex]
 					for true {
 						if node.keyRotations[id].time <= instance.animTimer &&
@@ -5790,7 +5784,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 							break
 						}
 						id += 1
-						if id == node.numKeyRotations - 1 {
+						if id == u32(len(node.keyRotations)) - 1 {
 							id = 0
 						}
 					}
@@ -5811,9 +5805,9 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 					)
 				}
 
-				if node.numKeyScales == 1 {
+				if len(node.keyScales) == 1 {
 					localBoneTransforms[node.bone] *= scale(node.keyScales[0].value)
-				} else if node.numKeyScales != 0 {
+				} else if len(node.keyScales) != 0 {
 					id := instance.scaleKeys[nodeIndex]
 					for true {
 						if node.keyScales[id].time <= instance.animTimer &&
@@ -5822,7 +5816,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 							break
 						}
 						id += 1
-						if id == node.numKeyScales - 1 {
+						if id == u32(len(node.keyScales)) - 1 {
 							id = 0
 						}
 					}
