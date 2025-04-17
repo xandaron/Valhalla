@@ -2073,7 +2073,7 @@ loadModels :: proc(
 
 		for clusterIndex in 0 ..< scene.skin_cluster.count {
 			skinCluster := scene.skin_cluster.data[clusterIndex]^
-			for &bone in model^.skeleton {
+			for &bone in model.skeleton {
 				if bone.name != skinCluster.bone_node.element.name.data {
 					continue
 				}
@@ -5721,12 +5721,12 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 
 		model := &scene.models[instance.modelID]
 
-		if len(model^.skeleton) == 0 {
+		if len(model.skeleton) == 0 {
 			instanceData[instanceIndex].boneOffset = 0
 			continue
 		}
 
-		skeleton := &model^.skeleton
+		skeleton := &model.skeleton
 
 		localBoneTransforms := make([]Mat4, len(skeleton))
 		defer delete(localBoneTransforms)
@@ -5735,8 +5735,8 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 			localBoneTransforms[index] = IMat4
 		}
 
-		if len(model^.animations) != 0 {
-			animation := model^.animations[instance.animID]
+		if len(model.animations) != 0 {
+			animation := model.animations[instance.animID]
 			instance.animTimer += f64(delta)
 			instance.animTimer /= animation.duration
 			instance.animTimer =
