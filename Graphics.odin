@@ -1930,11 +1930,7 @@ loadModels :: proc(
 	sceneIndex: u32,
 	modelPaths: []cstring,
 ) {
-	loadFBX :: proc(
-		filename: cstring,
-		model: ^Model,
-		vertexOffset, indiceOffset: u32,
-	) {
+	loadFBX :: proc(filename: cstring, model: ^Model, vertexOffset, indiceOffset: u32) {
 		opts: ufbx.Load_Opts = {
 			target_axes = ufbx.Coordinate_Axes {
 				right = .POSITIVE_X,
@@ -2181,11 +2177,7 @@ loadModels :: proc(
 		}
 	}
 
-	loadGLTF :: proc(
-		filename: cstring,
-		model: ^Model,
-		vertexOffset, indiceOffset: u32,
-	) {
+	loadGLTF :: proc(filename: cstring, model: ^Model, vertexOffset, indiceOffset: u32) {
 		copyData :: proc(accessor: ^cgltf.accessor, dst: rawptr) {
 			bufferView := accessor.buffer_view
 			data := bufferView.data
@@ -6309,7 +6301,9 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 				{.VERTEX, .FRAGMENT},
 				size_of(u32) + size_of(f32),
 				2 * size_of(u32),
-				raw_data([]u32{sceneInstance.textureIDs[meshIndex], sceneInstance.normalIDs[meshIndex]}),
+				raw_data(
+					[]u32{sceneInstance.textureIDs[meshIndex], sceneInstance.normalIDs[meshIndex]},
+				),
 			)
 
 			vk.CmdDrawIndexed(
