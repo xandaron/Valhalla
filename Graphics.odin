@@ -1931,7 +1931,6 @@ loadModels :: proc(
 	modelPaths: []cstring,
 ) {
 	loadFBX :: proc(
-		graphicsContext: ^GraphicsContext,
 		filename: cstring,
 		model: ^Model,
 		vertexOffset, indiceOffset: u32,
@@ -2187,7 +2186,6 @@ loadModels :: proc(
 	}
 
 	loadGLTF :: proc(
-		graphicsContext: ^GraphicsContext,
 		filename: cstring,
 		model: ^Model,
 		vertexOffset, indiceOffset: u32,
@@ -2298,7 +2296,6 @@ loadModels :: proc(
 			fallthrough
 		case "fbx":
 			loadFBX(
-				graphicsContext,
 				path,
 				&scene.models[modelIndex],
 				u32(len(scene.vertices)),
@@ -2308,7 +2305,6 @@ loadModels :: proc(
 			fallthrough
 		case "glb":
 			loadGLTF(
-				graphicsContext,
 				path,
 				&scene.models[modelIndex],
 				u32(len(scene.vertices)),
@@ -2998,8 +2994,8 @@ loadScene :: proc(
 		scene.instances[instanceIndex] = {
 			name       = instance.name,
 			modelID    = u32(instance.model + 1),
-			textureIDs = textureIDs,
-			normalIDs  = normalIDs,
+			textureIDs = textureIDs[:],
+			normalIDs  = normalIDs[:],
 			position   = instance.position,
 			rotation   = instance.rotation,
 			scale      = instance.scale,
@@ -3022,6 +3018,11 @@ loadScene :: proc(
 	delete(sceneJson.models)
 	delete(sceneJson.textures)
 	delete(sceneJson.normals)
+
+	for &instance in sceneJson.instances {
+		delete(instance.textures)
+		delete(instance.normals)
+	}
 	delete(sceneJson.instances)
 
 	if err = loadSceneAssets(graphicsContext, index); err != .None {
@@ -3116,6 +3117,8 @@ cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 
 	for &instance in scene.instances {
 		delete(instance.name)
+		delete(instance.textureIDs)
+		delete(instance.normalIDs)
 		delete(instance.scaleKeys)
 		delete(instance.positionKeys)
 		delete(instance.rotationKeys)
