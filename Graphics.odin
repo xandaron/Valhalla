@@ -2033,13 +2033,13 @@ loadModels :: proc(
 			index: u32 = 0
 			for faceIndex in 0 ..< sceneMesh.faces.count {
 				face := sceneMesh.faces.data[faceIndex]
-				triangulatedIndexCount := (face.num_indices - 2) * 3
+				triangulatedIndiceCount := (face.num_indices - 2) * 3
 
 				err: ufbx.Panic
 				tris := ufbx.catch_triangulate_face(
 					&err,
-					raw_data(mesh.indices[index:index + triangulatedIndexCount]),
-					uint(triangulatedIndexCount),
+					raw_data(mesh.indices[index:index + triangulatedIndiceCount]),
+					uint(triangulatedIndiceCount),
 					sceneMesh,
 					face,
 				)
@@ -2049,7 +2049,7 @@ loadModels :: proc(
 					log.log(.Error, errMessage)
 					panic(errMessage)
 				}
-				index += triangulatedIndexCount
+				index += triangulatedIndiceCount
 			}
 
 			for indiceIndex in 0 ..< sceneMesh.num_indices {
@@ -2155,9 +2155,7 @@ loadModels :: proc(
 				for index in 0 ..< bakedNode.translation_keys.count {
 					data := bakedNode.translation_keys.data[index]
 					animNode.keyPositions[index].time = data.time
-					animNode.keyPositions[index].value.x = f32(data.value[0])
-					animNode.keyPositions[index].value.y = f32(data.value[1])
-					animNode.keyPositions[index].value.z = f32(data.value[2])
+					animNode.keyPositions[index].value = data.value
 				}
 
 				for index in 0 ..< bakedNode.rotation_keys.count {
@@ -2169,9 +2167,7 @@ loadModels :: proc(
 				for index in 0 ..< bakedNode.scale_keys.count {
 					data := bakedNode.scale_keys.data[index]
 					animNode.keyScales[index].time = data.time
-					animNode.keyScales[index].value.x = f32(data.value[0])
-					animNode.keyScales[index].value.y = f32(data.value[1])
-					animNode.keyScales[index].value.z = f32(data.value[2])
+					animNode.keyScales[index].value = data.value
 				}
 			}
 		}
