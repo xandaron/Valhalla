@@ -162,16 +162,20 @@ Animation :: struct {
 	duration: f64,
 }
 
-// TODO: Models could contain multiple meshes each with their own textures... There should be a way to represent that.
+@(private = "file")
+Mesh :: struct {
+	vertices:     []Vertex,
+	indices:      []u32,
+	vertexOffset: u32,
+	indiceOffset: u32,
+}
+
 @(private = "file")
 Model :: struct {
-	name:         cstring,
-	vertices:     []Vertex,
-	vertexOffset: u32,
-	indices:      []u32,
-	indiceOffset: u32,
-	skeleton:     Skeleton,
-	animations:   []Animation,
+	name:       cstring,
+	meshes:     []Mesh,
+	skeleton:   Skeleton,
+	animations: []Animation,
 }
 
 @(private = "file")
@@ -1927,7 +1931,12 @@ loadModels :: proc(
 	sceneIndex: u32,
 	modelPaths: []cstring,
 ) {
-	loadFBX :: proc(graphicsContext: ^GraphicsContext, filename: cstring, model: ^Model) {
+	loadFBX :: proc(
+		graphicsContext: ^GraphicsContext,
+		filename: cstring,
+		model: ^Model,
+		vertexOffset, indiceOffset: u32,
+	) {
 		opts: ufbx.Load_Opts = {
 			target_axes = ufbx.Coordinate_Axes {
 				right = .POSITIVE_X,
@@ -1944,7 +1953,7 @@ loadModels :: proc(
 		}
 		defer ufbx.free_scene(scene)
 
-		model.skeleton = make([]Bone, scene.bones.count)
+		model.skeleton = make(Skeleton, scene.bones.count)
 
 		boneMap := make(map[cstring]u32, scene.bones.count)
 		defer delete(boneMap)
@@ -1960,7 +1969,7 @@ loadModels :: proc(
 					parentIndex = parentIndex,
 				}
 				boneMap[node.name.data] = skeletonOffset
-				
+
 				parentIndex := skeletonOffset
 				skeletonOffset := skeletonOffset + 1
 
@@ -1980,9 +1989,9 @@ loadModels :: proc(
 			rootBone := scene.bones.data[0]
 			boneMap[rootBone.name.data] = 0
 			model.skeleton[0] = {
-				parentIndex = 0
+				parentIndex = 0,
 			}
-			node := rootBone.instances.data[0]
+			node := rootBone.instances.data[0] // Get the node that the bone belongs to
 			skeletonOffset: u32 = 1
 			for childIndex in 0 ..< node.children.count {
 				skeletonOffset = loadBonesRecursively(
@@ -1995,15 +2004,42 @@ loadModels :: proc(
 			}
 		}
 
-		vertexCount: uint = 0
-		indexCount: uint = 0
-		for index in 0 ..< scene.meshes.count {
-			vertexCount += scene.meshes.data[index].num_indices
-			indexCount += scene.meshes.data[index].num_triangles * 3
-		}
+		// Why am I loading each bone one at a time? Each bone links to its child bone so cant I just find the root bone and then load all of them at once?
+		// boneIndex: u32 = 0
+		// for index in 0 ..< scene.nodes.count {
+		// 	node := scene.nodes.data[index]
+		// 	if node.attrib_type != .BONE {
+		// 		continue
+		// 	}
 
-		model.vertices = make([]Vertex, vertexCount)
-		model.indices = make([]u32, indexCount)
+		// 	parentIndex: u32 = 0
+		// 	if !node.parent.is_root {
+		// 		parentIndex = boneMap[node.parent.element.name.data]
+		// 	}
+		// 	model.skeleton[boneIndex] = {
+		// 		parentIndex = parentIndex,
+		// 	}
+		// 	boneMap[node.element.name.data] = boneIndex
+		// 	boneIndex += 1
+		// }
+
+		vertexOffset := vertexOffset
+		indiceOffset := indiceOffset
+
+		model.meshes = make([]Mesh, scene.meshes.count)
+		for &mesh, index in model.meshes {
+			mesh.vertexOffset = vertexOffset
+			mesh.indiceOffset = indiceOffset
+
+			lenVertices := u32(scene.meshes.data[index].num_indices)
+			lenIndices := u32(scene.meshes.data[index].num_triangles * 3)
+
+			mesh.vertices = make([]Vertex, lenVertices)
+			mesh.indices = make([]u32, lenIndices)
+
+			vertexOffset += lenVertices
+			indiceOffset += lenIndices
+		}
 
 		// Originally was
 		// model.name = strings.clone_to_cstring(string(scene.meshes.data[0].element.name.data))
@@ -2013,19 +2049,21 @@ loadModels :: proc(
 		mem.copy(memPtr, rawptr(scene.meshes.data[0].element.name.data), strLen)
 		model.name = cstring(memPtr)
 
-		vertexOffset, indiceOffset, meshIndexOffset: u32 = 0, 0, 0
 		for meshIndex in 0 ..< scene.meshes.count {
-			mesh := scene.meshes.data[meshIndex]
-			for faceIndex in 0 ..< mesh.faces.count {
-				face := mesh.faces.data[faceIndex]
+			mesh := &model.meshes[meshIndex]
+			sceneMesh := scene.meshes.data[meshIndex]
+
+			indiceOffset: u32 = 0
+			for faceIndex in 0 ..< sceneMesh.faces.count {
+				face := sceneMesh.faces.data[faceIndex]
 				triangulatedIndexCount := (face.num_indices - 2) * 3
 
 				err: ufbx.Panic
 				tris := ufbx.catch_triangulate_face(
 					&err,
-					raw_data(model.indices[indiceOffset:indiceOffset + triangulatedIndexCount]),
+					raw_data(mesh.indices[indiceOffset:indiceOffset + triangulatedIndexCount]),
 					uint(triangulatedIndexCount),
-					mesh,
+					sceneMesh,
 					face,
 				)
 
@@ -2034,26 +2072,22 @@ loadModels :: proc(
 					log.log(.Error, errMessage)
 					panic(errMessage)
 				}
-
-				for &index in model.indices[indiceOffset:indiceOffset + triangulatedIndexCount] {
-					index += meshIndexOffset
-				}
 				indiceOffset += triangulatedIndexCount
 			}
 
-			for indiceIndex in 0 ..< mesh.num_indices {
-				indiceIndex := u32(indiceIndex)
-				vertexIndex := mesh.vertex_position.indices.data[indiceIndex]
-				position := mesh.vertex_position.values.data[vertexIndex]
+			for indiceIndex in 0 ..< sceneMesh.num_indices {
+				vertexIndex := sceneMesh.vertex_position.indices.data[indiceIndex]
+				position := sceneMesh.vertex_position.values.data[vertexIndex]
 				normal :=
-					mesh.vertex_normal.values.data[mesh.vertex_normal.indices.data[indiceIndex]]
+					sceneMesh.vertex_normal.values.data[sceneMesh.vertex_normal.indices.data[indiceIndex]]
 
 				uv := [2]f32{0, 0}
-				if mesh.vertex_uv.values.count != 0 {
-					uv = mesh.vertex_uv.values.data[mesh.vertex_uv.indices.data[indiceIndex]]
+				if sceneMesh.vertex_uv.values.count != 0 {
+					uv =
+						sceneMesh.vertex_uv.values.data[sceneMesh.vertex_uv.indices.data[indiceIndex]]
 				}
 
-				model.vertices[indiceIndex + vertexOffset] = {
+				mesh.vertices[indiceIndex] = {
 					position = position,
 					texCoord = {uv.x, 1 - uv.y},
 					normal   = normal,
@@ -2061,10 +2095,10 @@ loadModels :: proc(
 					bones    = {0, 0, 0, 0},
 				}
 
-				if mesh.skin_deformers.count != 0 {
-					deformer := mesh.skin_deformers.data[0]
+				if sceneMesh.skin_deformers.count != 0 {
+					deformer := sceneMesh.skin_deformers.data[0]
 					numWeights :=
-						deformer.vertices.data[vertexIndex].num_weights if deformer.vertices.data[vertexIndex].num_weights <= 4 else 4
+						deformer.vertices.data[vertexIndex].num_weights <= 4 ? deformer.vertices.data[vertexIndex].num_weights : 4
 					firstWeightIndex := deformer.vertices.data[vertexIndex].weight_begin
 
 					for weightIndex in 0 ..< numWeights {
@@ -2072,23 +2106,17 @@ loadModels :: proc(
 						boneName :=
 							deformer.clusters.data[skinWeight.cluster_index].bone_node.element.name
 
-						model.vertices[indiceIndex + vertexOffset].bones[weightIndex] =
-							boneMap[boneName.data]
-						model.vertices[indiceIndex + vertexOffset].weights[weightIndex] = f32(
-							skinWeight.weight,
-						)
+						mesh.vertices[indiceIndex].bones[weightIndex] = boneMap[boneName.data]
+						mesh.vertices[indiceIndex].weights[weightIndex] = f32(skinWeight.weight)
 					}
 
 					if numWeights != 0 {
-						model.vertices[indiceIndex + vertexOffset].weights = normalize(
-							model.vertices[indiceIndex + vertexOffset].weights,
+						mesh.vertices[indiceIndex].weights = normalize(
+							mesh.vertices[indiceIndex].weights,
 						)
 					}
 				}
 			}
-
-			vertexOffset += u32(mesh.num_indices)
-			meshIndexOffset = indiceOffset
 		}
 
 		for clusterIndex in 0 ..< scene.skin_clusters.count {
@@ -2128,8 +2156,12 @@ loadModels :: proc(
 			defer ufbx.free_baked_anim(bakedAnim)
 
 			animation := &model.animations[animIndex]
-			// TODO: Surely there is a way to copy a cstring better than this. Might have to copy the data?
-			animation.name = strings.clone_to_cstring(string(stack.element.name.data))
+
+			strLen := int(stack.element.name.length + 1) // +1 to capture null terminator
+			memPtr, _ := mem.alloc(size_of(c.char) * strLen)
+			mem.copy(memPtr, rawptr(stack.element.name.data), strLen)
+			animation.name = cstring(memPtr)
+
 			animation.duration = bakedAnim.playback_duration
 			animation.nodes = make([]AnimationNode, bakedAnim.nodes.count)
 
@@ -2168,7 +2200,12 @@ loadModels :: proc(
 		}
 	}
 
-	loadGLTF :: proc(graphicsContext: ^GraphicsContext, filename: cstring, model: ^Model) {
+	loadGLTF :: proc(
+		graphicsContext: ^GraphicsContext,
+		filename: cstring,
+		model: ^Model,
+		vertexOffset, indiceOffset: u32,
+	) {
 		copyData :: proc(accessor: ^cgltf.accessor, dst: rawptr) {
 			bufferView := accessor.buffer_view
 			data := bufferView.data
@@ -2201,80 +2238,104 @@ loadModels :: proc(
 
 		vertices: #soa[]Vertex
 		defer delete(vertices)
-		for &primative in file.meshes[0].primitives {
-			if primative.type != .triangles {
-				continue
+
+		model.meshes = make([]Mesh, len(file.meshes))
+
+		vertexOffset := vertexOffset
+		indiceOffset := indiceOffset
+		for &mesh, meshIndex in model.meshes {
+			for &primative in file.meshes[meshIndex].primitives {
+				if primative.type != .triangles {
+					continue
+				}
+
+				mesh.indices = make([]u32, int(primative.indices.count))
+
+				if primative.indices.component_type == .r_32u {
+					copyData(primative.indices, &mesh.indices[0])
+				} else if primative.indices.component_type == .r_16u {
+					data := make([]u16, int(primative.indices.count))
+					copyData(primative.indices, &data[0])
+					for &indice, index in mesh.indices {
+						indice = u32(data[index])
+					}
+					delete(data)
+				} else if primative.indices.component_type == .r_8u {
+					data := make([]u8, int(primative.indices.count))
+					copyData(primative.indices, &data[0])
+					for &indice, index in mesh.indices {
+						indice = u32(data[index])
+					}
+					delete(data)
+				}
+
+				vertices = make(#soa[]Vertex, primative.attributes[0].data.count)
+				for &attribute in primative.attributes {
+					#partial switch attribute.type {
+					case .position:
+						copyData(attribute.data, &vertices[0].position)
+					case .texcoord:
+						copyData(attribute.data, &vertices[0].texCoord)
+					case .normal:
+						copyData(attribute.data, &vertices[0].normal)
+					}
+				}
 			}
 
-			model.indices = make([]u32, int(primative.indices.count))
-
-			if primative.indices.component_type == .r_32u {
-				copyData(primative.indices, &model.indices[0])
-			} else if primative.indices.component_type == .r_16u {
-				data := make([]u16, int(primative.indices.count))
-				copyData(primative.indices, &data[0])
-				for &indice, index in model.indices {
-					indice = u32(data[index])
-				}
-				delete(data)
-			} else if primative.indices.component_type == .r_8u {
-				data := make([]u8, int(primative.indices.count))
-				copyData(primative.indices, &data[0])
-				for &indice, index in model.indices {
-					indice = u32(data[index])
-				}
-				delete(data)
+			mesh.vertices = make([]Vertex, len(vertices))
+			for &vertex, index in mesh.vertices {
+				vertex.position = vertices[index].position
+				vertex.texCoord = vertices[index].texCoord
+				vertex.normal = vertices[index].normal
+				vertex.bones = vertices[index].bones
+				vertex.weights = {1, 0, 0, 0}
 			}
 
-			vertices = make(#soa[]Vertex, primative.attributes[0].data.count)
-			for &attribute in primative.attributes {
-				#partial switch attribute.type {
-				case .position:
-					copyData(attribute.data, &vertices[0].position)
-				case .texcoord:
-					copyData(attribute.data, &vertices[0].texCoord)
-				case .normal:
-					copyData(attribute.data, &vertices[0].normal)
-				}
-			}
-		}
+			mesh.vertexOffset = vertexOffset
+			mesh.indiceOffset = indiceOffset
 
-		model.vertices = make([]Vertex, len(vertices))
-		for &vertex, index in model.vertices {
-			vertex.position = vertices[index].position
-			vertex.texCoord = vertices[index].texCoord
-			vertex.normal = vertices[index].normal
-			vertex.bones = vertices[index].bones
-			vertex.weights = {1, 0, 0, 0}
+			vertexOffset += u32(len(mesh.vertices))
+			indiceOffset += u32(len(mesh.indices))
 		}
 	}
 
 	scene := &scenes[sceneIndex]
 
 	modelOffset := len(scene.models)
-	resize(&scene.models, len(scene.models) + len(modelPaths))
+	resize(&scene.models, modelOffset + len(modelPaths))
 
 	for path, index in modelPaths {
 		modelIndex := modelOffset + index
-
-		scene.models[modelIndex].vertexOffset = u32(len(scene.vertices))
-		scene.models[modelIndex].indiceOffset = u32(len(scene.indices))
 
 		switch ext := filepath.ext(string(path))[1:]; ext {
 		case "obj":
 			fallthrough
 		case "fbx":
-			loadFBX(graphicsContext, path, &scene.models[modelIndex])
+			loadFBX(
+				graphicsContext,
+				path,
+				&scene.models[modelIndex],
+				u32(len(scene.vertices)),
+				u32(len(scene.indices)),
+			)
 		case "gltf":
 			fallthrough
 		case "glb":
-			loadGLTF(graphicsContext, path, &scene.models[modelIndex])
+			loadGLTF(
+				graphicsContext,
+				path,
+				&scene.models[modelIndex],
+				u32(len(scene.vertices)),
+				u32(len(scene.indices)),
+			)
 		case:
 			log.log(.Warning, "File formate not supported! {}", ext)
 		}
 
-		append(&scene.vertices, ..scene.models[modelIndex].vertices)
-		append(&scene.indices, ..scene.models[modelIndex].indices)
+		for &mesh in scene.models[modelIndex].meshes {
+			append(&scene.vertices, ..mesh.vertices)
+			append(&scene.indices, ..mesh.indices)
+		}
 	}
 }
 
@@ -2687,7 +2748,9 @@ loadSceneAssets :: proc(
 		inst.rotationKeys = make([]u32, skeletonLength)
 		inst.scaleKeys = make([]u32, skeletonLength)
 		inst.animTimer = 0.0
-		scene.instanceVerticesCount += len(scene.models[inst.modelID].vertices)
+		for &mesh in scene.models[inst.modelID].meshes {
+			scene.instanceVerticesCount += len(mesh.vertices)
+		}
 	}
 	scene.boneCount += 1
 
@@ -3020,8 +3083,12 @@ cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 
 	for &model in scene.models {
 		delete(model.name)
-		delete(model.vertices)
-		delete(model.indices)
+
+		for &mesh in model.meshes {
+			delete(mesh.vertices)
+			delete(mesh.indices)
+		}
+
 		delete(model.skeleton)
 		for &animation in model.animations {
 			for &node in animation.nodes {
@@ -5022,7 +5089,7 @@ createGraphicsPipelines :: proc(
 			rasterizerDiscardEnable = false,
 			polygonMode = .FILL,
 			cullMode = {},
-			frontFace = .CLOCKWISE,
+			frontFace = .COUNTER_CLOCKWISE,
 			depthBiasEnable = true,
 			depthBiasConstantFactor = DEPTH_BIAS_CONSTANT,
 			depthBiasClamp = 0.0,
@@ -5921,28 +5988,30 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 
 	offset: u32 = 0
 	for &inst, instanceIndex in scene.instances {
-		vk.CmdPushConstants(
-			preComputeCommandBuffers[index],
-			pipelines[PipelineIndex.PRECOMPUTE].layout,
-			{.COMPUTE},
-			0,
-			4 * size_of(u32),
-			raw_data(
-				[]u32 {
-					u32(instanceIndex),
-					u32(len(scene.models[inst.modelID].vertices)),
-					scene.models[inst.modelID].vertexOffset,
-					offset,
-				},
-			),
-		)
-		vk.CmdDispatch(
-			preComputeCommandBuffers[index],
-			u32(len(scene.models[inst.modelID].vertices)) / 64 + 1,
-			1,
-			1,
-		)
-		offset += u32(len(scene.models[inst.modelID].vertices))
+		for &mesh in scene.models[inst.modelID].meshes {
+			vk.CmdPushConstants(
+				preComputeCommandBuffers[index],
+				pipelines[PipelineIndex.PRECOMPUTE].layout,
+				{.COMPUTE},
+				0,
+				4 * size_of(u32),
+				raw_data(
+					[]u32 {
+						u32(instanceIndex),
+						u32(len(mesh.vertices)),
+						mesh.vertexOffset,
+						offset,
+					},
+				),
+			)
+			vk.CmdDispatch(
+				preComputeCommandBuffers[index],
+				u32(len(mesh.vertices)) / 64 + 1,
+				1,
+				1,
+			)
+			offset += u32(len(mesh.vertices))
+		}
 	}
 
 	if vk.EndCommandBuffer(preComputeCommandBuffers[index]) != .SUCCESS {
@@ -6135,25 +6204,27 @@ recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u3
 
 		offset: u32 = 0
 		for &inst, instanceIndex in scene.instances {
-			vk.CmdPushConstants(
-				shadowMapCommandBuffers[index],
-				pipelines[PipelineIndex.LIGHT].layout,
-				{.VERTEX},
-				0,
-				size_of(u32),
-				&offset,
-			)
+			for &mesh in scene.models[inst.modelID].meshes {
+				vk.CmdPushConstants(
+					shadowMapCommandBuffers[index],
+					pipelines[PipelineIndex.LIGHT].layout,
+					{.VERTEX},
+					0,
+					size_of(u32),
+					&offset,
+				)
 
-			vk.CmdDrawIndexed(
-				shadowMapCommandBuffers[index],
-				u32(len(scene.models[inst.modelID].indices)),
-				1,
-				scene.models[inst.modelID].indiceOffset,
-				i32(scene.models[inst.modelID].vertexOffset),
-				u32(instanceIndex),
-			)
+				vk.CmdDrawIndexed(
+					shadowMapCommandBuffers[index],
+					u32(len(mesh.indices)),
+					1,
+					mesh.indiceOffset,
+					i32(mesh.vertexOffset),
+					u32(instanceIndex),
+				)
 
-			offset += u32(len(scene.models[inst.modelID].vertices))
+				offset += u32(len(mesh.vertices))
+			}
 		}
 	}
 
@@ -6231,25 +6302,27 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 
 	offset: u32 = 0
 	for &inst, instanceIndex in scene.instances {
-		vk.CmdPushConstants(
-			sceneCommandBuffers[index],
-			pipelines[PipelineIndex.MAIN].layout,
-			{.VERTEX, .FRAGMENT},
-			0,
-			size_of(u32),
-			&offset,
-		)
+		for &mesh in scene.models[inst.modelID].meshes {
+			vk.CmdPushConstants(
+				sceneCommandBuffers[index],
+				pipelines[PipelineIndex.MAIN].layout,
+				{.VERTEX, .FRAGMENT},
+				0,
+				size_of(u32),
+				&offset,
+			)
 
-		vk.CmdDrawIndexed(
-			sceneCommandBuffers[index],
-			u32(len(scene.models[inst.modelID].indices)),
-			1,
-			scene.models[inst.modelID].indiceOffset,
-			i32(scene.models[inst.modelID].vertexOffset),
-			u32(instanceIndex),
-		)
+			vk.CmdDrawIndexed(
+				sceneCommandBuffers[index],
+				u32(len(mesh.indices)),
+				1,
+				mesh.indiceOffset,
+				i32(mesh.vertexOffset),
+				u32(instanceIndex),
+			)
 
-		offset += u32(len(scene.models[inst.modelID].vertices))
+			offset += u32(len(mesh.vertices))
+		}
 	}
 
 	if vk.EndCommandBuffer(sceneCommandBuffers[index]) != .SUCCESS {
@@ -6662,12 +6735,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					)
 					defer delete(file)
 
-					extension := filepath.ext(file)[1:]
-					if file != "" &&
-					   (extension == "gltf" ||
-							   extension == "glb" ||
-							   extension == "fbx" ||
-							   extension == "obj") {
+					if file != "" {
 						alreadyLoaded := false
 						for &loadedFile in scene.modelPaths {
 							if file == string(loadedFile) {
@@ -6852,31 +6920,34 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 		scene := &scenes[activeScene]
 
 		for index := len(scene.instances) - 1; index >= 0; index -= 1 {
-			instance := &scene.instances[index]
-			if !imgui.TreeNode(instance.name) {
+			modelInstance := &scene.instances[index]
+			if !imgui.TreeNode(modelInstance.name) {
 				continue
 			}
-			imgui.DragFloat3("Position", &instance.position, 0.01)
-			imgui.DragFloat3("Rotation", &instance.rotation, 5)
-			imgui.DragFloat3("Scale", &instance.scale, 0.001)
-			if imgui.BeginCombo("Model", scene.models[instance.modelID].name) {
+			imgui.DragFloat3("Position", &modelInstance.position, 0.01)
+			imgui.DragFloat3("Rotation", &modelInstance.rotation, 5)
+			imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
+			if imgui.BeginCombo("Model", scene.models[modelInstance.modelID].name) {
 				for &model, i in scene.models {
-					if u32(i) != instance.modelID && imgui.Selectable(model.name) {
-						scene.boneCount -= len(scene.models[instance.modelID].skeleton)
-						scene.instanceVerticesCount -= len(scene.models[instance.modelID].vertices)
+					if u32(i) != modelInstance.modelID && imgui.Selectable(model.name) {
+						scene.boneCount -= len(scene.models[modelInstance.modelID].skeleton)
+						for &mesh in scene.models[modelInstance.modelID].meshes {
+							scene.instanceVerticesCount -= len(mesh.vertices)
+						}
+						delete(modelInstance.positionKeys)
+						delete(modelInstance.rotationKeys)
+						delete(modelInstance.scaleKeys)
 
-						delete(instance.positionKeys)
-						delete(instance.rotationKeys)
-						delete(instance.scaleKeys)
-
-						instance.modelID = u32(i)
-						skeletonLength := len(scene.models[instance.modelID].skeleton)
+						modelInstance.modelID = u32(i)
+						skeletonLength := len(scene.models[modelInstance.modelID].skeleton)
 						scene.boneCount += skeletonLength
-						scene.instanceVerticesCount += len(scene.models[instance.modelID].vertices)
+						for &mesh in scene.models[modelInstance.modelID].meshes {
+							scene.instanceVerticesCount += len(mesh.vertices)
+						}
 
-						instance.positionKeys = make([]u32, skeletonLength)
-						instance.rotationKeys = make([]u32, skeletonLength)
-						instance.scaleKeys = make([]u32, skeletonLength)
+						modelInstance.positionKeys = make([]u32, skeletonLength)
+						modelInstance.rotationKeys = make([]u32, skeletonLength)
+						modelInstance.scaleKeys = make([]u32, skeletonLength)
 
 						if vk.DeviceWaitIdle(device) != .SUCCESS {
 							panic("Failed to wait for device idle?")
@@ -6887,43 +6958,45 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				}
 				imgui.EndCombo()
 			}
-			if imgui.BeginCombo("Texture", scene.texturePaths[instance.textureID]) {
+			if imgui.BeginCombo("Texture", scene.texturePaths[modelInstance.textureID]) {
 				for &texture, i in scene.texturePaths {
-					if u32(i) != instance.textureID && imgui.Selectable(texture) {
-						instance.textureID = u32(i)
+					if u32(i) != modelInstance.textureID && imgui.Selectable(texture) {
+						modelInstance.textureID = u32(i)
 					}
 				}
 				imgui.EndCombo()
 			}
-			if imgui.BeginCombo("Normal Map", scene.normalPaths[instance.normalID]) {
+			if imgui.BeginCombo("Normal Map", scene.normalPaths[modelInstance.normalID]) {
 				for &normal, i in scene.normalPaths {
-					if u32(i) != instance.normalID && imgui.Selectable(normal) {
-						instance.normalID = u32(i)
+					if u32(i) != modelInstance.normalID && imgui.Selectable(normal) {
+						modelInstance.normalID = u32(i)
 					}
 				}
 				imgui.EndCombo()
 			}
-			animations := &scene.models[instance.modelID].animations
+			animations := &scene.models[modelInstance.modelID].animations
 			if len(animations) > 0 {
 				imgui.SeparatorText("Animations")
-				if imgui.BeginCombo("Animation Selection", animations[instance.animID].name) {
+				if imgui.BeginCombo("Animation Selection", animations[modelInstance.animID].name) {
 					for &anim, i in animations {
-						if instance.animID != u32(i) && imgui.Selectable(anim.name) {
-							instance.animID = u32(i)
+						if modelInstance.animID != u32(i) && imgui.Selectable(anim.name) {
+							modelInstance.animID = u32(i)
 						}
 					}
 					imgui.EndCombo()
 				}
-				imgui.DragScalar("Animation Timer", .Double, &instance.animTimer, 0.01)
+				imgui.DragScalar("Animation Timer", .Double, &modelInstance.animTimer, 0.01)
 			}
 			imgui.BeginDisabled(len(scene.instances) == 1)
 			if imgui.Button("Delete") {
-				delete(instance.name)
-				delete(instance.positionKeys)
-				delete(instance.rotationKeys)
-				delete(instance.scaleKeys)
-				scene.boneCount -= len(scene.models[instance.modelID].skeleton)
-				scene.instanceVerticesCount -= len(scene.models[instance.modelID].vertices)
+				delete(modelInstance.name)
+				delete(modelInstance.positionKeys)
+				delete(modelInstance.rotationKeys)
+				delete(modelInstance.scaleKeys)
+				scene.boneCount -= len(scene.models[modelInstance.modelID].skeleton)
+				for &mesh in scene.models[modelInstance.modelID].meshes {
+					scene.instanceVerticesCount -= len(mesh.vertices)
+				}
 				unordered_remove(&scene.instances, index)
 
 				if vk.DeviceWaitIdle(device) != .SUCCESS {
@@ -7061,7 +7134,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					animTimer    = 0.0,
 				}
 				scene.boneCount += len(scene.models[0].skeleton)
-				scene.instanceVerticesCount += len(scene.models[0].vertices)
+				scene.instanceVerticesCount += len(scene.models[0].meshes[0].vertices)
 				append(&scene.instances, newInstance)
 				if vk.DeviceWaitIdle(device) != .SUCCESS {
 					panic("Failed to wait for device idle?")
