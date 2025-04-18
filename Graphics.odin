@@ -2030,7 +2030,7 @@ loadModels :: proc(
 			vertexOffset += lenVertices
 			indiceOffset += lenIndices
 
-			indiceOffset: u32 = 0
+			index: u32 = 0
 			for faceIndex in 0 ..< sceneMesh.faces.count {
 				face := sceneMesh.faces.data[faceIndex]
 				triangulatedIndexCount := (face.num_indices - 2) * 3
@@ -2038,7 +2038,7 @@ loadModels :: proc(
 				err: ufbx.Panic
 				tris := ufbx.catch_triangulate_face(
 					&err,
-					raw_data(mesh.indices[indiceOffset:indiceOffset + triangulatedIndexCount]),
+					raw_data(mesh.indices[index:index + triangulatedIndexCount]),
 					uint(triangulatedIndexCount),
 					sceneMesh,
 					face,
@@ -2049,7 +2049,7 @@ loadModels :: proc(
 					log.log(.Error, errMessage)
 					panic(errMessage)
 				}
-				indiceOffset += triangulatedIndexCount
+				index += triangulatedIndexCount
 			}
 
 			for indiceIndex in 0 ..< sceneMesh.num_indices {
