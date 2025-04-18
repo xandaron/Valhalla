@@ -2002,30 +2002,6 @@ loadModels :: proc(
 			}
 		}
 
-		vertexOffset := vertexOffset
-		indiceOffset := indiceOffset
-
-		model.meshes = make([]Mesh, scene.meshes.count)
-		for &mesh, index in model.meshes {
-			lenVertices := u32(scene.meshes.data[index].num_indices)
-			lenIndices := u32(scene.meshes.data[index].num_triangles * 3)
-
-			mesh = {
-				vertices     = make([]Vertex, lenVertices),
-				indices      = make([]u32, lenIndices),
-				vertexOffset = vertexOffset,
-				indiceOffset = indiceOffset,
-			}
-
-			strLen := int(scene.meshes.data[index].name.length + 1) // +1 to capture null terminator
-			memPtr, _ := mem.alloc(size_of(c.char) * strLen)
-			mem.copy(memPtr, rawptr(scene.meshes.data[index].name.data), strLen)
-			mesh.name = cstring(memPtr)
-
-			vertexOffset += lenVertices
-			indiceOffset += lenIndices
-		}
-
 		// Originally was
 		// model.name = strings.clone_to_cstring(string(scene.meshes.data[0].element.name.data))
 		// Which seemed horrific. Has been changed to below but still not sure if this is really the most correct method
@@ -2034,9 +2010,29 @@ loadModels :: proc(
 		mem.copy(memPtr, rawptr(scene.meshes.data[0].element.name.data), strLen)
 		model.name = cstring(memPtr)
 
-		for meshIndex in 0 ..< scene.meshes.count {
-			mesh := &model.meshes[meshIndex]
+		vertexOffset := vertexOffset
+		indiceOffset := indiceOffset
+
+		for &mesh, meshIndex in model.meshes {
 			sceneMesh := scene.meshes.data[meshIndex]
+
+			lenVertices := u32(scene.meshes.data[meshIndex].num_indices)
+			lenIndices := u32(scene.meshes.data[meshIndex].num_triangles * 3)
+
+			mesh = {
+				vertices     = make([]Vertex, lenVertices),
+				indices      = make([]u32, lenIndices),
+				vertexOffset = vertexOffset,
+				indiceOffset = indiceOffset,
+			}
+
+			strLen := int(scene.meshes.data[meshIndex].name.length + 1) // +1 to capture null terminator
+			memPtr, _ := mem.alloc(size_of(c.char) * strLen)
+			mem.copy(memPtr, rawptr(scene.meshes.data[meshIndex].name.data), strLen)
+			mesh.name = cstring(memPtr)
+
+			vertexOffset += lenVertices
+			indiceOffset += lenIndices
 
 			indiceOffset: u32 = 0
 			for faceIndex in 0 ..< sceneMesh.faces.count {
