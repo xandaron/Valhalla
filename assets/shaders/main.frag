@@ -25,22 +25,22 @@ layout(binding = 6) uniform samplerCubeArray shadowMap;
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
 layout(location = 2) in vec3 inNormal;
-layout(location = 3) in float inAlbedoIndex;
-layout(location = 4) in float inNormalIndex;
 
 layout(location = 0) out vec4 outColour;
 
 layout(push_constant) uniform PushConstants {
     uint vertexOffset;
 	float ambientLight;
+    uint albedoTextureIndex;
+    uint normalTextureIndex;
 } pushConstant;
 
 #define EPSILON 0.015 // Shadows are noisy without this
 
 void main() {
     vec3 cumulativeColour = vec3(0.0);
-    const vec3 albedo = pow(texture(albedoArray, vec3(inUV, inAlbedoIndex)).xyz, vec3(1.0 / 2.2));
-    const vec3 normal = outerProduct(inNormal, vec3(0.0, 0.0, 1.0)) * (texture(normalArray, vec3(inUV, inNormalIndex)).xyz - 0.5) * 2.0;
+    const vec3 albedo = pow(texture(albedoArray, vec3(inUV, pushConstant.albedoTextureIndex)).xyz, vec3(1.0 / 2.2));
+    const vec3 normal = outerProduct(inNormal, vec3(0.0, 0.0, 1.0)) * (texture(normalArray, vec3(inUV, pushConstant.normalTextureIndex)).xyz - 0.5) * 2.0;
 
     for (uint index = 0; index < uniformBuffer.lightCount; index++) {
         #define light lightBuffer.lights[index]

@@ -10,8 +10,6 @@ layout(binding = 0) readonly uniform UniformBuffer {
 struct InstanceInfo {
     mat4 model;
     uint boneOffset;
-    float albedoSamplerOffset;
-    float normalSamplerOffset;
 };
 
 layout(binding = 1) readonly buffer InstanceBuffer {
@@ -32,6 +30,8 @@ layout(binding = 3) readonly buffer TransformBuffer {
 layout(push_constant) uniform PushConstants {
     uint vertexOffset;
 	float ambientLight;
+    uint albedoTextureIndex;
+    uint normalTextureIndex;
 } pushConstants;
 
 layout(location = 0) in vec3 inPosition;
@@ -43,8 +43,6 @@ layout(location = 4) in vec4 inWeights;
 layout(location = 0) out vec3 outPosition;
 layout(location = 1) out vec2 outUV;
 layout(location = 2) out vec3 outNormal;
-layout(location = 3) out float outAlbedoIndex;
-layout(location = 4) out float outNormalIndex;
 
 void main() {
     mat4 vertexTransform = transformBuffer.vertexTransforms[gl_VertexIndex - gl_BaseVertex + pushConstants.vertexOffset];
@@ -55,6 +53,4 @@ void main() {
     outPosition = position.xyz / position.w;
     outUV = inUV;
     outNormal = normalize(mat3(vertexTransform) * inNormal);
-    outAlbedoIndex = instanceBuffer.instanceInfo[gl_InstanceIndex].albedoSamplerOffset;
-    outNormalIndex = instanceBuffer.instanceInfo[gl_InstanceIndex].normalSamplerOffset;
 }

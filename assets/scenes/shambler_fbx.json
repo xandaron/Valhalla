@@ -1,5 +1,5 @@
 {
-	"name": "Shambler",
+	"name": "Shambler_fbx",
 	"clear_colour": [
 		150,
 		150,
@@ -11,13 +11,13 @@
 		{
 			"name": "Main",
 			"eye": [
-				0.00000000,
-				0.20000000,
-				-0.50000000
+				-0.01326999,
+				0.18649814,
+				-0.14403832
 			],
 			"center": [
 				0.00000000,
-				0.00000000,
+				0.16166565,
 				0.00000000
 			],
 			"up": [
@@ -25,7 +25,9 @@
 				1.00000000,
 				0.00000000
 			],
-			"distance": 0.44721401,
+			"near": 0.00000000,
+			"far": 0.00000000,
+			"distance": 0.12187921,
 			"fov": 45.00000000,
 			"mode": 0
 		}
@@ -53,7 +55,7 @@
 		}
 	],
 	"models": [
-		"./assets/models/zombie/model.fbx"
+		"./assets/models/zombie/zombie.fbx"
 	],
 	"textures": [
 		"./assets/models/zombie/albedo.png",
@@ -66,8 +68,12 @@
 		{
 			"name": "Zombie",
 			"model": 0,
-			"texture": 0,
-			"normal": 0,
+			"textures": [
+				0
+			],
+			"normals": [
+				0
+			],
 			"position": [
 				0.00000000,
 				0.00000000,
@@ -87,8 +93,12 @@
 		{
 			"name": "Floor",
 			"model": -1,
-			"texture": 1,
-			"normal": -1,
+			"textures": [
+				1
+			],
+			"normals": [
+				-1
+			],
 			"position": [
 				0.00000000,
 				-0.10000000,

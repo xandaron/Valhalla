@@ -164,6 +164,7 @@ Animation :: struct {
 
 @(private = "file")
 Mesh :: struct {
+	name:         cstring,
 	vertices:     []Vertex,
 	indices:      []u32,
 	vertexOffset: u32,
@@ -206,10 +207,8 @@ UniformBuffer :: struct #align (16) {
 
 @(private = "file")
 InstanceInfo :: struct #align (16) {
-	model:                Mat4,
-	boneOffset:           u32,
-	textureSamplerOffset: f32,
-	normalsSamplerOffset: f32,
+	model:      Mat4,
+	boneOffset: u32,
 }
 
 @(private = "file")
@@ -282,13 +281,13 @@ PointLight :: struct {
 @(private = "file")
 Instance :: struct {
 	name:         cstring,
-	modelID:      u32,
-	animID:       u32,
-	textureID:    u32,
-	normalID:     u32,
 	position:     Vec3,
 	rotation:     Vec3,
 	scale:        Vec3,
+	modelID:      u32,
+	animID:       u32,
+	textureIDs:   []u32,
+	normalIDs:    []u32,
 	positionKeys: []u32,
 	rotationKeys: []u32,
 	scaleKeys:    []u32,
@@ -2004,38 +2003,25 @@ loadModels :: proc(
 			}
 		}
 
-		// Why am I loading each bone one at a time? Each bone links to its child bone so cant I just find the root bone and then load all of them at once?
-		// boneIndex: u32 = 0
-		// for index in 0 ..< scene.nodes.count {
-		// 	node := scene.nodes.data[index]
-		// 	if node.attrib_type != .BONE {
-		// 		continue
-		// 	}
-
-		// 	parentIndex: u32 = 0
-		// 	if !node.parent.is_root {
-		// 		parentIndex = boneMap[node.parent.element.name.data]
-		// 	}
-		// 	model.skeleton[boneIndex] = {
-		// 		parentIndex = parentIndex,
-		// 	}
-		// 	boneMap[node.element.name.data] = boneIndex
-		// 	boneIndex += 1
-		// }
-
 		vertexOffset := vertexOffset
 		indiceOffset := indiceOffset
 
 		model.meshes = make([]Mesh, scene.meshes.count)
 		for &mesh, index in model.meshes {
-			mesh.vertexOffset = vertexOffset
-			mesh.indiceOffset = indiceOffset
-
 			lenVertices := u32(scene.meshes.data[index].num_indices)
 			lenIndices := u32(scene.meshes.data[index].num_triangles * 3)
 
-			mesh.vertices = make([]Vertex, lenVertices)
-			mesh.indices = make([]u32, lenIndices)
+			mesh = {
+				vertices     = make([]Vertex, lenVertices),
+				indices      = make([]u32, lenIndices),
+				vertexOffset = vertexOffset,
+				indiceOffset = indiceOffset,
+			}
+
+			strLen := int(scene.meshes.data[index].name.length + 1) // +1 to capture null terminator
+			memPtr, _ := mem.alloc(size_of(c.char) * strLen)
+			mem.copy(memPtr, rawptr(scene.meshes.data[index].name.data), strLen)
+			mesh.name = cstring(memPtr)
 
 			vertexOffset += lenVertices
 			indiceOffset += lenIndices
@@ -2838,13 +2824,13 @@ createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
 
 	scene.instances = make([dynamic]Instance, 1)
 	scene.instances[0] = {
-		name      = strings.clone_to_cstring("cube"),
-		modelID   = 0,
-		textureID = 0,
-		normalID  = 0,
-		position  = {0, 0, 0},
-		rotation  = {0, 0, 0},
-		scale     = {0.2, 0.2, 0.2},
+		name       = strings.clone_to_cstring("cube"),
+		modelID    = 0,
+		textureIDs = {0},
+		normalIDs  = {0},
+		position   = {0, 0, 0},
+		rotation   = {0, 0, 0},
+		scale      = {0.2, 0.2, 0.2},
 	}
 
 	scene.pointLights = make([dynamic]PointLight, 1)
@@ -2892,26 +2878,26 @@ createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
 
 @(private = "file")
 InstanceJSON :: struct {
-	name:     cstring,
-	model:    i32,
-	texture:  i32,
-	normal:   i32,
-	position: Vec3,
-	rotation: Vec3,
-	scale:    Vec3,
+	name:     cstring `json:name`,
+	model:    i32 `json:model`,
+	textures: []i32 `json:textures`,
+	normals:  []i32 `json:normals`,
+	position: Vec3 `json:position`,
+	rotation: Vec3 `json:rotation`,
+	scale:    Vec3 `json:scale`,
 }
 
 @(private = "file")
 SceneJSON :: struct {
-	name:          cstring,
-	clear_colour:  [4]i32,
-	ambient_light: f32,
-	cameras:       []Camera,
-	lights:        []PointLight,
-	models:        []cstring,
-	textures:      []cstring,
-	normals:       []cstring,
-	instances:     []InstanceJSON,
+	name:          cstring `json:name`,
+	clear_colour:  [4]i32 `json:clear_colour`,
+	ambient_light: f32 `json:ambient_light`,
+	cameras:       []Camera `json:cameras`,
+	lights:        []PointLight `json:lights`,
+	models:        []cstring `json:models`,
+	textures:      []cstring `json:textures`,
+	normals:       []cstring `json:normals`,
+	instances:     []InstanceJSON `json:instances`,
 }
 
 @(private = "file")
@@ -2932,11 +2918,19 @@ saveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	defer delete(sceneInfo.instances)
 
 	for &instance, index in scene.instances {
+		textureIDs := make([]i32, len(instance.textureIDs))
+		normalIDs := make([]i32, len(instance.normalIDs))
+
+		for index := 0; index < len(textureIDs); index += 1 {
+			textureIDs[index] = i32(instance.textureIDs[index]) - 1
+			normalIDs[index] = i32(instance.normalIDs[index]) - 1
+		}
+
 		sceneInfo.instances[index] = {
 			name     = instance.name,
 			model    = i32(instance.modelID) - 1,
-			texture  = i32(instance.textureID) - 1,
-			normal   = i32(instance.normalID) - 1,
+			textures = textureIDs,
+			normals  = normalIDs,
 			position = instance.position,
 			rotation = instance.rotation,
 			scale    = instance.scale,
@@ -2993,14 +2987,22 @@ loadScene :: proc(
 	scene.filePath, _ = filepath.abs(sceneFile)
 
 	for &instance, instanceIndex in sceneJson.instances {
+		textureIDs := make([]u32, len(instance.textures))
+		normalIDs := make([]u32, len(instance.normals))
+
+		for index := 0; index < len(textureIDs); index += 1 {
+			textureIDs[index] = u32(instance.textures[index] + 1)
+			normalIDs[index] = u32(instance.normals[index] + 1)
+		}
+
 		scene.instances[instanceIndex] = {
-			name      = instance.name,
-			modelID   = u32(instance.model + 1),
-			textureID = u32(instance.texture + 1),
-			normalID  = u32(instance.normal + 1),
-			position  = instance.position,
-			rotation  = instance.rotation,
-			scale     = instance.scale,
+			name       = instance.name,
+			modelID    = u32(instance.model + 1),
+			textureIDs = textureIDs,
+			normalIDs  = normalIDs,
+			position   = instance.position,
+			rotation   = instance.rotation,
+			scale      = instance.scale,
 		}
 	}
 
@@ -3085,9 +3087,11 @@ cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 		delete(model.name)
 
 		for &mesh in model.meshes {
+			delete(mesh.name)
 			delete(mesh.vertices)
 			delete(mesh.indices)
 		}
+		delete(model.meshes)
 
 		delete(model.skeleton)
 		for &animation in model.animations {
@@ -5160,7 +5164,7 @@ createGraphicsPipelines :: proc(
 	mainPushConstant: vk.PushConstantRange = {
 		stageFlags = {.VERTEX, .FRAGMENT},
 		offset     = 0,
-		size       = size_of(u32) + size_of(f32),
+		size       = size_of(u32) + size_of(f32) + 2 * size_of(u32),
 	}
 
 	mainPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -5785,12 +5789,10 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 	boneOffset: u32 = 1
 	for &instance, instanceIndex in scene.instances {
 		instanceData[instanceIndex] = {
-			model                = translate(
+			model      = translate(
 				instance.position,
 			) * quatToRotation(quatFromX(radians(instance.rotation.x)) * quatFromY(radians(instance.rotation.y)) * quatFromZ(radians(instance.rotation.z))) * scale(instance.scale),
-			boneOffset           = boneOffset,
-			textureSamplerOffset = f32(instance.textureID),
-			normalsSamplerOffset = f32(instance.normalID),
+			boneOffset = boneOffset,
 		}
 
 		model := &scene.models[instance.modelID]
@@ -5996,20 +5998,10 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 				0,
 				4 * size_of(u32),
 				raw_data(
-					[]u32 {
-						u32(instanceIndex),
-						u32(len(mesh.vertices)),
-						mesh.vertexOffset,
-						offset,
-					},
+					[]u32{u32(instanceIndex), u32(len(mesh.vertices)), mesh.vertexOffset, offset},
 				),
 			)
-			vk.CmdDispatch(
-				preComputeCommandBuffers[index],
-				u32(len(mesh.vertices)) / 64 + 1,
-				1,
-				1,
-			)
+			vk.CmdDispatch(preComputeCommandBuffers[index], u32(len(mesh.vertices)) / 64 + 1, 1, 1)
 			offset += u32(len(mesh.vertices))
 		}
 	}
@@ -6301,8 +6293,8 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 	vk.CmdBindIndexBuffer(sceneCommandBuffers[index], scene.indexBuffer.buffer, 0, .UINT32)
 
 	offset: u32 = 0
-	for &inst, instanceIndex in scene.instances {
-		for &mesh in scene.models[inst.modelID].meshes {
+	for &sceneInstance, instanceIndex in scene.instances {
+		for &mesh, meshIndex in scene.models[sceneInstance.modelID].meshes {
 			vk.CmdPushConstants(
 				sceneCommandBuffers[index],
 				pipelines[PipelineIndex.MAIN].layout,
@@ -6310,6 +6302,15 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 				0,
 				size_of(u32),
 				&offset,
+			)
+
+			vk.CmdPushConstants(
+				sceneCommandBuffers[index],
+				pipelines[PipelineIndex.MAIN].layout,
+				{.VERTEX, .FRAGMENT},
+				size_of(u32) + size_of(f32),
+				2 * size_of(u32),
+				raw_data([]u32{sceneInstance.textureIDs[meshIndex], sceneInstance.normalIDs[meshIndex]}),
 			)
 
 			vk.CmdDrawIndexed(
@@ -6405,17 +6406,6 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 		0,
 		nil,
 	)
-
-	// vk.CmdPushConstants(
-	// 	postComputeCommandBuffers[index],
-	// 	pipelines[PipelineIndex.POST].layout,
-	// 	{.COMPUTE},
-	// 	0,
-	// 	6 * size_of(f32),
-	// 	raw_data(
-	// 		[]f32{contrast, brightness, saturation, pow(f32(2.0), exposure), tonemapper, gamma},
-	// 	),
-	// )
 
 	vk.CmdPushConstants2(
 		postComputeCommandBuffers[index],
@@ -6924,9 +6914,11 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			if !imgui.TreeNode(modelInstance.name) {
 				continue
 			}
+
 			imgui.DragFloat3("Position", &modelInstance.position, 0.01)
 			imgui.DragFloat3("Rotation", &modelInstance.rotation, 5)
 			imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
+
 			if imgui.BeginCombo("Model", scene.models[modelInstance.modelID].name) {
 				for &model, i in scene.models {
 					if u32(i) != modelInstance.modelID && imgui.Selectable(model.name) {
@@ -6958,22 +6950,47 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				}
 				imgui.EndCombo()
 			}
-			if imgui.BeginCombo("Texture", scene.texturePaths[modelInstance.textureID]) {
-				for &texture, i in scene.texturePaths {
-					if u32(i) != modelInstance.textureID && imgui.Selectable(texture) {
-						modelInstance.textureID = u32(i)
-					}
+
+			imgui.SeparatorText("Meshes")
+			for &mesh, meshIndex in scene.models[modelInstance.modelID].meshes {
+				if !imgui.TreeNode(mesh.name) {
+					continue
 				}
-				imgui.EndCombo()
-			}
-			if imgui.BeginCombo("Normal Map", scene.normalPaths[modelInstance.normalID]) {
-				for &normal, i in scene.normalPaths {
-					if u32(i) != modelInstance.normalID && imgui.Selectable(normal) {
-						modelInstance.normalID = u32(i)
+				if imgui.BeginCombo(
+					"Texture",
+					scene.texturePaths[modelInstance.textureIDs[meshIndex]],
+				) {
+					for &texture, i in scene.texturePaths {
+						if u32(i) != modelInstance.textureIDs[meshIndex] &&
+						   imgui.Selectable(texture) {
+							modelInstance.textureIDs[meshIndex] = u32(i)
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Failed to wait for device idle?")
+							}
+							updateCommandBuffers(graphicsContext)
+						}
 					}
+					imgui.EndCombo()
 				}
-				imgui.EndCombo()
+				if imgui.BeginCombo(
+					"Normal Map",
+					scene.normalPaths[modelInstance.normalIDs[meshIndex]],
+				) {
+					for &normal, i in scene.normalPaths {
+						if u32(i) != modelInstance.normalIDs[meshIndex] &&
+						   imgui.Selectable(normal) {
+							modelInstance.normalIDs[meshIndex] = u32(i)
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Failed to wait for device idle?")
+							}
+							updateCommandBuffers(graphicsContext)
+						}
+					}
+					imgui.EndCombo()
+				}
+				imgui.TreePop()
 			}
+
 			animations := &scene.models[modelInstance.modelID].animations
 			if len(animations) > 0 {
 				imgui.SeparatorText("Animations")
@@ -7123,8 +7140,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					name         = fmt.caprintf("Object{:3d}", count),
 					modelID      = 0,
 					animID       = 0,
-					textureID    = 0,
-					normalID     = 0,
+					textureIDs   = {0},
+					normalIDs    = {0},
 					position     = {0, 0, 0},
 					rotation     = {0, 0, 0},
 					scale        = {0.2, 0.2, 0.2},

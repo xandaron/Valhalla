@@ -132,8 +132,12 @@
 		{
 			"name": "Bunny",
 			"model": 0,
-			"texture": 0,
-			"normal": 0,
+			"textures": [
+				0
+			],
+			"normals": [
+				0
+			],
 			"position": [
 				-0.02000000,
 				-9.71000004,
@@ -153,8 +157,12 @@
 		{
 			"name": "Box",
 			"model": 1,
-			"texture": 0,
-			"normal": 0,
+			"textures": [
+				0
+			],
+			"normals": [
+				0
+			],
 			"position": [
 				0.00000000,
 				0.00000000,

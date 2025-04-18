@@ -1,5 +1,5 @@
 {
-	"name": "Dragon Box",
+	"name": "Shambler_gltf",
 	"clear_colour": [
 		150,
 		150,
@@ -12,12 +12,12 @@
 			"name": "Main",
 			"eye": [
 				0.00000000,
-				-4.00000000,
-				18.00000000
+				0.20000000,
+				-0.50000000
 			],
 			"center": [
 				0.00000000,
-				-6.00000000,
+				0.00000000,
 				0.00000000
 			],
 			"up": [
@@ -25,9 +25,7 @@
 				1.00000000,
 				0.00000000
 			],
-			"near": 0.00000000,
-			"far": 0.00000000,
-			"distance": 17.24636841,
+			"distance": 0.44721401,
 			"fov": 45.00000000,
 			"mode": 0
 		}
@@ -37,16 +35,16 @@
 			"name": "White",
 			"position": [
 				0.00000000,
-				2.00000000,
-				7.00000000
+				0.30000001,
+				-0.30000001
 			],
 			"colour": [
 				1.00000000,
 				1.00000000,
 				1.00000000
 			],
-			"intensity": 10.00000000,
-			"rotationAngle": 10.00000000,
+			"intensity": 1.00000000,
+			"rotationAngle": 0.00000000,
 			"rotationAxis": [
 				0.00000000,
 				1.00000000,
@@ -55,47 +53,18 @@
 		}
 	],
 	"models": [
-		"./assets/models/cube/cube_inverted.fbx",
-		"./assets/models/dragon/Stanford_Dragon_V4.glb",
-		"./assets/models/dragon/Stanford_Dragon_V3.glb",
-		"./assets/models/dragon/Stanford_Dragon_V2.glb",
-		"./assets/models/dragon/Stanford_Dragon_V1.glb"
+		"./assets/models/zombie/model.glb"
 	],
 	"textures": [
-		"./assets/models/cube/texture.jpg",
-		"./assets/models/dragon/gold.jpg"
+		"./assets/models/zombie/albedo.png",
+		"./assets/textures/white.jpg"
 	],
 	"normals": [
-		"./assets/textures/normal.jpg"
+		"./assets/models/zombie/normal.png"
 	],
 	"instances": [
 		{
-			"name": "Dragon",
-			"model": 3,
-			"textures": [
-				1
-			],
-			"normals": [
-				0
-			],
-			"position": [
-				-0.02000000,
-				-13.21000004,
-				0.00000000
-			],
-			"rotation": [
-				90.00000000,
-				0.00000000,
-				0.00000000
-			],
-			"scale": [
-				60.00000000,
-				60.00000000,
-				60.00000000
-			]
-		},
-		{
-			"name": "Box",
+			"name": "Zombie",
 			"model": 0,
 			"textures": [
 				0
@@ -110,12 +79,33 @@
 			],
 			"rotation": [
 				0.00000000,
+				180.00000000,
+				0.00000000
+			],
+			"scale": [
+				0.00100000,
+				0.00100000,
+				0.00100000
+			]
+		},
+		{
+			"name": "Floor",
+			"model": -1,
+			"texture": 1,
+			"normal": -1,
+			"position": [
+				0.00000000,
+				-0.10000000,
+				0.00000000
+			],
+			"rotation": [
+				0.00000000,
 				0.00000000,
 				0.00000000
 			],
 			"scale": [
 				10.00000000,
-				10.00000000,
+				0.10000000,
 				10.00000000
 			]
 		}
