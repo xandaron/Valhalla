@@ -1934,6 +1934,7 @@ loadModels :: proc(
 				up = .POSITIVE_Y,
 				front = .POSITIVE_Z,
 			},
+			generate_missing_normals = true,
 		}
 		err: ufbx.Error
 		scene := ufbx.load_file(filename, &opts, &err)
@@ -1948,23 +1949,50 @@ loadModels :: proc(
 		boneMap := make(map[cstring]u32, scene.bones.count)
 		defer delete(boneMap)
 
-		// Why am I loading each bone one at a time? Each bone links to its child bone so cant I just find the root bone and then load all of them at once?
-		boneIndex: u32 = 0
-		for index in 0 ..< scene.nodes.count {
-			node := scene.nodes.data[index]
-			if node.attrib_type != .BONE {
-				continue
+		if scene.bones.count != 0 {
+			loadBonesRecursively :: proc(
+				node: ^ufbx.Node,
+				skeleton: ^Skeleton,
+				boneMap: ^map[cstring]u32,
+				parentIndex, skeletonOffset: u32,
+			) -> u32 {
+				skeleton[skeletonOffset] = {
+					parentIndex = parentIndex,
+				}
+				boneMap[node.name.data] = skeletonOffset
+				
+				parentIndex := skeletonOffset
+				skeletonOffset := skeletonOffset + 1
+
+				for childIndex in 0 ..< node.children.count {
+					skeletonOffset = loadBonesRecursively(
+						node.children.data[childIndex],
+						skeleton,
+						boneMap,
+						parentIndex,
+						skeletonOffset,
+					)
+				}
+				return skeletonOffset
 			}
 
-			parentIndex: u32 = 0
-			if !node.parent.is_root {
-				parentIndex = boneMap[node.parent.element.name.data]
+			// IDK if the first bone is guaranteed to be the root bone but im going to assume it is.
+			rootBone := scene.bones.data[0]
+			boneMap[rootBone.name.data] = 0
+			model.skeleton[0] = {
+				parentIndex = 0
 			}
-			model.skeleton[boneIndex] = {
-				parentIndex = parentIndex,
+			node := rootBone.instances.data[0]
+			skeletonOffset: u32 = 1
+			for childIndex in 0 ..< node.children.count {
+				skeletonOffset = loadBonesRecursively(
+					node.children.data[childIndex],
+					&model.skeleton,
+					&boneMap,
+					0,
+					skeletonOffset,
+				)
 			}
-			boneMap[node.element.name.data] = boneIndex
-			boneIndex += 1
 		}
 
 		vertexCount: uint = 0
@@ -1979,7 +2007,7 @@ loadModels :: proc(
 
 		// Originally was
 		// model.name = strings.clone_to_cstring(string(scene.meshes.data[0].element.name.data))
-		// Which seemed horrific. Has been changed to bellow but still not sure if this is really the most correct method
+		// Which seemed horrific. Has been changed to below but still not sure if this is really the most correct method
 		strLen := int(scene.meshes.data[0].element.name.length + 1) // +1 to capture null terminator
 		memPtr, _ := mem.alloc(size_of(c.char) * strLen)
 		mem.copy(memPtr, rawptr(scene.meshes.data[0].element.name.data), strLen)
@@ -2016,23 +2044,19 @@ loadModels :: proc(
 			for indiceIndex in 0 ..< mesh.num_indices {
 				indiceIndex := u32(indiceIndex)
 				vertexIndex := mesh.vertex_position.indices.data[indiceIndex]
-				pos := mesh.vertex_position.values.data[vertexIndex]
+				position := mesh.vertex_position.values.data[vertexIndex]
+				normal :=
+					mesh.vertex_normal.values.data[mesh.vertex_normal.indices.data[indiceIndex]]
 
-				uv := [2]f64{0, 0}
+				uv := [2]f32{0, 0}
 				if mesh.vertex_uv.values.count != 0 {
 					uv = mesh.vertex_uv.values.data[mesh.vertex_uv.indices.data[indiceIndex]]
 				}
 
-				norm := [3]f64{0, 1, 0}
-				if mesh.vertex_normal.values.count != 0 {
-					norm =
-						mesh.vertex_normal.values.data[mesh.vertex_normal.indices.data[indiceIndex]]
-				}
-
 				model.vertices[indiceIndex + vertexOffset] = {
-					position = {f32(pos.x), f32(pos.y), f32(pos.z)},
-					texCoord = {f32(uv.x), 1 - f32(uv.y)},
-					normal   = {f32(norm.x), f32(norm.y), f32(norm.z)},
+					position = position,
+					texCoord = {uv.x, 1 - uv.y},
+					normal   = normal,
 					weights  = {1.0, 0.0, 0.0, 0.0},
 					bones    = {0, 0, 0, 0},
 				}
@@ -2067,8 +2091,8 @@ loadModels :: proc(
 			meshIndexOffset = indiceOffset
 		}
 
-		for clusterIndex in 0 ..< scene.skin_cluster.count {
-			skinCluster := scene.skin_cluster.data[clusterIndex]
+		for clusterIndex in 0 ..< scene.skin_clusters.count {
+			skinCluster := scene.skin_clusters.data[clusterIndex]
 			bone := &model.skeleton[boneMap[skinCluster.bone_node.element.name.data]]
 			m := skinCluster.geometry_to_bone.cols
 			bone.inverseBind = {
@@ -2130,10 +2154,7 @@ loadModels :: proc(
 				for index in 0 ..< bakedNode.rotation_keys.count {
 					data := bakedNode.rotation_keys.data[index]
 					animNode.keyRotations[index].time = data.time
-					animNode.keyRotations[index].value.x = f32(data.value[0])
-					animNode.keyRotations[index].value.y = f32(data.value[1])
-					animNode.keyRotations[index].value.z = f32(data.value[2])
-					animNode.keyRotations[index].value.w = f32(data.value[3])
+					animNode.keyRotations[index].value = data.value
 				}
 
 				for index in 0 ..< bakedNode.scale_keys.count {
@@ -2239,7 +2260,7 @@ loadModels :: proc(
 		scene.models[modelIndex].vertexOffset = u32(len(scene.vertices))
 		scene.models[modelIndex].indiceOffset = u32(len(scene.indices))
 
-		switch filepath.ext(string(path))[1:] {
+		switch ext := filepath.ext(string(path))[1:]; ext {
 		case "obj":
 			fallthrough
 		case "fbx":
@@ -2248,6 +2269,8 @@ loadModels :: proc(
 			fallthrough
 		case "glb":
 			loadGLTF(graphicsContext, path, &scene.models[modelIndex])
+		case:
+			log.log(.Warning, "File formate not supported! {}", ext)
 		}
 
 		append(&scene.vertices, ..scene.models[modelIndex].vertices)
