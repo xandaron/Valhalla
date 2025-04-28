@@ -28,8 +28,8 @@ layout(binding = 3) readonly buffer TransformBuffer {
 } transformBuffer;
 
 layout(push_constant) uniform PushConstants {
-    uint vertexOffset;
 	float ambientLight;
+    uint vertexOffset;
     uint albedoTextureIndex;
     uint normalTextureIndex;
 } pushConstants;

@@ -5152,7 +5152,7 @@ createGraphicsPipelines :: proc(
 	mainPushConstant: vk.PushConstantRange = {
 		stageFlags = {.VERTEX, .FRAGMENT},
 		offset     = 0,
-		size       = size_of(u32) + size_of(f32) + 2 * size_of(u32),
+		size       = size_of(f32) + 3 * size_of(u32),
 	}
 
 	mainPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -5819,6 +5819,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 						id = 0
 					}
 				}
+
 				thisTime := node.keyPositions[instance.positionKeys[nodeIndex]].time
 				nextTime := node.keyPositions[instance.positionKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
@@ -5845,6 +5846,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 						id = 0
 					}
 				}
+
 				thisTime := node.keyRotations[instance.rotationKeys[nodeIndex]].time
 				nextTime := node.keyRotations[instance.rotationKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
@@ -5872,6 +5874,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 						id = 0
 					}
 				}
+
 				thisTime := node.keyScales[instance.scaleKeys[nodeIndex]].time
 				nextTime := node.keyScales[instance.scaleKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
@@ -5965,19 +5968,25 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 	)
 
 	offset: u32 = 0
-	for &inst, instanceIndex in scene.instances {
-		for &mesh in scene.models[inst.modelID].meshes {
+	for instanceIndex: u32 = 0; instanceIndex < u32(len(scene.instances)); instanceIndex += 1 {
+		vk.CmdPushConstants(
+			preComputeCommandBuffers[index],
+			pipelines[PipelineIndex.PRECOMPUTE].layout,
+			{.COMPUTE},
+			0,
+			1 * size_of(u32),
+			&instanceIndex,
+		)
+		for &mesh in scene.models[scene.instances[instanceIndex].modelID].meshes {
 			vk.CmdPushConstants(
 				preComputeCommandBuffers[index],
 				pipelines[PipelineIndex.PRECOMPUTE].layout,
 				{.COMPUTE},
-				0,
-				4 * size_of(u32),
-				raw_data(
-					[]u32{u32(instanceIndex), u32(len(mesh.vertices)), mesh.vertexOffset, offset},
-				),
+				1 * size_of(u32),
+				3 * size_of(u32),
+				raw_data([]u32{u32(len(mesh.vertices)), mesh.vertexOffset, offset}),
 			)
-			vk.CmdDispatch(preComputeCommandBuffers[index], u32(len(mesh.vertices)) / 64 + 1, 1, 1)
+			vk.CmdDispatch(preComputeCommandBuffers[index], u32(ceil(f32(len(mesh.vertices)) / 64.0)), 1, 1)
 			offset += u32(len(mesh.vertices))
 		}
 	}
@@ -6254,7 +6263,7 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 		sceneCommandBuffers[index],
 		pipelines[PipelineIndex.MAIN].layout,
 		{.VERTEX, .FRAGMENT},
-		size_of(u32),
+		0,
 		size_of(f32),
 		&scene.ambientLight,
 	)
@@ -6275,19 +6284,10 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 				sceneCommandBuffers[index],
 				pipelines[PipelineIndex.MAIN].layout,
 				{.VERTEX, .FRAGMENT},
-				0,
-				size_of(u32),
-				&offset,
-			)
-
-			vk.CmdPushConstants(
-				sceneCommandBuffers[index],
-				pipelines[PipelineIndex.MAIN].layout,
-				{.VERTEX, .FRAGMENT},
-				size_of(u32) + size_of(f32),
-				2 * size_of(u32),
+				size_of(f32),
+				3 * size_of(u32),
 				raw_data(
-					[]u32{sceneInstance.textureIDs[meshIndex], sceneInstance.normalIDs[meshIndex]},
+					[]u32{offset, sceneInstance.textureIDs[meshIndex], sceneInstance.normalIDs[meshIndex]},
 				),
 			)
 
