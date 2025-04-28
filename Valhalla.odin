@@ -28,11 +28,11 @@ lastFrameTime := time.now()
 @(private = "file")
 mouseMode := false
 @(private = "file")
-mousePos, mouseDelta: f64Vec2 = {0, 0}, {0, 0}
+mousePos, mouseDelta: Vec2f64 = {0, 0}, {0, 0}
 @(private = "file")
 mouseSensitivity: f64 = 1
 @(private = "file")
-scrollDelta: f64Vec2 = {0, 0}
+scrollDelta: Vec2f64 = {0, 0}
 
 @(private = "file")
 cameraAngleSpeed: f64 = 1
@@ -108,7 +108,7 @@ main :: proc() {
 
 	graphicsContext: GraphicsContext
 	engineState.graphicsContext = &graphicsContext
-	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/dragon_box.json") {
+	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/shambler_fbx.json") {
 	case .FailedToLoadSceneFile, .FailedToParseJson:
 		log.log(.Warning, "Failed to load scene file")
 	case .FailedToLoadModel:
@@ -282,7 +282,7 @@ glfwMouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, 
 
 glfwCursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	newPos: f64Vec2 = {xpos, ypos} * mouseSensitivity
+	newPos: Vec2f64 = {xpos, ypos} * mouseSensitivity
 	vector1 := mousePos
 	mouseDelta = newPos - vector1
 	mousePos = newPos
