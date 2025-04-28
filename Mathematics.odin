@@ -58,7 +58,6 @@ quatToRotation :: linalg.matrix4_from_quaternion
 
 invert :: linalg.matrix4_inverse
 
-lerp :: linalg.lerp
 quatLerp :: linalg.quaternion_nlerp
 
 pow :: linalg.pow
@@ -71,9 +70,13 @@ vector4Lerp :: proc(a, b: Vec4, t: f32) -> Vec4 {
 	return a + (b - a) * t
 }
 
-vectorLerp :: proc {
+lerp :: proc {
+	linalg.lerp,
 	vector3Lerp,
 	vector4Lerp,
+	linalg.quaternion_nlerp_f16,
+	linalg.quaternion_nlerp_f32,
+	linalg.quaternion_nlerp_f64,
 }
 
 lookAt :: proc(eye, center, up: Vec3) -> Mat4 {

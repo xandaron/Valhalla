@@ -5822,7 +5822,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 				thisTime := node.keyPositions[instance.positionKeys[nodeIndex]].time
 				nextTime := node.keyPositions[instance.positionKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
-				value := vectorLerp(
+				value := lerp(
 					node.keyPositions[instance.positionKeys[nodeIndex]].value,
 					node.keyPositions[instance.positionKeys[nodeIndex] + 1].value,
 					timeDiff,
@@ -5849,7 +5849,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 				nextTime := node.keyRotations[instance.rotationKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
 				transform *= quatToRotation(
-					quatLerp(
+					lerp(
 						node.keyRotations[instance.rotationKeys[nodeIndex]].value,
 						node.keyRotations[instance.rotationKeys[nodeIndex] + 1].value,
 						f32(timeDiff),
@@ -5875,7 +5875,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 				thisTime := node.keyScales[instance.scaleKeys[nodeIndex]].time
 				nextTime := node.keyScales[instance.scaleKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
-				value := vectorLerp(
+				value := lerp(
 					node.keyScales[instance.scaleKeys[nodeIndex]].value,
 					node.keyScales[instance.scaleKeys[nodeIndex] + 1].value,
 					timeDiff,
