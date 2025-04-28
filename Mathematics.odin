@@ -14,12 +14,12 @@ Vec2 :: linalg.Vector2f32
 Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 
-f64Vec2 :: linalg.Vector2f64
-f64Vec3 :: linalg.Vector3f64
-f64Vec4 :: linalg.Vector4f64
+Vec2f64 :: linalg.Vector2f64
+Vec3f64 :: linalg.Vector3f64
+Vec4f64 :: linalg.Vector4f64
 
 Quat :: linalg.Quaternionf32
-IQuat :: linalg.QUATERNIONF32_IDENTITY
+IQUAT :: linalg.QUATERNIONF32_IDENTITY
 
 quatFromX :: linalg.quaternion_from_euler_angle_x
 quatFromY :: linalg.quaternion_from_euler_angle_y
