@@ -57,7 +57,7 @@ void main() {
     const vec4 vertexPosition = transformBuffer.vertexTransforms[gl_VertexIndex - gl_BaseVertex + pushConstants.vertexOffset] * vec4(inPosition, 1.0);
 
     // +x = 0, -x = 1, +y = 2, -y = 3, +z = 4, -z = 5
-    switch(pushConstants.layerIndex % 6) {
+    switch (pushConstants.layerIndex % 6) {
         case 0:
             gl_Position = positiveX * vertexPosition;
             gl_Layer = int(pushConstants.layerIndex);
