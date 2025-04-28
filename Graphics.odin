@@ -2009,6 +2009,7 @@ loadModels :: proc(
 		vertexOffset := vertexOffset
 		indiceOffset := indiceOffset
 
+		model.meshes = make([]Mesh, scene.meshes.count)
 		for &mesh, meshIndex in model.meshes {
 			sceneMesh := scene.meshes.data[meshIndex]
 
