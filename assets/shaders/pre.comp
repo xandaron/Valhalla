@@ -15,7 +15,6 @@ layout(binding = 0) readonly buffer VertexBuffer {
 struct InstanceInfo {
     mat4 model;
     uint boneOffset;
-    float samplerOffset;
 };
 
 layout(binding = 1) readonly buffer InstanceBuffer {
