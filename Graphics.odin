@@ -5769,11 +5769,12 @@ updateUniformBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	scene := &scenes[activeScene]
 
-	finalBoneTransforms := make([]Mat4, scene.boneCount)
+	boneTransforms := make([]Mat4, scene.boneCount)
 	instanceData := make([]InstanceInfo, len(scene.instances))
-	defer delete(finalBoneTransforms)
+	defer delete(boneTransforms)
 	defer delete(instanceData)
-	finalBoneTransforms[0] = IMAT4
+
+	boneTransforms[0] = IMAT4
 	boneOffset: u32 = 1
 	for &instance, instanceIndex in scene.instances {
 		instanceData[instanceIndex] = {
@@ -5785,134 +5786,121 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 
 		model := &scene.models[instance.modelID]
 
-		if len(model.skeleton) == 0 {
+		// If the skeleton is empty, or the model has no animations, use the identity matrix.
+		if len(model.skeleton) == 0 || len(model.animations) == 0 {
 			instanceData[instanceIndex].boneOffset = 0
 			continue
 		}
 
 		skeleton := &model.skeleton
 
-		localBoneTransforms := make([]Mat4, len(skeleton))
-		defer delete(localBoneTransforms)
-
-		for index in 0 ..< len(skeleton) {
-			localBoneTransforms[index] = IMAT4
+		animation := model.animations[instance.animID]
+		instance.animTimer += f64(delta)
+		if instance.animTimer >= animation.duration {
+			instance.animTimer -= animation.duration
 		}
 
-		if len(model.animations) != 0 {
-			animation := model.animations[instance.animID]
-			instance.animTimer += f64(delta)
-			instance.animTimer /= animation.duration
-			instance.animTimer =
-				(instance.animTimer - floor(instance.animTimer)) * animation.duration
-			for &node, nodeIndex in animation.nodes {
-				// a *= b == a = a * b
-				// therefore I *= T *= R *= S == aT = I * T * R * S
-				if len(node.keyPositions) == 1 {
-					localBoneTransforms[node.bone] *= translate(node.keyPositions[0].value)
-				} else if len(node.keyPositions) != 0 {
-					id := instance.positionKeys[nodeIndex]
-					for true {
-						if node.keyPositions[id].time <= instance.animTimer &&
-						   instance.animTimer <= node.keyPositions[id + 1].time {
-							instance.positionKeys[nodeIndex] = id
-							break
-						}
-						id += 1
-						if id == u32(len(node.keyPositions)) - 1 {
-							id = 0
-						}
+		for &node, nodeIndex in animation.nodes {
+			transform := IMAT4
+			// a *= b == a = a * b
+			// therefore I *= T *= R *= S == aT = I * T * R * S
+			if len(node.keyPositions) == 1 {
+				transform *= translate(node.keyPositions[0].value)
+			} else if len(node.keyPositions) != 0 {
+				id := instance.positionKeys[nodeIndex]
+				for true {
+					if node.keyPositions[id].time <= instance.animTimer &&
+					   instance.animTimer <= node.keyPositions[id + 1].time {
+						instance.positionKeys[nodeIndex] = id
+						break
 					}
-					valueDiff :=
-						node.keyPositions[instance.positionKeys[nodeIndex] + 1].value -
-						node.keyPositions[instance.positionKeys[nodeIndex]].value
-					timeDiff :=
-						(instance.animTimer -
-							node.keyPositions[instance.positionKeys[nodeIndex]].time) /
-						(node.keyPositions[instance.positionKeys[nodeIndex] + 1].time -
-								node.keyPositions[instance.positionKeys[nodeIndex]].time)
-					value :=
-						f32(timeDiff) * valueDiff +
-						node.keyPositions[instance.positionKeys[nodeIndex]].value
-					localBoneTransforms[node.bone] *= translate(value)
+					id += 1
+					if id == u32(len(node.keyPositions)) - 1 {
+						id = 0
+					}
 				}
+				thisTime := node.keyPositions[instance.positionKeys[nodeIndex]].time
+				nextTime := node.keyPositions[instance.positionKeys[nodeIndex] + 1].time
+				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
+				value := lerp(
+					node.keyPositions[instance.positionKeys[nodeIndex]].value,
+					node.keyPositions[instance.positionKeys[nodeIndex] + 1].value,
+					Vec3{timeDiff, timeDiff, timeDiff},
+				)
+				transform *= translate(value)
+			}
 
-				if len(node.keyRotations) == 1 {
-					localBoneTransforms[node.bone] *= quatToRotation(node.keyRotations[0].value)
-				} else if len(node.keyRotations) != 0 {
-					id := instance.rotationKeys[nodeIndex]
-					for true {
-						if node.keyRotations[id].time <= instance.animTimer &&
-						   instance.animTimer <= node.keyRotations[id + 1].time {
-							instance.rotationKeys[nodeIndex] = id
-							break
-						}
-						id += 1
-						if id == u32(len(node.keyRotations)) - 1 {
-							id = 0
-						}
+			if len(node.keyRotations) == 1 {
+				transform *= quatToRotation(node.keyRotations[0].value)
+			} else if len(node.keyRotations) != 0 {
+				id := instance.rotationKeys[nodeIndex]
+				for true {
+					if node.keyRotations[id].time <= instance.animTimer &&
+					   instance.animTimer <= node.keyRotations[id + 1].time {
+						instance.rotationKeys[nodeIndex] = id
+						break
 					}
-					valueDiff :=
-						node.keyRotations[instance.rotationKeys[nodeIndex] + 1].value -
-						node.keyRotations[instance.rotationKeys[nodeIndex]].value
-					timeDiff :=
-						(instance.animTimer -
-							node.keyRotations[instance.rotationKeys[nodeIndex]].time) /
-						(node.keyRotations[instance.rotationKeys[nodeIndex] + 1].time -
-								node.keyRotations[instance.rotationKeys[nodeIndex]].time)
-					localBoneTransforms[node.bone] *= quatToRotation(
-						quatLerp(
-							node.keyRotations[instance.rotationKeys[nodeIndex]].value,
-							node.keyRotations[instance.rotationKeys[nodeIndex] + 1].value,
-							f32(timeDiff),
-						),
-					)
+					id += 1
+					if id == u32(len(node.keyRotations)) - 1 {
+						id = 0
+					}
 				}
+				thisTime := node.keyRotations[instance.rotationKeys[nodeIndex]].time
+				nextTime := node.keyRotations[instance.rotationKeys[nodeIndex] + 1].time
+				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
+				transform *= quatToRotation(
+					quatLerp(
+						node.keyRotations[instance.rotationKeys[nodeIndex]].value,
+						node.keyRotations[instance.rotationKeys[nodeIndex] + 1].value,
+						f32(timeDiff),
+					),
+				)
+			}
 
-				if len(node.keyScales) == 1 {
-					localBoneTransforms[node.bone] *= scale(node.keyScales[0].value)
-				} else if len(node.keyScales) != 0 {
-					id := instance.scaleKeys[nodeIndex]
-					for true {
-						if node.keyScales[id].time <= instance.animTimer &&
-						   instance.animTimer <= node.keyScales[id + 1].time {
-							instance.scaleKeys[nodeIndex] = id
-							break
-						}
-						id += 1
-						if id == u32(len(node.keyScales)) - 1 {
-							id = 0
-						}
+			if len(node.keyScales) == 1 {
+				transform *= scale(node.keyScales[0].value)
+			} else if len(node.keyScales) != 0 {
+				id := instance.scaleKeys[nodeIndex]
+				for true {
+					if node.keyScales[id].time <= instance.animTimer &&
+					   instance.animTimer <= node.keyScales[id + 1].time {
+						instance.scaleKeys[nodeIndex] = id
+						break
 					}
-					valueDiff :=
-						node.keyScales[instance.scaleKeys[nodeIndex] + 1].value -
-						node.keyScales[instance.scaleKeys[nodeIndex]].value
-					timeDiff :=
-						(instance.animTimer - node.keyScales[instance.scaleKeys[nodeIndex]].time) /
-						(node.keyScales[instance.scaleKeys[nodeIndex] + 1].time -
-								node.keyScales[instance.scaleKeys[nodeIndex]].time)
-					value :=
-						f32(timeDiff) * valueDiff +
-						node.keyScales[instance.scaleKeys[nodeIndex]].value
-					localBoneTransforms[node.bone] *= scale(value)
+					id += 1
+					if id == u32(len(node.keyScales)) - 1 {
+						id = 0
+					}
 				}
+				thisTime := node.keyScales[instance.scaleKeys[nodeIndex]].time
+				nextTime := node.keyScales[instance.scaleKeys[nodeIndex] + 1].time
+				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
+				value := lerp(
+					node.keyScales[instance.scaleKeys[nodeIndex]].value,
+					node.keyScales[instance.scaleKeys[nodeIndex] + 1].value,
+					Vec3{timeDiff, timeDiff, timeDiff},
+				)
+				transform *= scale(value)
+			}
+
+			if node.bone == 0 {
+				boneTransforms[boneOffset + node.bone] = transform
+			} else {
+				boneTransforms[boneOffset + node.bone] =
+					boneTransforms[boneOffset + skeleton[node.bone].parentIndex] * transform
 			}
 		}
 
-		finalBoneTransforms[boneOffset] = localBoneTransforms[0] * skeleton[0].inverseBind
-		for boneIndex in 1 ..< u32(len(skeleton)) {
-			localBoneTransforms[boneIndex] =
-				localBoneTransforms[skeleton[boneIndex].parentIndex] *
-				localBoneTransforms[boneIndex]
-			finalBoneTransforms[boneOffset + boneIndex] =
-				localBoneTransforms[boneIndex] * skeleton[boneIndex].inverseBind
+		for boneIndex in 0 ..< u32(len(skeleton)) {
+			boneTransforms[boneOffset + boneIndex] =
+				boneTransforms[boneOffset + boneIndex] * skeleton[boneIndex].inverseBind
 		}
 		boneOffset += u32(len(skeleton))
 	}
 
 	mem.copy(
 		scene.boneBuffers[currentFrame].mapped,
-		raw_data(finalBoneTransforms),
+		raw_data(boneTransforms),
 		scene.boneCount * size_of(Mat4),
 	)
 	mem.copy(
