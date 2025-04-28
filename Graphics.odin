@@ -5822,10 +5822,10 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 				thisTime := node.keyPositions[instance.positionKeys[nodeIndex]].time
 				nextTime := node.keyPositions[instance.positionKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
-				value := lerp(
+				value := vectorLerp(
 					node.keyPositions[instance.positionKeys[nodeIndex]].value,
 					node.keyPositions[instance.positionKeys[nodeIndex] + 1].value,
-					Vec3{timeDiff, timeDiff, timeDiff},
+					timeDiff,
 				)
 				transform *= translate(value)
 			}
@@ -5875,10 +5875,10 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 				thisTime := node.keyScales[instance.scaleKeys[nodeIndex]].time
 				nextTime := node.keyScales[instance.scaleKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
-				value := lerp(
+				value := vectorLerp(
 					node.keyScales[instance.scaleKeys[nodeIndex]].value,
 					node.keyScales[instance.scaleKeys[nodeIndex] + 1].value,
-					Vec3{timeDiff, timeDiff, timeDiff},
+					timeDiff,
 				)
 				transform *= scale(value)
 			}

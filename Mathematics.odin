@@ -63,6 +63,19 @@ quatLerp :: linalg.quaternion_nlerp
 
 pow :: linalg.pow
 
+vector3Lerp :: proc(a, b: Vec3, t: f32) -> Vec3 {
+	return a + (b - a) * t
+}
+
+vector4Lerp :: proc(a, b: Vec4, t: f32) -> Vec4 {
+	return a + (b - a) * t
+}
+
+vectorLerp :: proc {
+	vector3Lerp,
+	vector4Lerp,
+}
+
 lookAt :: proc(eye, center, up: Vec3) -> Mat4 {
 	f := normalize(center - eye)
 	s := normalize(cross(up, f))
