@@ -260,12 +260,12 @@ PipelineIndex :: enum {
 
 @(private = "file")
 Pipeline :: struct {
-	using renderPassData: RenderPass,
-	descriptorPool:       vk.DescriptorPool,
-	descriptorSets:       [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-	pipeline:             vk.Pipeline,
-	descriptorSetLayout:  vk.DescriptorSetLayout,
-	layout:               vk.PipelineLayout,
+	using _:             RenderPass,
+	descriptorPool:      vk.DescriptorPool,
+	descriptorSets:      [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	pipeline:            vk.Pipeline,
+	descriptorSetLayout: vk.DescriptorSetLayout,
+	layout:              vk.PipelineLayout,
 }
 
 @(private = "file")
