@@ -1,3 +1,5 @@
+#+private file
+
 package Valhalla
 
 import "base:runtime"

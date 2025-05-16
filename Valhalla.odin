@@ -1,3 +1,5 @@
+#+private file
+
 package Valhalla
 
 import "base:runtime"
@@ -10,46 +12,43 @@ import "core:strings"
 import "core:time"
 import "vendor:glfw"
 
+@(private = "package")
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 
+@(private = "package")
 baseDir: string
 
-@(private = "file")
 frameCount: u16 = 0
-@(private = "file")
 fpsTimer := time.now()
 
+@(private = "package")
 paused := false
-@(private = "file")
 delta: f64 = 0.0
-@(private = "file")
 lastFrameTime := time.now()
 
-@(private = "file")
 mouseMode := false
-@(private = "file")
 mousePos, mouseDelta: Vec2f64 = {0, 0}, {0, 0}
-@(private = "file")
 mouseSensitivity: f64 = 1
-@(private = "file")
 scrollDelta: Vec2f64 = {0, 0}
 
-@(private = "file")
 cameraAngleSpeed: f64 = 1
-@(private = "file")
 cameraMoveSpeed: f32 = 1
-@(private = "file")
 cameraMove: Vec3 = {0, 0, 0}
 
 // Debug
+@(private = "package")
 logger: runtime.Logger
+@(private = "package")
 showDemo := false
+@(private = "package")
 showMetrics := false
 
+@(private = "package")
 EngineState :: struct {
 	graphicsContext: ^GraphicsContext,
 }
 
+@(private = "package")
 engineState: EngineState
 
 main :: proc() {
@@ -108,7 +107,15 @@ main :: proc() {
 
 	graphicsContext: GraphicsContext
 	engineState.graphicsContext = &graphicsContext
-	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/shambler_fbx.json") {
+
+	glfwCallbacks := GLFWCallbacks{
+		keyCallback = keyCallback,
+		mouseButtonCallback = mouseButtonCallback,
+		cursorPosCallback = cursorPosCallback,
+		scrollCallback = scrollCallback,
+	}
+
+	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/shambler_fbx.json", &glfwCallbacks) {
 	case .FailedToLoadSceneFile, .FailedToParseJson:
 		log.log(.Warning, "Failed to load scene file")
 	case .FailedToLoadModel:
@@ -194,7 +201,7 @@ calcFrameRate :: proc(window: glfw.WindowHandle) {
 	}
 }
 
-glfwKeyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
+keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
 	context = runtime.default_context()
 	context.logger = logger
 	using engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
@@ -268,7 +275,7 @@ glfwKeyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, m
 	}
 }
 
-glfwMouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
+mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
 	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
 		if mouseMode {
@@ -280,7 +287,7 @@ glfwMouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, 
 	}
 }
 
-glfwCursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
+cursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
 	newPos: Vec2f64 = {xpos, ypos} * mouseSensitivity
 	vector1 := mousePos
@@ -288,7 +295,7 @@ glfwCursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 	mousePos = newPos
 }
 
-glfwScrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
+scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
 	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
 	scrollDelta = {xoffset, yoffset}
 }

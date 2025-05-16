@@ -101,6 +101,21 @@ DEPTH_BIAS_SLOPE: f32 : 1.75
 
 
 // ###################################################################
+// #                        Function Type Defs                       #
+// ###################################################################
+
+
+@(private = "package")
+KeyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32)
+@(private = "package")
+MouseButtonCallback :: #type proc "c" (window: glfw.WindowHandle, button, action, mods: i32)
+@(private = "package")
+CursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64)
+@(private = "package")
+ScrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64)
+
+
+// ###################################################################
 // #                         Data Structures                         #
 // ###################################################################
 
@@ -312,6 +327,14 @@ Camera :: struct {
 }
 
 @(private = "package")
+GLFWCallbacks :: struct {
+	keyCallback:         KeyCallback,
+	mouseButtonCallback: MouseButtonCallback,
+	cursorPosCallback:   CursorPosCallback,
+	scrollCallback:      ScrollCallback,
+}
+
+@(private = "package")
 GraphicsContext :: struct {
 	// GLFW + IMGUI
 	window:                    glfw.WindowHandle,
@@ -393,6 +416,7 @@ GraphicsContext :: struct {
 initVkGraphics :: proc(
 	using graphicsContext: ^GraphicsContext,
 	sceneFile: string = "",
+	glfwCallbacks: ^GLFWCallbacks,
 ) -> (
 	err: LoadSceneError = .None,
 ) {
@@ -411,7 +435,7 @@ initVkGraphics :: proc(
 	when ODIN_DEBUG {
 		vkSetupDebugMessenger(graphicsContext)
 	}
-	initWindow(graphicsContext)
+	initWindow(graphicsContext, glfwCallbacks)
 	pickPhysicalDevice(graphicsContext)
 	createLogicalDevice(graphicsContext)
 	createSwapchain(graphicsContext)
@@ -577,21 +601,75 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 	vk.load_proc_addresses(instance)
 }
 
-initWindow :: proc(using graphicsContext: ^GraphicsContext) {
+initWindow :: proc(using graphicsContext: ^GraphicsContext, glfwCallbacks: ^GLFWCallbacks) {
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	if window = glfw.CreateWindow(1600, 800, "Valhalla", nil, nil); window == nil {
 		log.log(.Fatal, "Failed to create window, quitting application.")
 		return
 	}
 
-	glfw.SetKeyCallback(window, glfwKeyCallback)
-	glfw.SetMouseButtonCallback(window, glfwMouseButtonCallback)
-	glfw.SetCursorPosCallback(window, glfwCursorPosCallback)
-	glfw.SetScrollCallback(window, glfwScrollCallback)
+	if glfwCallbacks != nil {
+		updateGLFWCallbacks(graphicsContext, glfwCallbacks)
+	}
+
 	if glfw.CreateWindowSurface(instance, window, nil, &surface) != .SUCCESS {
 		log.log(.Fatal, "Failed to create surface!")
 		panic("Failed to create surface!")
 	}
+}
+
+@(private = "package")
+updateGLFWCallbacks :: proc(
+	using graphicsContext: ^GraphicsContext,
+	glfwCallbacks: ^GLFWCallbacks,
+) {
+	if glfwCallbacks.keyCallback != nil {
+		glfw.SetKeyCallback(graphicsContext.window, glfwCallbacks.keyCallback)
+	}
+
+	if glfwCallbacks.mouseButtonCallback != nil {
+		glfw.SetMouseButtonCallback(graphicsContext.window, glfwCallbacks.mouseButtonCallback)
+	}
+
+	if glfwCallbacks.cursorPosCallback != nil {
+		glfw.SetCursorPosCallback(graphicsContext.window, glfwCallbacks.cursorPosCallback)
+	}
+
+	if glfwCallbacks.scrollCallback != nil {
+		glfw.SetScrollCallback(graphicsContext.window, glfwCallbacks.scrollCallback)
+	}
+}
+
+@(private = "package")
+updateGLFWKeyCallback :: proc(
+	using graphicsContext: ^GraphicsContext,
+	keyCallback: KeyCallback,
+) {
+	glfw.SetKeyCallback(graphicsContext.window, keyCallback)
+}
+
+@(private = "package")
+updateGLFWMouseButtonCallback :: proc(
+	using graphicsContext: ^GraphicsContext,
+	mouseButtonCallback: MouseButtonCallback,
+) {
+	glfw.SetMouseButtonCallback(graphicsContext.window, mouseButtonCallback)
+}
+
+@(private = "package")
+updateGLFWCursorPosCallback :: proc(
+	using graphicsContext: ^GraphicsContext,
+	cursorPosCallback: CursorPosCallback,
+) {
+	glfw.SetCursorPosCallback(graphicsContext.window, cursorPosCallback)
+}
+
+@(private = "package")
+updateGLFWScrollCallback :: proc(
+	using graphicsContext: ^GraphicsContext,
+	scrollCallback: ScrollCallback,
+) {
+	glfw.SetScrollCallback(graphicsContext.window, scrollCallback)
 }
 
 @(private = "package")
