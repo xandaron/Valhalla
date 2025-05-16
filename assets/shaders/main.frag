@@ -50,13 +50,37 @@ void main() {
         const float lightDistance = sqrt(lightSquaredDistance);
         const vec3 negativeLightDirection = relativePosition / lightDistance;
 
-        if (texture(shadowMap, vec4(-negativeLightDirection, float(index))).r + EPSILON < lightSquaredDistance) {
-            continue;
+        #define diskRadius 0.003 // The engine has a scale problem. I need to fix the scaling of objects and the world and then increase this value
+        vec3 sampleOffsetDirections[20] = vec3[](
+            vec3(1, 0, 0), vec3(-1, 0, 0),
+            vec3(0, 1, 0), vec3(0, -1, 0),
+            vec3(0, 0, 1), vec3(0, 0, -1),
+            vec3(1, 1, 0), vec3(-1, -1, 0),
+            vec3(1, -1, 0), vec3(-1, 1, 0),
+            vec3(1, 0, 1), vec3(-1, 0, -1),
+            vec3(1, 0, -1), vec3(-1, 0, 1),
+            vec3(0, 1, 1), vec3(0, -1, -1),
+            vec3(0, 1, -1), vec3(0, -1, 1),
+            vec3(1, 1, 1), vec3(-1, -1, -1)
+        );
+
+        #define BIAS 0.015
+        #define SAMPLES 20
+
+        float shadow = 0.0;
+
+        for (int i = 0; i < SAMPLES; ++i) {
+            vec3 offsetDir = diskRadius * sampleOffsetDirections[i] - relativePosition;
+            float sampleDepth = texture(shadowMap, vec4(offsetDir, float(index))).r;
+
+            if (lightSquaredDistance < sampleDepth + BIAS) shadow += 1.0;
         }
+
+        shadow /= float(SAMPLES);
 
         const float lambertainCoefficient = clamp(dot(normal, negativeLightDirection), 0.0, 1.0);
         // Should be devided by lightSquaredDistance but the light drops off too quickly and looks too dark
-        cumulativeColour += albedo * lambertainCoefficient * light.colourIntensity.xyz / lightDistance;
+        cumulativeColour += albedo * shadow * lambertainCoefficient * light.colourIntensity.xyz / lightDistance;
     }
 
     cumulativeColour = max(cumulativeColour, albedo * pushConstant.ambientLight);

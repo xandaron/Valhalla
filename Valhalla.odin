@@ -51,6 +51,7 @@ EngineState :: struct {
 @(private = "package")
 engineState: EngineState
 
+@(private = "package")
 main :: proc() {
 	{
 		// Sets the current dir to the folder above the dir of the exe file
