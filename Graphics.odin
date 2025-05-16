@@ -1,3 +1,5 @@
+#+private file
+
 package Valhalla
 
 import "base:runtime"
@@ -25,16 +27,12 @@ import vk "vendor:vulkan"
 // ###################################################################
 
 
-@(private = "file")
 UI_ENABLED: bool : true
 
-@(private = "file")
 HDR_ENABLED: bool : true
 
-@(private = "file")
 requestedLayers: []cstring : {"VK_LAYER_KHRONOS_validation"}
 
-@(private = "file")
 deviceExtensions: []cstring : {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
@@ -42,21 +40,18 @@ deviceExtensions: []cstring : {
 	vk.KHR_MULTIVIEW_EXTENSION_NAME,
 }
 
-@(private = "file")
 instanceExtensions: []cstring : {
 	vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
 	vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,
 	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
 }
 
-@(private = "file")
 vertexBindingDescription: vk.VertexInputBindingDescription : {
 	binding = 0,
 	stride = size_of(Vertex),
 	inputRate = .VERTEX,
 }
 
-@(private = "file")
 vertexInputAttributeDescriptions: []vk.VertexInputAttributeDescription : {
 	{
 		location = 0,
@@ -90,25 +85,18 @@ vertexInputAttributeDescriptions: []vk.VertexInputAttributeDescription : {
 	},
 }
 
-@(private = "file")
 GRAPHICS_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 
-@(private = "file")
 MAX_FRAMES_IN_FLIGHT: u32 : 2
 
-@(private = "file")
 RENDER_SIZE: Vec2 : {1980, 1080}
 
-@(private = "file")
 SHADOW_RESOLUTION: Vec2 : {1024, 1024}
 
-@(private = "file")
 IMAGES_RESOLUTION: Vec2 : {2048, 2048}
 
-@(private = "file")
 DEPTH_BIAS_CONSTANT: f32 : 1.25
 
-@(private = "file")
 DEPTH_BIAS_SLOPE: f32 : 1.75
 
 
@@ -117,7 +105,6 @@ DEPTH_BIAS_SLOPE: f32 : 1.75
 // ###################################################################
 
 
-@(private = "file")
 Vertex :: struct #min_field_align (16) {
 	position: Vec3,
 	texCoord: Vec2,
@@ -126,28 +113,23 @@ Vertex :: struct #min_field_align (16) {
 	weights:  Vec4,
 }
 
-@(private = "file")
 Bone :: struct {
 	parentIndex: u32,
 	inverseBind: Mat4,
 }
 
-@(private = "file")
 Skeleton :: []Bone
 
-@(private = "file")
 KeyVector :: struct {
 	time:  f64,
 	value: Vec3,
 }
 
-@(private = "file")
 KeyQuat :: struct {
 	time:  f64,
 	value: Quat,
 }
 
-@(private = "file")
 AnimationNode :: struct {
 	bone:         u32,
 	keyPositions: []KeyVector,
@@ -155,14 +137,12 @@ AnimationNode :: struct {
 	keyScales:    []KeyVector,
 }
 
-@(private = "file")
 Animation :: struct {
 	name:     cstring,
 	nodes:    []AnimationNode,
 	duration: f64,
 }
 
-@(private = "file")
 Mesh :: struct {
 	name:         cstring,
 	vertices:     []Vertex,
@@ -171,7 +151,6 @@ Mesh :: struct {
 	indiceOffset: u32,
 }
 
-@(private = "file")
 Model :: struct {
 	name:       cstring,
 	meshes:     []Mesh,
@@ -179,7 +158,6 @@ Model :: struct {
 	animations: []Animation,
 }
 
-@(private = "file")
 Image :: struct {
 	vkImage: vk.Image,
 	memory:  vk.DeviceMemory,
@@ -189,7 +167,6 @@ Image :: struct {
 }
 
 // Use Vec4 becuse of alignment issues when using Vec3
-@(private = "file")
 LightData :: struct #align (16) {
 	position:        Vec4,
 	colourIntensity: Vec4,
@@ -197,7 +174,6 @@ LightData :: struct #align (16) {
 	far:             f32,
 }
 
-@(private = "file")
 UniformBuffer :: struct #align (16) {
 	view:           Mat4,
 	projection:     Mat4,
@@ -205,34 +181,29 @@ UniformBuffer :: struct #align (16) {
 	lightCount:     u32,
 }
 
-@(private = "file")
 InstanceInfo :: struct #align (16) {
 	model:      Mat4,
 	boneOffset: u32,
 }
 
-@(private = "file")
 QueueFamilyIndices :: struct {
 	graphicsFamily: u32,
 	presentFamily:  u32,
 	computeFamily:  u32,
 }
 
-@(private = "file")
 SwapchainSupportDetails :: struct {
 	capabilities: vk.SurfaceCapabilitiesKHR,
 	formats:      []vk.SurfaceFormatKHR,
 	modes:        []vk.PresentModeKHR,
 }
 
-@(private = "file")
 Buffer :: struct {
 	buffer: vk.Buffer,
 	memory: vk.DeviceMemory,
 	mapped: rawptr,
 }
 
-@(private = "file")
 ImguiData :: struct {
 	uiContext:      ^imgui.Context,
 	frameBuffers:   []vk.Framebuffer,
@@ -241,7 +212,6 @@ ImguiData :: struct {
 	colour:         Image,
 }
 
-@(private = "file")
 RenderPass :: struct {
 	frameBuffers: []vk.Framebuffer,
 	colour:       Image,
@@ -250,7 +220,6 @@ RenderPass :: struct {
 	descriptor:   vk.DescriptorImageInfo,
 }
 
-@(private = "file")
 PipelineIndex :: enum {
 	PRECOMPUTE = 0,
 	LIGHT      = 1,
@@ -258,7 +227,6 @@ PipelineIndex :: enum {
 	POSTPROCESS       = 3,
 }
 
-@(private = "file")
 Pipeline :: struct {
 	using _:             RenderPass,
 	descriptorPool:      vk.DescriptorPool,
@@ -268,7 +236,6 @@ Pipeline :: struct {
 	layout:              vk.PipelineLayout,
 }
 
-@(private = "file")
 PointLight :: struct {
 	name:          cstring,
 	position:      Vec3,
@@ -278,7 +245,6 @@ PointLight :: struct {
 	rotationAxis:  Vec3,
 }
 
-@(private = "file")
 Instance :: struct {
 	name:         cstring,
 	position:     Vec3,
@@ -294,7 +260,6 @@ Instance :: struct {
 	animTimer:    f64,
 }
 
-@(private = "file")
 Scene :: struct {
 	filePath:              string,
 	name:                  cstring,
@@ -330,11 +295,13 @@ Scene :: struct {
 	transformBuffers:      [MAX_FRAMES_IN_FLIGHT]Buffer,
 }
 
+@(private = "package")
 CameraMode :: enum {
 	PERSPECTIVE,
 	ORTHOGRAPHIC,
 }
 
+@(private = "package")
 Camera :: struct {
 	name:            cstring,
 	eye, center, up: Vec3,
@@ -344,6 +311,7 @@ Camera :: struct {
 	mode:            CameraMode,
 }
 
+@(private = "package")
 GraphicsContext :: struct {
 	// GLFW + IMGUI
 	window:                    glfw.WindowHandle,
@@ -421,6 +389,7 @@ GraphicsContext :: struct {
 // ###################################################################
 
 
+@(private = "package")
 initVkGraphics :: proc(
 	using graphicsContext: ^GraphicsContext,
 	sceneFile: string = "",
@@ -521,7 +490,6 @@ initVkGraphics :: proc(
 	return
 }
 
-@(private = "file")
 createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 	appInfo: vk.ApplicationInfo = {
 		sType              = .APPLICATION_INFO,
@@ -609,7 +577,6 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 	vk.load_proc_addresses(instance)
 }
 
-@(private = "file")
 initWindow :: proc(using graphicsContext: ^GraphicsContext) {
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	if window = glfw.CreateWindow(1600, 800, "Valhalla", nil, nil); window == nil {
@@ -627,6 +594,7 @@ initWindow :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
+@(private = "package")
 cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	graphicsContext := graphicsContext
 	if vk.DeviceWaitIdle(device) != .SUCCESS {
@@ -750,7 +718,6 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-@(private = "file")
 findQueueFamilies :: proc(
 	physicalDevice: vk.PhysicalDevice,
 	graphicsContext: ^GraphicsContext,
@@ -800,7 +767,6 @@ findQueueFamilies :: proc(
 	return indices, true
 }
 
-@(private = "file")
 querySwapchainSupport :: proc(
 	physicalDevice: vk.PhysicalDevice,
 	graphicsContext: ^GraphicsContext,
@@ -849,7 +815,6 @@ querySwapchainSupport :: proc(
 	return
 }
 
-@(private = "file")
 pickPhysicalDevice :: proc(graphicsContext: ^GraphicsContext) {
 	scorePhysicalDevice :: proc(
 		physicalDevice: vk.PhysicalDevice,
@@ -970,7 +935,6 @@ pickPhysicalDevice :: proc(graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 	queueFamilies, _ = findQueueFamilies(physicalDevice, graphicsContext)
 
@@ -1120,7 +1084,6 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-@(private = "file")
 createSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 	chooseFormat :: proc(formats: []vk.SurfaceFormatKHR) -> (fmt: vk.SurfaceFormatKHR) {
 		fmt = formats[0]
@@ -1233,7 +1196,6 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 recreateSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 	width, height := glfw.GetFramebufferSize(window)
 	for width == 0 && height == 0 {
@@ -1256,7 +1218,6 @@ recreateSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 cleanupSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 	for imageView in swapchainImageViews {
 		vk.DestroyImageView(device, imageView, nil)
@@ -1275,7 +1236,6 @@ cleanupSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-@(private = "file")
 createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	poolInfo: vk.CommandPoolCreateInfo = {
 		sType            = .COMMAND_POOL_CREATE_INFO,
@@ -1381,7 +1341,6 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 beginSingleTimeCommands :: proc(
 	using graphicsContext: ^GraphicsContext,
 	commandPool: vk.CommandPool,
@@ -1406,7 +1365,6 @@ beginSingleTimeCommands :: proc(
 	return
 }
 
-@(private = "file")
 endSingleTimeCommands :: proc(
 	using graphicsContext: ^GraphicsContext,
 	commandBuffer: vk.CommandBuffer,
@@ -1444,7 +1402,6 @@ endSingleTimeCommands :: proc(
 // ###################################################################
 
 
-@(private = "file")
 createBuffer :: proc(
 	using graphicsContext: ^GraphicsContext,
 	size: int,
@@ -1488,7 +1445,6 @@ createBuffer :: proc(
 	vk.BindBufferMemory(device, buffer^, bufferMemory^, 0)
 }
 
-@(private = "file")
 loadBufferToGPU :: proc(
 	using graphicsContext: ^GraphicsContext,
 	bufferSize: int,
@@ -1536,7 +1492,6 @@ loadBufferToGPU :: proc(
 }
 
 // Useful to have a function for this so I can update allocators easily in the future.
-@(private = "file")
 cleanupBuffer :: proc(using graphicsContext: ^GraphicsContext, buffer: ^Buffer) {
 	vk.DestroyBuffer(device, buffer.buffer, nil)
 	vk.FreeMemory(device, buffer.memory, nil)
@@ -1548,7 +1503,6 @@ cleanupBuffer :: proc(using graphicsContext: ^GraphicsContext, buffer: ^Buffer) 
 // ###################################################################
 
 
-@(private = "file")
 findMemoryType :: proc(
 	using graphicsContext: ^GraphicsContext,
 	typeFilter: u32,
@@ -1566,7 +1520,6 @@ findMemoryType :: proc(
 	panic("Failed to find suitable memory type!")
 }
 
-@(private = "file")
 createImage :: proc(
 	using graphicsContext: ^GraphicsContext,
 	image: ^Image,
@@ -1626,7 +1579,6 @@ createImage :: proc(
 	}
 }
 
-@(private = "file")
 createImageView :: proc(
 	using graphicsContext: ^GraphicsContext,
 	image: vk.Image,
@@ -1660,7 +1612,6 @@ createImageView :: proc(
 	return imageView
 }
 
-@(private = "file")
 transitionImageLayout :: proc(
 	using graphicsContext: ^GraphicsContext,
 	commandBuffer: vk.CommandBuffer,
@@ -1752,7 +1703,6 @@ transitionImageLayout :: proc(
 	)
 }
 
-@(private = "file")
 copyBufferToImage :: proc(
 	using graphicsContext: ^GraphicsContext,
 	commandBuffer: vk.CommandBuffer,
@@ -1776,7 +1726,6 @@ copyBufferToImage :: proc(
 	vk.CmdCopyBufferToImage(commandBuffer, buffer, image, .TRANSFER_DST_OPTIMAL, 1, &region)
 }
 
-@(private = "file")
 copyBufferToTextureArray :: proc(
 	using graphicsContext: ^GraphicsContext,
 	commandBuffer: vk.CommandBuffer,
@@ -1813,7 +1762,6 @@ copyBufferToTextureArray :: proc(
 	)
 }
 
-@(private = "file")
 copyImage :: proc(
 	commandBuffer: vk.CommandBuffer,
 	extent: vk.Extent3D,
@@ -1830,7 +1778,6 @@ copyImage :: proc(
 	vk.CmdCopyImage(commandBuffer, srcImage, srcLayout, dstImage, dstLayout, 1, &region)
 }
 
-@(private = "file")
 upscaleImage :: proc(
 	commandBuffer: vk.CommandBuffer,
 	src, dst: vk.Image,
@@ -1872,7 +1819,6 @@ upscaleImage :: proc(
 	)
 }
 
-@(private = "file")
 createSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 	samplers = make([]vk.Sampler, 2)
 	samplerInfo: vk.SamplerCreateInfo = {
@@ -1910,7 +1856,6 @@ createSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 cleanupSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 	for &sampler in samplers {
 		vk.DestroySampler(device, sampler, nil)
@@ -1924,7 +1869,6 @@ cleanupSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-@(private = "file")
 loadModels :: proc(
 	using graphicsContext: ^GraphicsContext,
 	sceneIndex: u32,
@@ -2306,7 +2250,6 @@ loadModels :: proc(
 	}
 }
 
-@(private = "file")
 loadImages :: proc(using graphicsContext: ^GraphicsContext, image: ^Image, imagePaths: []cstring) {
 	imageCount := u32(len(imagePaths))
 	image.format = .R8G8B8A8_SRGB
@@ -2456,7 +2399,6 @@ loadImages :: proc(using graphicsContext: ^GraphicsContext, image: ^Image, image
 	image.sampler = 1
 }
 
-@(private = "file")
 addImages :: proc(
 	using graphicsContext: ^GraphicsContext,
 	image: ^Image,
@@ -2657,7 +2599,6 @@ addImages :: proc(
 }
 
 // Useful to have a function for this so I can update allocators easily in the future.
-@(private = "file")
 cleanupImage :: proc(using graphicsContext: ^GraphicsContext, image: ^Image) {
 	vk.DestroyImageView(device, image.view, nil)
 	vk.DestroyImage(device, image.vkImage, nil)
@@ -2670,6 +2611,7 @@ cleanupImage :: proc(using graphicsContext: ^GraphicsContext, image: ^Image) {
 // ###################################################################
 
 
+@(private = "package")
 LoadSceneError :: enum {
 	None,
 	FailedToLoadSceneFile,
@@ -2678,7 +2620,6 @@ LoadSceneError :: enum {
 	FailedToLoadTexture,
 }
 
-@(private = "file")
 loadSceneAssets :: proc(
 	using graphicsContext: ^GraphicsContext,
 	sceneIndex: u32,
@@ -2790,9 +2731,9 @@ loadSceneAssets :: proc(
 	return
 }
 
-// ATM we cant have a truly "empty" scene as we have to make buffers and images that must exist.
+// ATM we can't have a truly "empty" scene as we have to make buffers and images that must exist.
 // It might be possible to make the buffers optional to solve this?
-@(private = "file")
+// I've heard of bindless buffers and images. Maybe that could be a solution?
 createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
 	index := u32(len(scenes))
 
@@ -2857,7 +2798,6 @@ createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
 	loadSceneAssets(graphicsContext, index)
 }
 
-@(private = "file")
 InstanceJSON :: struct {
 	name:     cstring `json:name`,
 	model:    i32 `json:model`,
@@ -2868,7 +2808,6 @@ InstanceJSON :: struct {
 	scale:    Vec3 `json:scale`,
 }
 
-@(private = "file")
 SceneJSON :: struct {
 	name:          cstring `json:name`,
 	clear_colour:  [4]i32 `json:clear_colour`,
@@ -2881,7 +2820,6 @@ SceneJSON :: struct {
 	instances:     []InstanceJSON `json:instances`,
 }
 
-@(private = "file")
 saveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[sceneIndex]
 
@@ -2930,6 +2868,7 @@ saveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	}
 }
 
+@(private = "package")
 loadScene :: proc(
 	using graphicsContext: ^GraphicsContext,
 	sceneFile: string,
@@ -3017,6 +2956,7 @@ loadScene :: proc(
 	return
 }
 
+@(private = "package")
 closeScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	if vk.DeviceWaitIdle(device) != .SUCCESS {
 		panic("Failed to wait for device idle?")
@@ -3028,6 +2968,7 @@ closeScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	}
 }
 
+@(private = "package")
 setActiveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	paused = true
 
@@ -3042,7 +2983,6 @@ setActiveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32)
 	updateCommandBuffers(graphicsContext)
 }
 
-@(private = "file")
 cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := scenes[sceneIndex]
 
@@ -3131,7 +3071,6 @@ cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 // ###################################################################
 
 
-@(private = "file")
 createGraphicsDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	// SHADOW
 	{
@@ -3352,7 +3291,6 @@ createGraphicsDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 updateGraphicsDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	// MAIN
 	{
@@ -3382,7 +3320,6 @@ updateGraphicsDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	// PRECOMPUTE
 	{
@@ -3618,7 +3555,6 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	// POSTPROCESS PROCESSING
 	{
@@ -3764,7 +3700,6 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 updateSceneDescriptorSets :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[activeScene]
 
@@ -3999,7 +3934,6 @@ updateSceneDescriptorSets :: proc(using graphicsContext: ^GraphicsContext, scene
 	}
 }
 
-@(private = "file")
 updateSceneInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[sceneIndex]
 
@@ -4170,7 +4104,6 @@ updateSceneInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, scene
 	}
 }
 
-@(private = "file")
 updateSceneInstanceModel :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[sceneIndex]
 
@@ -4279,7 +4212,6 @@ updateSceneInstanceModel :: proc(using graphicsContext: ^GraphicsContext, sceneI
 	}
 }
 
-@(private = "file")
 updateSceneModels :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[sceneIndex]
 
@@ -4333,7 +4265,6 @@ updateSceneModels :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u
 	}
 }
 
-@(private = "file")
 updateSceneTextures :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[sceneIndex]
 
@@ -4368,7 +4299,6 @@ updateSceneTextures :: proc(using graphicsContext: ^GraphicsContext, sceneIndex:
 	}
 }
 
-@(private = "file")
 updateSceneNormals :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[sceneIndex]
 
@@ -4403,7 +4333,6 @@ updateSceneNormals :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: 
 	}
 }
 
-@(private = "file")
 updateSceneLights :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	scene := &scenes[sceneIndex]
 	updateShadowMapFrameBuffer(graphicsContext)
@@ -4507,7 +4436,6 @@ updateSceneLights :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u
 // ###################################################################
 
 
-@(private = "file")
 createSyncObjects :: proc(using graphicsContext: ^GraphicsContext) {
 	inFlightFrames = make([]vk.Fence, MAX_FRAMES_IN_FLIGHT)
 	preComputeFinished = make([]vk.Semaphore, MAX_FRAMES_IN_FLIGHT)
@@ -4549,7 +4477,6 @@ createSyncObjects :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-@(private = "file")
 findSupportedDepthFormat :: proc(
 	using graphicsContext: ^GraphicsContext,
 	candidates: []vk.Format,
@@ -4569,7 +4496,6 @@ findSupportedDepthFormat :: proc(
 	panic("Failed to find supported format!")
 }
 
-@(private = "file")
 createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 	// SHADOW
 	{
@@ -4779,7 +4705,6 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 createMainFramebuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	frameBufferInfo: vk.FramebufferCreateInfo = {
 		sType           = .FRAMEBUFFER_CREATE_INFO,
@@ -4813,7 +4738,6 @@ createMainFramebuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	scene := &scenes[activeScene]
 
@@ -4917,7 +4841,6 @@ createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 updateShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	for index in 0 ..< swapchainImageCount {
 		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
@@ -4929,7 +4852,6 @@ updateShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	createShadowMapFrameBuffer(graphicsContext)
 }
 
-@(private = "file")
 createShaderModule :: proc(
 	using graphicsContext: ^GraphicsContext,
 	filename: string,
@@ -4967,7 +4889,6 @@ createShaderModule :: proc(
 	return
 }
 
-@(private = "file")
 createGraphicsPipelines :: proc(
 	using graphicsContext: ^GraphicsContext,
 	pipelineCache: vk.PipelineCache = 0,
@@ -5329,7 +5250,6 @@ createGraphicsPipelines :: proc(
 	pipelines[PipelineIndex.MAIN].pipeline = vkPipelines[1]
 }
 
-@(private = "file")
 createComputePipelines :: proc(
 	using graphicsContext: ^GraphicsContext,
 	pipelineCache: vk.PipelineCache = 0,
@@ -5464,7 +5384,6 @@ createComputePipelines :: proc(
 // ###################################################################
 
 
-@(private = "file")
 initImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	imgui.CHECKVERSION()
 
@@ -5503,7 +5422,6 @@ initImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	imguiData.uiContext = imgui.CreateContext()
 	io := imgui.GetIO()
@@ -5667,7 +5585,6 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	implVulkan.Shutdown()
 	implGLFW.Shutdown()
@@ -5689,7 +5606,6 @@ cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-@(private = "file")
 updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	scene := &scenes[activeScene]
 
@@ -5729,7 +5645,6 @@ updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	)
 }
 
-@(private = "file")
 updateUniformBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	scene := &scenes[activeScene]
 
@@ -5763,7 +5678,6 @@ updateUniformBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	mem.copy(uniformBuffers[currentFrame].mapped, &viewProjection, size_of(UniformBuffer))
 }
 
-@(private = "file")
 updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	scene := &scenes[activeScene]
 
@@ -5911,7 +5825,6 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 	)
 }
 
-@(private = "file")
 updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	if vk.DeviceWaitIdle(device) != .SUCCESS {
 		panic("Failed to wait device idle?")
@@ -5933,7 +5846,6 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	scene := &scenes[activeScene]
 
@@ -5995,7 +5907,6 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 	}
 }
 
-@(private = "file")
 updatePreComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.ResetCommandBuffer(preComputeCommandBuffers[bufferIndex], {})
@@ -6003,7 +5914,6 @@ updatePreComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 recordMainGraphicsBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	scene := &scenes[activeScene]
 
@@ -6107,7 +6017,6 @@ recordMainGraphicsBuffer :: proc(using graphicsContext: ^GraphicsContext, index:
 	}
 }
 
-@(private = "file")
 updateMainGraphicsBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
@@ -6115,7 +6024,6 @@ updateMainGraphicsBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	scene := &scenes[activeScene]
 
@@ -6209,7 +6117,6 @@ recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u3
 	}
 }
 
-@(private = "file")
 updateShadowMapBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
@@ -6217,7 +6124,6 @@ updateShadowMapBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	scene := &scenes[activeScene]
 
@@ -6308,7 +6214,6 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 	}
 }
 
-@(private = "file")
 updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
@@ -6316,7 +6221,6 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	scene := &scenes[activeScene]
 
@@ -6509,7 +6413,6 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 	}
 }
 
-@(private = "file")
 updatePostComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
@@ -6517,7 +6420,6 @@ updatePostComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "file")
 recordUIBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
@@ -6604,7 +6506,6 @@ recordUIBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	}
 }
 
-@(private = "file")
 drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 	constructMenuBar :: proc(using graphicsContext: ^GraphicsContext) {
 		scene := &scenes[activeScene]
@@ -7164,6 +7065,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 	imgui.EndFrame()
 }
 
+@(private = "package")
 drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	vk.WaitForFences(device, 1, &inFlightFrames[currentFrame], true, max(u64))
 
