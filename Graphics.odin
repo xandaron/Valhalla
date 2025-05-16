@@ -252,10 +252,10 @@ RenderPass :: struct {
 
 @(private = "file")
 PipelineIndex :: enum {
-	LIGHT      = 0,
-	MAIN       = 1,
-	PRECOMPUTE = 2,
-	POST       = 3,
+	PRECOMPUTE = 0,
+	LIGHT      = 1,
+	MAIN       = 2,
+	POSTPROCESS       = 3,
 }
 
 @(private = "file")
@@ -720,12 +720,12 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.MAIN].layout, nil)
 	vk.DestroyRenderPass(device, pipelines[PipelineIndex.MAIN].renderPass, nil)
 
-	// POST
-	vk.DestroyDescriptorPool(device, pipelines[PipelineIndex.POST].descriptorPool, nil)
-	vk.DestroyDescriptorSetLayout(device, pipelines[PipelineIndex.POST].descriptorSetLayout, nil)
+	// POSTPROCESS
+	vk.DestroyDescriptorPool(device, pipelines[PipelineIndex.POSTPROCESS].descriptorPool, nil)
+	vk.DestroyDescriptorSetLayout(device, pipelines[PipelineIndex.POSTPROCESS].descriptorSetLayout, nil)
 
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.POST].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.POST].layout, nil)
+	vk.DestroyPipeline(device, pipelines[PipelineIndex.POSTPROCESS].pipeline, nil)
+	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.POSTPROCESS].layout, nil)
 
 	delete(pipelines)
 
@@ -3483,7 +3483,7 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 		}
 	}
 
-	// POST PROCESSING
+	// POSTPROCESS PROCESSING
 	{
 		layoutBindings: []vk.DescriptorSetLayoutBinding = {
 			{
@@ -3535,7 +3535,7 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 			   device,
 			   &layoutInfo,
 			   nil,
-			   &pipelines[PipelineIndex.POST].descriptorSetLayout,
+			   &pipelines[PipelineIndex.POSTPROCESS].descriptorSetLayout,
 		   ) !=
 		   .SUCCESS {
 			log.log(.Error, "Failed to create compute descriptor set layout!")
@@ -3562,7 +3562,7 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 			   device,
 			   &poolInfo,
 			   nil,
-			   &pipelines[PipelineIndex.POST].descriptorPool,
+			   &pipelines[PipelineIndex.POSTPROCESS].descriptorPool,
 		   ) !=
 		   .SUCCESS {
 			log.log(.Error, "Failed to create descriptor pool!")
@@ -3572,13 +3572,13 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 		layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
 		defer delete(layouts)
 		for &layout in layouts {
-			layout = pipelines[PipelineIndex.POST].descriptorSetLayout
+			layout = pipelines[PipelineIndex.POSTPROCESS].descriptorSetLayout
 		}
 
 		allocInfo: vk.DescriptorSetAllocateInfo = {
 			sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
 			pNext              = nil,
-			descriptorPool     = pipelines[PipelineIndex.POST].descriptorPool,
+			descriptorPool     = pipelines[PipelineIndex.POSTPROCESS].descriptorPool,
 			descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
 			pSetLayouts        = raw_data(layouts),
 		}
@@ -3586,7 +3586,7 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 		if vk.AllocateDescriptorSets(
 			   device,
 			   &allocInfo,
-			   raw_data(pipelines[PipelineIndex.POST].descriptorSets[:]),
+			   raw_data(pipelines[PipelineIndex.POSTPROCESS].descriptorSets[:]),
 		   ) !=
 		   .SUCCESS {
 			log.log(.Error, "Failed to allocate compute descriptor sets!")
@@ -3603,7 +3603,7 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 			descriptorWrite: vk.WriteDescriptorSet = {
 				sType            = .WRITE_DESCRIPTOR_SET,
 				pNext            = nil,
-				dstSet           = pipelines[PipelineIndex.POST].descriptorSets[index],
+				dstSet           = pipelines[PipelineIndex.POSTPROCESS].descriptorSets[index],
 				dstBinding       = 2,
 				dstArrayElement  = 0,
 				descriptorCount  = 1,
@@ -3620,7 +3620,7 @@ createComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 
 @(private = "file")
 updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
-	// POST PROCESSING
+	// POSTPROCESS PROCESSING
 	{
 		inImage.format = .R16G16B16A16_SFLOAT
 		createImage(
@@ -3706,7 +3706,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 				{
 					sType = .WRITE_DESCRIPTOR_SET,
 					pNext = nil,
-					dstSet = pipelines[PipelineIndex.POST].descriptorSets[index],
+					dstSet = pipelines[PipelineIndex.POSTPROCESS].descriptorSets[index],
 					dstBinding = 0,
 					dstArrayElement = 0,
 					descriptorCount = 1,
@@ -3718,7 +3718,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 				{
 					sType = .WRITE_DESCRIPTOR_SET,
 					pNext = nil,
-					dstSet = pipelines[PipelineIndex.POST].descriptorSets[index],
+					dstSet = pipelines[PipelineIndex.POSTPROCESS].descriptorSets[index],
 					dstBinding = 1,
 					dstArrayElement = 0,
 					descriptorCount = 1,
@@ -3730,7 +3730,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 				{
 					sType = .WRITE_DESCRIPTOR_SET,
 					pNext = nil,
-					dstSet = pipelines[PipelineIndex.POST].descriptorSets[index],
+					dstSet = pipelines[PipelineIndex.POSTPROCESS].descriptorSets[index],
 					dstBinding = 2,
 					dstArrayElement = 0,
 					descriptorCount = 1,
@@ -3742,7 +3742,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 				{
 					sType = .WRITE_DESCRIPTOR_SET,
 					pNext = nil,
-					dstSet = pipelines[PipelineIndex.POST].descriptorSets[index],
+					dstSet = pipelines[PipelineIndex.POSTPROCESS].descriptorSets[index],
 					dstBinding = 3,
 					dstArrayElement = 0,
 					descriptorCount = 1,
@@ -3978,7 +3978,7 @@ updateSceneDescriptorSets :: proc(using graphicsContext: ^GraphicsContext, scene
 			{
 				sType = .WRITE_DESCRIPTOR_SET,
 				pNext = nil,
-				dstSet = pipelines[PipelineIndex.POST].descriptorSets[index],
+				dstSet = pipelines[PipelineIndex.POSTPROCESS].descriptorSets[index],
 				dstBinding = 4,
 				dstArrayElement = 0,
 				descriptorCount = 1,
@@ -4481,7 +4481,7 @@ updateSceneLights :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u
 			{
 				sType = .WRITE_DESCRIPTOR_SET,
 				pNext = nil,
-				dstSet = pipelines[PipelineIndex.POST].descriptorSets[index],
+				dstSet = pipelines[PipelineIndex.POSTPROCESS].descriptorSets[index],
 				dstBinding = 4,
 				dstArrayElement = 0,
 				descriptorCount = 1,
@@ -5325,9 +5325,8 @@ createGraphicsPipelines :: proc(
 		panic("Failed to create pipeline!")
 	}
 
-	for pipeline, i in vkPipelines {
-		pipelines[i].pipeline = pipeline
-	}
+	pipelines[PipelineIndex.LIGHT].pipeline = vkPipelines[0]
+	pipelines[PipelineIndex.MAIN].pipeline = vkPipelines[1]
 }
 
 @(private = "file")
@@ -5388,7 +5387,7 @@ createComputePipelines :: proc(
 		basePipelineIndex  = 0,
 	}
 
-	// POST PROCESSING
+	// POSTPROCESS PROCESSING
 	postPushConstants: vk.PushConstantRange = {
 		stageFlags = {.COMPUTE},
 		offset     = 0,
@@ -5400,7 +5399,7 @@ createComputePipelines :: proc(
 		pNext                  = nil,
 		flags                  = {},
 		setLayoutCount         = 1,
-		pSetLayouts            = &pipelines[PipelineIndex.POST].descriptorSetLayout,
+		pSetLayouts            = &pipelines[PipelineIndex.POSTPROCESS].descriptorSetLayout,
 		pushConstantRangeCount = 1,
 		pPushConstantRanges    = &postPushConstants,
 	}
@@ -5409,7 +5408,7 @@ createComputePipelines :: proc(
 		   device,
 		   &postPipelineLayoutInfo,
 		   nil,
-		   &pipelines[PipelineIndex.POST].layout,
+		   &pipelines[PipelineIndex.POSTPROCESS].layout,
 	   ) !=
 	   .SUCCESS {
 		log.log(.Error, "Failed to create postprocess pipeline layout!")
@@ -5435,7 +5434,7 @@ createComputePipelines :: proc(
 		pNext              = nil,
 		flags              = {},
 		stage              = postShaderStageInfo,
-		layout             = pipelines[PipelineIndex.POST].layout,
+		layout             = pipelines[PipelineIndex.POSTPROCESS].layout,
 		basePipelineHandle = {},
 		basePipelineIndex  = 0,
 	}
@@ -5455,9 +5454,8 @@ createComputePipelines :: proc(
 		panic("Failed to create pipeline!")
 	}
 
-	for pipeline, i in vkPipelines {
-		pipelines[i + 2].pipeline = pipeline
-	}
+	pipelines[PipelineIndex.PRECOMPUTE].pipeline = vkPipelines[0]
+	pipelines[PipelineIndex.POSTPROCESS].pipeline = vkPipelines[1]
 }
 
 
@@ -6377,10 +6375,10 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 	vk.CmdBindDescriptorSets(
 		postComputeCommandBuffers[index],
 		.COMPUTE,
-		pipelines[PipelineIndex.POST].layout,
+		pipelines[PipelineIndex.POSTPROCESS].layout,
 		0,
 		1,
-		&pipelines[PipelineIndex.POST].descriptorSets[currentFrame],
+		&pipelines[PipelineIndex.POSTPROCESS].descriptorSets[currentFrame],
 		0,
 		nil,
 	)
@@ -6390,7 +6388,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 		&vk.PushConstantsInfo {
 			sType = .PUSH_CONSTANTS_INFO,
 			pNext = nil,
-			layout = pipelines[PipelineIndex.POST].layout,
+			layout = pipelines[PipelineIndex.POSTPROCESS].layout,
 			stageFlags = {.COMPUTE},
 			offset = 0,
 			size = 6 * size_of(f32),
@@ -6413,7 +6411,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 		&vk.PushConstantsInfo {
 			sType = .PUSH_CONSTANTS_INFO,
 			pNext = nil,
-			layout = pipelines[PipelineIndex.POST].layout,
+			layout = pipelines[PipelineIndex.POSTPROCESS].layout,
 			stageFlags = {.COMPUTE},
 			offset = 6 * size_of(f32),
 			size = size_of(b32),
@@ -6424,7 +6422,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 	vk.CmdBindPipeline(
 		postComputeCommandBuffers[index],
 		.COMPUTE,
-		pipelines[PipelineIndex.POST].pipeline,
+		pipelines[PipelineIndex.POSTPROCESS].pipeline,
 	)
 
 	vk.CmdDispatch(
