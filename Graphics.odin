@@ -31,16 +31,16 @@ UI_ENABLED: bool : true
 
 HDR_ENABLED: bool : true
 
-requestedLayers: []cstring : {"VK_LAYER_KHRONOS_validation"}
+REQUESTED_LAYERS: []cstring : {"VK_LAYER_KHRONOS_validation"}
 
-deviceExtensions: []cstring : {
+DEVICE_EXTENSIONS: []cstring : {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
 	vk.EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
 	vk.KHR_MULTIVIEW_EXTENSION_NAME,
 }
 
-instanceExtensions: []cstring : {
+INSTANCE_EXTENSIONS: []cstring : {
 	vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
 	vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,
 	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
@@ -86,17 +86,11 @@ vertexInputAttributeDescriptions: []vk.VertexInputAttributeDescription : {
 }
 
 GRAPHICS_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
-
 MAX_FRAMES_IN_FLIGHT: u32 : 2
-
 RENDER_SIZE: Vec2 : {1980, 1080}
-
 SHADOW_RESOLUTION: Vec2 : {512, 512}
-
 IMAGES_RESOLUTION: Vec2 : {2048, 2048}
-
 DEPTH_BIAS_CONSTANT: f32 : 1.25
-
 DEPTH_BIAS_SLOPE: f32 : 1.75
 
 
@@ -546,7 +540,7 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	when ODIN_DEBUG {
-		instance_extension_outer_loop: for name in instanceExtensions {
+		instance_extension_outer_loop: for name in INSTANCE_EXTENSIONS {
 			for &extension in availableExtensions {
 				if (name == cstring(&extension.extensionName[0])) {
 					append(&supportedExtensions, name)
@@ -939,7 +933,7 @@ pickPhysicalDevice :: proc(graphicsContext: ^GraphicsContext) {
 			raw_data(availableExtensions),
 		)
 
-		outer_loop: for name in deviceExtensions {
+		outer_loop: for name in DEVICE_EXTENSIONS {
 			for &extension in availableExtensions {
 				if (name == cstring(&extension.extensionName[0])) {
 					continue outer_loop
@@ -1125,7 +1119,7 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 		synchronization2 = true,
 	}
 
-	requiredDeviceExtensions := deviceExtensions
+	requiredDeviceExtensions := DEVICE_EXTENSIONS
 	createInfo: vk.DeviceCreateInfo = {
 		sType                   = .DEVICE_CREATE_INFO,
 		pNext                   = &sync2,
