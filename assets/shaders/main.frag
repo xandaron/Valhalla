@@ -29,8 +29,8 @@ layout(location = 2) in vec3 inNormal;
 layout(location = 0) out vec4 outColour;
 
 layout(push_constant) uniform PushConstants {
-    uint vertexOffset;
 	float ambientLight;
+    uint vertexOffset;
     uint albedoTextureIndex;
     uint normalTextureIndex;
 } pushConstant;
@@ -50,8 +50,9 @@ void main() {
         const float lightDistance = sqrt(lightSquaredDistance);
         const vec3 negativeLightDirection = relativePosition / lightDistance;
 
-        #define diskRadius 0.003 // The engine has a scale problem. I need to fix the scaling of objects and the world and then increase this value
-        vec3 sampleOffsetDirections[20] = vec3[](
+        #define diskRadius 0.02 // The engine has a scale problem. I need to fix the scaling of objects and the world and then increase this value
+        #define SAMPLES 20
+        vec3 sampleOffsetDirections[SAMPLES] = vec3[](
             vec3(1, 0, 0), vec3(-1, 0, 0),
             vec3(0, 1, 0), vec3(0, -1, 0),
             vec3(0, 0, 1), vec3(0, 0, -1),
@@ -65,7 +66,6 @@ void main() {
         );
 
         #define BIAS 0.015
-        #define SAMPLES 20
 
         float shadow = 0.0;
 
@@ -83,6 +83,6 @@ void main() {
         cumulativeColour += albedo * shadow * lambertainCoefficient * light.colourIntensity.xyz / lightDistance;
     }
 
-    cumulativeColour = max(cumulativeColour, albedo * pushConstant.ambientLight);
+    cumulativeColour = max(cumulativeColour, pushConstant.ambientLight * albedo);
     outColour =  vec4(cumulativeColour, 1.0);
 }
