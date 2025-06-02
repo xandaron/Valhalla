@@ -1942,6 +1942,7 @@ cleanupSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
+// TODO: Use Assimp to load models so I can load muiltiple file types using the same function.
 loadModels :: proc(
 	using graphicsContext: ^GraphicsContext,
 	sceneIndex: u32,
@@ -2191,6 +2192,7 @@ loadModels :: proc(
 		}
 	}
 
+	// TODO: I haven't implemented bones and animations for GLTF yet
 	loadGLTF :: proc(filename: cstring, model: ^Model, vertexOffset, indiceOffset: u32) {
 		copyData :: proc(accessor: ^cgltf.accessor, dst: rawptr) {
 			bufferView := accessor.buffer_view
@@ -2230,6 +2232,8 @@ loadModels :: proc(
 		vertexOffset := vertexOffset
 		indiceOffset := indiceOffset
 		for &mesh, meshIndex in model.meshes {
+			mesh.name = fmt.caprint(file.meshes[meshIndex].name)
+
 			for &primative in file.meshes[meshIndex].primitives {
 				if primative.type != .triangles {
 					continue
@@ -2294,18 +2298,14 @@ loadModels :: proc(
 		modelIndex := modelOffset + index
 
 		switch ext := filepath.ext(string(path))[1:]; ext {
-		case "obj":
-			fallthrough
-		case "fbx":
+		case "obj", "fbx":
 			loadFBX(
 				path,
 				&scene.models[modelIndex],
 				u32(len(scene.vertices)),
 				u32(len(scene.indices)),
 			)
-		case "gltf":
-			fallthrough
-		case "glb":
+		case "gltf", "glb":
 			loadGLTF(
 				path,
 				&scene.models[modelIndex],
