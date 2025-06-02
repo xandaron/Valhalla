@@ -46,13 +46,13 @@ INSTANCE_EXTENSIONS: []cstring : {
 	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
 }
 
-vertexBindingDescription: vk.VertexInputBindingDescription : {
+VERTEX_BINDING_DESCRIPTION: vk.VertexInputBindingDescription : {
 	binding = 0,
 	stride = size_of(Vertex),
 	inputRate = .VERTEX,
 }
 
-vertexInputAttributeDescriptions: []vk.VertexInputAttributeDescription : {
+VERTEX_ATTRIBUTE_DESCRIPTION: []vk.VertexInputAttributeDescription : {
 	{
 		location = 0,
 		binding = 0,
@@ -571,7 +571,7 @@ createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 		layers := make([]vk.LayerProperties, layerCount)
 		defer delete(layers)
 		vk.EnumerateInstanceLayerProperties(&layerCount, raw_data(layers))
-		instance_layers_outer_loop: for name in requestedLayers {
+		instance_layers_outer_loop: for name in REQUESTED_LAYERS {
 			for &layer in layers {
 				if name == cstring(&layer.layerName[0]) {
 					append(&supportedLayers, name)
@@ -1134,8 +1134,8 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	when ODIN_DEBUG {
-		createInfo.enabledLayerCount = u32(len(requestedLayers))
-		createInfo.ppEnabledLayerNames = raw_data(requestedLayers)
+		createInfo.enabledLayerCount = u32(len(REQUESTED_LAYERS))
+		createInfo.ppEnabledLayerNames = raw_data(REQUESTED_LAYERS)
 	}
 
 	if vk.CreateDevice(physicalDevice, &createInfo, nil, &device) != .SUCCESS {
@@ -4969,7 +4969,7 @@ createGraphicsPipelines :: proc(
 	pipelineInfos := make([]vk.GraphicsPipelineCreateInfo, pipelineCount)
 	defer delete(pipelineInfos)
 
-	vertexBindingDescription := vertexBindingDescription
+	vertexBindingDescription := VERTEX_BINDING_DESCRIPTION
 
 	// SHADOW PIPELINE
 	shadowPushConstants: vk.PushConstantRange = {
@@ -5036,8 +5036,8 @@ createGraphicsPipelines :: proc(
 			flags = {},
 			vertexBindingDescriptionCount = 1,
 			pVertexBindingDescriptions = &vertexBindingDescription,
-			vertexAttributeDescriptionCount = u32(len(vertexInputAttributeDescriptions)),
-			pVertexAttributeDescriptions = raw_data(vertexInputAttributeDescriptions),
+			vertexAttributeDescriptionCount = u32(len(VERTEX_ATTRIBUTE_DESCRIPTION)),
+			pVertexAttributeDescriptions = raw_data(VERTEX_ATTRIBUTE_DESCRIPTION),
 		},
 		pInputAssemblyState = &{
 			sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -5206,8 +5206,8 @@ createGraphicsPipelines :: proc(
 			flags = {},
 			vertexBindingDescriptionCount = 1,
 			pVertexBindingDescriptions = &vertexBindingDescription,
-			vertexAttributeDescriptionCount = u32(len(vertexInputAttributeDescriptions)),
-			pVertexAttributeDescriptions = raw_data(vertexInputAttributeDescriptions),
+			vertexAttributeDescriptionCount = u32(len(VERTEX_ATTRIBUTE_DESCRIPTION)),
+			pVertexAttributeDescriptions = raw_data(VERTEX_ATTRIBUTE_DESCRIPTION),
 		},
 		pInputAssemblyState = &{
 			sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
