@@ -258,6 +258,7 @@ Instance :: struct {
 	name:         cstring,
 	position:     Vec3,
 	rotation:     Vec3,
+	scaleUniform: bool,
 	scale:        Vec3,
 	modelID:      u32,
 	animID:       u32,
@@ -6866,7 +6867,16 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 
 			imgui.DragFloat3("Position", &modelInstance.position, 0.01)
 			imgui.DragFloat3("Rotation", &modelInstance.rotation, 5)
-			imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
+
+			imgui.Checkbox("Scale Uniformly", &modelInstance.scaleUniform)
+			if modelInstance.scaleUniform {
+				imgui.DragFloat("Scale", &modelInstance.scale.x, 0.001)
+				modelInstance.scale.y = modelInstance.scale.x
+				modelInstance.scale.z = modelInstance.scale.x
+			}
+			else {
+				imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
+			}
 
 			if imgui.BeginCombo("Model", scene.models[modelInstance.modelID].name) {
 				for &model, i in scene.models {
