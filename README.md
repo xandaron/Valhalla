@@ -19,14 +19,13 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 
 ### Prerequisites
 
-- Odin programming language
-  - Install Odin from [here](https://odin-lang.org/docs/install/)
-- VulkanSDK (recommended for development)
-  - Install VulkanSDK from [here](https://vulkan.lunarg.com/) to use validation layers
+- [Odin](https://odin-lang.org/docs/install/) programming language
+- [VulkanSDK](https://vulkan.lunarg.com/) (recommended for development)
 
 ### Setup
 
 Run the following script to clone the repository, build the project and run the exe:
+
 ```sh
 git clone https://github.com/xandaron/valhalla.git
 cd valhalla
