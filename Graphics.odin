@@ -6442,7 +6442,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 		transitionImageLayout(
 			graphicsContext,
 			postComputeCommandBuffers[index],
-			swapchainImages[imageIndex],
+			swapchainImages[index],
 			.UNDEFINED,
 			.TRANSFER_DST_OPTIMAL,
 			{.COLOR},
@@ -6472,7 +6472,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 		transitionImageLayout(
 			graphicsContext,
 			postComputeCommandBuffers[index],
-			swapchainImages[imageIndex],
+			swapchainImages[index],
 			.TRANSFER_DST_OPTIMAL,
 			.PRESENT_SRC_KHR,
 			{.COLOR},
