@@ -50,7 +50,7 @@ void main() {
         const float lightDistance = sqrt(lightSquaredDistance);
         const vec3 negativeLightDirection = relativePosition / lightDistance;
 
-        #define diskRadius 0.02 // The engine has a scale problem. I need to fix the scaling of objects and the world and then increase this value
+        #define diskRadius 0.02
         #define SAMPLES 20
         vec3 sampleOffsetDirections[SAMPLES] = vec3[](
             vec3(1, 0, 0), vec3(-1, 0, 0),
@@ -73,16 +73,17 @@ void main() {
             vec3 offsetDir = diskRadius * sampleOffsetDirections[i] - relativePosition;
             float sampleDepth = texture(shadowMap, vec4(offsetDir, float(index))).r;
 
-            if (lightSquaredDistance < sampleDepth + BIAS) shadow += 1.0;
+            if (lightSquaredDistance < sampleDepth + BIAS) {
+                shadow += 1.0;
+            }
         }
 
         shadow /= float(SAMPLES);
 
         const float lambertainCoefficient = clamp(dot(normal, negativeLightDirection), 0.0, 1.0);
-        // Should be devided by lightSquaredDistance but the light drops off too quickly and looks too dark
-        cumulativeColour += albedo * shadow * lambertainCoefficient * light.colourIntensity.xyz / lightDistance;
+        cumulativeColour += shadow * lambertainCoefficient * light.colourIntensity.xyz / lightDistance;
     }
 
-    cumulativeColour = max(cumulativeColour, pushConstant.ambientLight * albedo);
-    outColour =  vec4(cumulativeColour, 1.0);
+    cumulativeColour = max(cumulativeColour, vec3(pushConstant.ambientLight, pushConstant.ambientLight, pushConstant.ambientLight));
+    outColour =  vec4(albedo * cumulativeColour, 1.0);
 }

@@ -7017,7 +7017,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 		if imgui.DragInt4("Clear Colour", &scene.clearColour) {
 			updateCommandBuffers(graphicsContext)
 		}
-		if imgui.DragFloat("Ambient Light", &scene.ambientLight, 0.0001) {
+		if imgui.DragFloat("Ambient Light", &scene.ambientLight, 0.001) {
 			updateCommandBuffers(graphicsContext)
 		}
 		if imgui.Checkbox("Draw Light Sources", &drawLights) {
