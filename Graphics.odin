@@ -62,15 +62,10 @@ VERTEX_ATTRIBUTE_DESCRIPTION: []vk.VertexInputAttributeDescription : {
 	{
 		location = 1,
 		binding = 0,
-		format = .R32G32_SFLOAT,
-		offset = u32(offset_of(Vertex, texCoord)),
-	},
-	{
-		location = 2,
-		binding = 0,
 		format = .R32G32B32_SFLOAT,
 		offset = u32(offset_of(Vertex, normal)),
 	},
+	{location = 2, binding = 0, format = .R32G32_SFLOAT, offset = u32(offset_of(Vertex, uv))},
 	{
 		location = 3,
 		binding = 0,
@@ -116,8 +111,8 @@ ScrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64)
 
 Vertex :: struct #min_field_align (16) {
 	position: Vec3,
-	texCoord: Vec2,
 	normal:   Vec3,
+	uv:       Vec2,
 	bones:    [4]u32,
 	weights:  Vec4,
 }
@@ -2264,10 +2259,10 @@ loadModels :: proc(
 					#partial switch attribute.type {
 					case .position:
 						copyData(attribute.data, &vertices[0].position)
-					case .texcoord:
-						copyData(attribute.data, &vertices[0].texCoord)
 					case .normal:
 						copyData(attribute.data, &vertices[0].normal)
+					case .texcoord:
+						copyData(attribute.data, &vertices[0].uv)
 					}
 				}
 			}
@@ -2275,8 +2270,8 @@ loadModels :: proc(
 			mesh.vertices = make([]Vertex, len(vertices))
 			for &vertex, index in mesh.vertices {
 				vertex.position = vertices[index].position
-				vertex.texCoord = vertices[index].texCoord
 				vertex.normal = vertices[index].normal
+				vertex.uv = vertices[index].uv
 				vertex.bones = vertices[index].bones
 				vertex.weights = {1, 0, 0, 0}
 			}
@@ -2872,13 +2867,14 @@ createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 InstanceJSON :: struct {
-	name:     cstring `json:name`,
-	model:    i32 `json:model`,
-	textures: []i32 `json:textures`,
-	normals:  []i32 `json:normals`,
-	position: Vec3 `json:position`,
-	rotation: Vec3 `json:rotation`,
-	scale:    Vec3 `json:scale`,
+	name:         cstring `json:name`,
+	model:        i32 `json:model`,
+	textures:     []i32 `json:textures`,
+	normals:      []i32 `json:normals`,
+	position:     Vec3 `json:position`,
+	rotation:     Vec3 `json:rotation`,
+	scaleUniform: bool `json:scale_uniform`,
+	scale:        Vec3 `json:scale`,
 }
 
 SceneJSON :: struct {
@@ -2919,13 +2915,14 @@ saveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 		}
 
 		sceneInfo.instances[index] = {
-			name     = instance.name,
-			model    = i32(instance.modelID) - 1,
-			textures = textureIDs,
-			normals  = normalIDs,
-			position = instance.position,
-			rotation = instance.rotation,
-			scale    = instance.scale,
+			name         = instance.name,
+			model        = i32(instance.modelID) - 1,
+			textures     = textureIDs,
+			normals      = normalIDs,
+			position     = instance.position,
+			rotation     = instance.rotation,
+			scaleUniform = instance.scaleUniform,
+			scale        = instance.scale,
 		}
 	}
 
@@ -2989,13 +2986,14 @@ loadScene :: proc(
 		}
 
 		scene.instances[instanceIndex] = {
-			name       = instance.name,
-			modelID    = u32(instance.model + 1),
-			textureIDs = textureIDs[:],
-			normalIDs  = normalIDs[:],
-			position   = instance.position,
-			rotation   = instance.rotation,
-			scale      = instance.scale,
+			name         = instance.name,
+			modelID      = u32(instance.model + 1),
+			textureIDs   = textureIDs[:],
+			normalIDs    = normalIDs[:],
+			position     = instance.position,
+			rotation     = instance.rotation,
+			scaleUniform = instance.scaleUniform,
+			scale        = instance.scale,
 		}
 	}
 
