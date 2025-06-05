@@ -15,7 +15,7 @@ import "vendor:glfw"
 @(private = "package")
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 
-LOG_TO_FILE := false
+LOG_TO_FILE :: false
 
 @(private = "package")
 baseDir: string
