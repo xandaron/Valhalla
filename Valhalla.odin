@@ -15,6 +15,8 @@ import "vendor:glfw"
 @(private = "package")
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 
+LOG_TO_FILE := false
+
 @(private = "package")
 baseDir: string
 
@@ -35,9 +37,10 @@ cameraAngleSpeed: f64 = 1
 cameraMoveSpeed: f32 = 1
 cameraMove: Vec3 = {0, 0, 0}
 
-// Debug
 @(private = "package")
-logger: runtime.Logger
+runtimeContext: runtime.Context
+
+// Debug
 @(private = "package")
 showDemo := false
 @(private = "package")
@@ -53,36 +56,32 @@ engineState: EngineState
 
 @(private = "package")
 main :: proc() {
-	{
-		// Sets the current dir to the folder above the dir of the exe file
-		dashCount: u32 = 0
-		s0, _ := filepath.abs(os.args[0])
-		defer delete(s0)
-		s1 := filepath.dir(s0)
-		defer delete(s1)
-		baseDir = filepath.dir(s1)
-		if err := os.set_current_directory(baseDir); err != os.ERROR_NONE {
-			fmt.printfln(
-				"Failed to set current directory to '{}': {}",
-				baseDir,
-				err,
-			)
-		}
+	// Sets the current dir to the folder above the dir of the exe file
+	absExePath, _ := filepath.abs(os.args[0], context.temp_allocator)
+	baseDir = filepath.dir(
+		filepath.dir(absExePath, context.temp_allocator),
+		context.temp_allocator,
+	)
+	if err := os.set_current_directory(baseDir); err != os.ERROR_NONE {
+		fmt.printfln("Failed to set directory to '%s': %s", baseDir, err)
+		panic("Failed to set directory!")
 	}
-	defer delete(baseDir)
 
 	when ODIN_DEBUG {
-		logPath := createLogPath()
-		if logHandle, err := os.open(logPath, os.O_WRONLY | os.O_CREATE); err == 0 {
-			logger = log.create_multi_logger(
-				log.create_console_logger(),
-				// log.create_file_logger(logHandle),
-			)
+		when LOG_TO_FILE {
+			logPath := createLogPath()
+			if logHandle, err := os.open(logPath, os.O_WRONLY | os.O_CREATE); err == 0 {
+				context.logger = log.create_multi_logger(
+					log.create_console_logger(),
+					log.create_file_logger(logHandle),
+				)
+			} else {
+				context.logger = log.create_multi_logger(log.create_console_logger())
+				log.logf(.Warning, "Log file could not be created! Filename: {}", logPath)
+			}
 		} else {
-			logger = log.create_multi_logger(log.create_console_logger())
-			log.logf(.Warning, "Log file could not be created! Filename: {}", logPath)
+			context.logger = log.create_multi_logger(log.create_console_logger())
 		}
-		context.logger = logger
 		defer log.destroy_multi_logger(context.logger)
 
 		tracker: mem.Tracking_Allocator
@@ -105,18 +104,24 @@ main :: proc() {
 			mem.tracking_allocator_destroy(&tracker)
 		}
 	}
+	runtimeContext = context
+	free_all(context.temp_allocator)
 
 	graphicsContext: GraphicsContext
 	engineState.graphicsContext = &graphicsContext
 
-	glfwCallbacks := GLFWCallbacks{
-		keyCallback = keyCallback,
+	glfwCallbacks := GLFWCallbacks {
+		keyCallback         = keyCallback,
 		mouseButtonCallback = mouseButtonCallback,
-		cursorPosCallback = cursorPosCallback,
-		scrollCallback = scrollCallback,
+		cursorPosCallback   = cursorPosCallback,
+		scrollCallback      = scrollCallback,
 	}
 
-	#partial switch initVkGraphics(&graphicsContext, "./assets/scenes/shambler_fbx.json", &glfwCallbacks) {
+	#partial switch initVkGraphics(
+		&graphicsContext,
+		"./assets/scenes/shambler_fbx.json",
+		&glfwCallbacks,
+	) {
 	case .FailedToLoadSceneFile, .FailedToParseJson:
 		log.log(.Warning, "Failed to load scene file")
 	case .FailedToLoadModel:
@@ -151,7 +156,7 @@ main :: proc() {
 					axis -= cross(camera.up, forward)
 				}
 				rotation := rotation3(f32(radians(cameraAngleSpeed)), axis)
-				forward =  rotation * forward
+				forward = rotation * forward
 				camera.eye = camera.center - forward
 				mouseDelta = {0, 0}
 			}
@@ -203,8 +208,7 @@ calcFrameRate :: proc(window: glfw.WindowHandle) {
 }
 
 keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
-	context = runtime.default_context()
-	context.logger = logger
+	context = runtimeContext
 	using engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
 	switch key {
 	case glfw.KEY_ESCAPE:

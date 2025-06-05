@@ -51,8 +51,7 @@ createLogPath :: proc() -> string {
 
 @(private = "package")
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
-	context = runtime.default_context()
-	context.logger = logger
+	context = runtimeContext
 	log.logf(.Error, "[GLFW Error]: {}", string(desc))
 }
 
@@ -69,8 +68,7 @@ vkDebugCallback :: proc "system" (
 	pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
 	pUserData: rawptr,
 ) -> b32 {
-	context = runtime.default_context()
-	context.logger = logger
+	context = runtimeContext
 	log.logf(
 		vkDecodeSeverity(messageSeverity),
 		"Vulkan validation layer ({}):\n{}\n",
@@ -165,12 +163,11 @@ vkPopulateDebugMessengerCreateInfo :: proc() -> (createInfo: vk.DebugUtilsMessen
 
 @(private = "package")
 imguiCheckVkResult :: proc "c" (err: vk.Result) {
-	context = runtime.default_context()
-	logger = context.logger
-	if int(err) == 0 { return }
+	context = runtimeContext
+	if int(err) == 0 {return}
 	if int(err) < 0 {
-		log.logf(.Fatal, "Imgui-Vulkan: VkResult = {}", err)
+		log.logf(.Fatal, "Imgui-Vulkan: VkResult = %i", err)
 		panic("Imgui error")
 	}
-	log.logf(.Error, "Imgui-Vulkan: VkResult = {}", err)
+	log.logf(.Error, "Imgui-Vulkan: VkResult = %i", err)
 }
