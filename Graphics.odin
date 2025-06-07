@@ -2813,12 +2813,14 @@ createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
 	scene.instances[0] = {
 		name       = strings.clone_to_cstring("cube"),
 		modelID    = 0,
-		textureIDs = {0},
-		normalIDs  = {0},
+		textureIDs = make([]u32, 1),
+		normalIDs  = make([]u32, 1),
 		position   = {0, 0, 0},
 		rotation   = {0, 0, 0},
 		scale      = {0.2, 0.2, 0.2},
 	}
+	scene.instances[0].textureIDs[0] = 0
+	scene.instances[0].normalIDs[0] = 0
 
 	scene.pointLights = make([dynamic]PointLight, 1)
 	scene.pointLights[0] = {
