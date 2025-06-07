@@ -58,10 +58,7 @@ engineState: EngineState
 main :: proc() {
 	// Sets the current dir to the folder above the dir of the exe file
 	absExePath, _ := filepath.abs(os.args[0], context.temp_allocator)
-	baseDir = filepath.dir(
-		filepath.dir(absExePath, context.temp_allocator),
-		context.temp_allocator,
-	)
+	baseDir = filepath.dir(filepath.dir(absExePath, context.temp_allocator))
 	if err := os.set_current_directory(baseDir); err != os.ERROR_NONE {
 		fmt.printfln("Failed to set directory to '%s': %s", baseDir, err)
 		panic("Failed to set directory!")
@@ -119,7 +116,7 @@ main :: proc() {
 
 	#partial switch initVkGraphics(
 		&graphicsContext,
-		"./assets/scenes/shambler_fbx.json",
+		"./assets/scenes/shambler_gltf.json",
 		&glfwCallbacks,
 	) {
 	case .FailedToLoadSceneFile, .FailedToParseJson:
