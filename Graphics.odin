@@ -2,6 +2,7 @@
 
 package Valhalla
 
+import ai "assimp"
 import "base:runtime"
 import "core:c"
 import "core:encoding/json"
@@ -15,8 +16,6 @@ import "imgui"
 import implGLFW "imgui/imgui_impl_glfw"
 import implVulkan "imgui/imgui_impl_vulkan"
 import tinyfd "tinyfiledialogs"
-import "ufbx"
-import "vendor:cgltf"
 import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -109,7 +108,7 @@ ScrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64)
 // ###################################################################
 
 
-Vertex :: struct #min_field_align (16) {
+Vertex :: struct #min_field_align(16) {
 	position: Vec3,
 	normal:   Vec3,
 	uv:       Vec2,
@@ -135,7 +134,6 @@ KeyQuat :: struct {
 }
 
 AnimationNode :: struct {
-	bone:         u32,
 	keyPositions: []KeyVector,
 	keyRotations: []KeyQuat,
 	keyScales:    []KeyVector,
@@ -171,21 +169,21 @@ Image :: struct {
 }
 
 // Use Vec4 becuse of alignment issues when using Vec3
-LightData :: struct #align (16) {
+LightData :: struct #align(16) {
 	position:        Vec4,
 	colourIntensity: Vec4,
 	near:            f32,
 	far:             f32,
 }
 
-UniformBuffer :: struct #align (16) {
+UniformBuffer :: struct #align(16) {
 	view:           Mat4,
 	projection:     Mat4,
 	viewProjection: Mat4,
 	lightCount:     u32,
 }
 
-InstanceInfo :: struct #align (16) {
+InstanceInfo :: struct #align(16) {
 	model:      Mat4,
 	boneOffset: u32,
 }
@@ -225,10 +223,10 @@ RenderPass :: struct {
 }
 
 PipelineIndex :: enum {
-	PRECOMPUTE = 0,
-	LIGHT      = 1,
-	MAIN       = 2,
-	POSTPROCESS       = 3,
+	PRECOMPUTE  = 0,
+	LIGHT       = 1,
+	MAIN        = 2,
+	POSTPROCESS = 3,
 }
 
 Pipeline :: struct {
@@ -631,10 +629,7 @@ updateGLFWCallbacks :: proc(
 }
 
 @(private = "package")
-updateGLFWKeyCallback :: proc(
-	using graphicsContext: ^GraphicsContext,
-	keyCallback: KeyCallback,
-) {
+updateGLFWKeyCallback :: proc(using graphicsContext: ^GraphicsContext, keyCallback: KeyCallback) {
 	glfw.SetKeyCallback(graphicsContext.window, keyCallback)
 }
 
@@ -758,7 +753,11 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 
 	// POSTPROCESS
 	vk.DestroyDescriptorPool(device, pipelines[PipelineIndex.POSTPROCESS].descriptorPool, nil)
-	vk.DestroyDescriptorSetLayout(device, pipelines[PipelineIndex.POSTPROCESS].descriptorSetLayout, nil)
+	vk.DestroyDescriptorSetLayout(
+		device,
+		pipelines[PipelineIndex.POSTPROCESS].descriptorSetLayout,
+		nil,
+	)
 
 	vk.DestroyPipeline(device, pipelines[PipelineIndex.POSTPROCESS].pipeline, nil)
 	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.POSTPROCESS].layout, nil)
@@ -1943,344 +1942,354 @@ loadModels :: proc(
 	sceneIndex: u32,
 	modelPaths: []cstring,
 ) {
-	loadFBX :: proc(filename: cstring, model: ^Model, vertexOffset, indiceOffset: u32) {
-		opts: ufbx.Load_Opts = {
-			target_axes = ufbx.Coordinate_Axes {
-				right = .POSITIVE_X,
-				up = .POSITIVE_Y,
-				front = .POSITIVE_Z,
-			},
-			generate_missing_normals = true,
+	loadModel :: proc(filename: cstring, model: ^Model, vertexOffset, indiceOffset: u32) {
+		aiStringToCstring :: proc(aiStr: ^ai.String, allocator := context.allocator) -> cstring {
+			strLen := int(aiStr.length) / size_of(c.char)
+			memPtr, _ := mem.alloc(size_of(c.char) * (strLen + 1), allocator = allocator)
+			mem.copy(memPtr, rawptr(&aiStr.data), strLen)
+			(^u8)(uintptr(memPtr) + uintptr(strLen * size_of(c.char)))^ = 0 // Null terminate the string
+			return cstring(memPtr)
 		}
-		err: ufbx.Error
-		scene := ufbx.load_file(filename, &opts, &err)
-		if err.type != .NONE || scene == nil {
-			log.logf(.Error, "Failed to load FBX file! Reason\n{}", err.description.data)
-			panic("Failed to load FBX file!")
+
+		aiQuaternionToQuat :: proc(aiQuat: ^ai.Quaternion) -> (ret: Quat) {
+			ret.x = aiQuat.x
+			ret.y = aiQuat.y
+			ret.z = aiQuat.z
+			ret.w = aiQuat.w
+			return
 		}
-		defer ufbx.free_scene(scene)
 
-		model.skeleton = make(Skeleton, scene.bones.count)
-
-		boneMap := make(map[cstring]u32, scene.bones.count)
-		defer delete(boneMap)
-
-		if scene.bones.count != 0 {
-			loadBonesRecursively :: proc(
-				node: ^ufbx.Node,
-				skeleton: ^Skeleton,
-				boneMap: ^map[cstring]u32,
-				parentIndex, skeletonOffset: u32,
-			) -> u32 {
-				skeleton[skeletonOffset] = {
-					parentIndex = parentIndex,
-				}
-				boneMap[node.name.data] = skeletonOffset
-
-				parentIndex := skeletonOffset
-				skeletonOffset := skeletonOffset + 1
-
-				for childIndex in 0 ..< node.children.count {
-					skeletonOffset = loadBonesRecursively(
-						node.children.data[childIndex],
-						skeleton,
-						boneMap,
-						parentIndex,
-						skeletonOffset,
-					)
-				}
-				return skeletonOffset
-			}
-
-			// IDK if the first bone is guaranteed to be the root bone but im going to assume it is.
-			rootBone := scene.bones.data[0]
-			boneMap[rootBone.name.data] = 0
-			model.skeleton[0] = {
-				parentIndex = 0,
-			}
-			node := rootBone.instances.data[0] // Get the node that the bone belongs to
-			skeletonOffset: u32 = 1
-			for childIndex in 0 ..< node.children.count {
-				skeletonOffset = loadBonesRecursively(
-					node.children.data[childIndex],
-					&model.skeleton,
-					&boneMap,
-					0,
-					skeletonOffset,
-				)
+		aiMatrixToMat4 :: proc(aiMat: ^ai.Matrix4x4) -> Mat4 {
+			return {
+				aiMat.a1,
+				aiMat.a2,
+				aiMat.a3,
+				aiMat.a4,
+				aiMat.b1,
+				aiMat.b2,
+				aiMat.b3,
+				aiMat.b4,
+				aiMat.c1,
+				aiMat.c2,
+				aiMat.c3,
+				aiMat.c4,
+				aiMat.d1,
+				aiMat.d2,
+				aiMat.d3,
+				aiMat.d4,
 			}
 		}
 
-		// Originally was
-		// model.name = strings.clone_to_cstring(string(scene.meshes.data[0].element.name.data))
-		// Which seemed horrific. Has been changed to below but still not sure if this is really the most correct method
-		strLen := int(scene.meshes.data[0].element.name.length + 1) // +1 to capture null terminator
-		memPtr, _ := mem.alloc(size_of(c.char) * strLen)
-		mem.copy(memPtr, rawptr(scene.meshes.data[0].element.name.data), strLen)
-		model.name = cstring(memPtr)
+		// I could make this persistent but I don't think I need to
+		propertyStore := ai.CreatePropertyStore()
+
+		// Stops Assimp from checking the area of faces preventing it from culling faces that are too small
+		ai.SetImportPropertyInteger(propertyStore, ai.AI_CONFIG_PP_FD_CHECKAREA, 0)
+
+		// Maximum number of bones per vertex
+		ai.SetImportPropertyInteger(propertyStore, ai.AI_CONFIG_PP_LBW_MAX_WEIGHTS, 4)
+
+		// Remove point and line primitives
+		ai.SetImportPropertyInteger(
+			propertyStore,
+			ai.AI_CONFIG_PP_SBP_REMOVE,
+			i32(ai.Primitive_Type_Flags{.POINT, .LINE}),
+		)
+
+		// Remove scene components that I don't need
+		ai.SetImportPropertyInteger(
+			propertyStore,
+			ai.AI_CONFIG_PP_RVC_FLAGS,
+			i32(
+				ai.Component_Flags {
+					.TANGENTS_AND_BITANGENTS,
+					.COLORS,
+					.TEXTURES,
+					.LIGHTS,
+					.CAMERAS,
+					.MATERIALS,
+				},
+			),
+		)
+
+		defer ai.ReleasePropertyStore(propertyStore)
+
+		IMPORT_FLAGS :: ai.Post_Process_Step_Flags {
+			.JoinIdenticalVertices,
+			.MakeLeftHanded,
+			.Triangulate,
+			.RemoveComponent,
+			.GenNormals,
+			// This seems like a good idea.
+			.SplitLargeMeshes,
+			.LimitBoneWeights,
+			// Maybe we should use this and add logging.
+			// .ValidateDataStructure,
+			// I don't think I need this right now. Maybe in the future.
+			// .ImproveCacheLocality,
+			.SortByPType,
+			.FindDegenerates,
+			.FindInvalidData,
+			.GenUVCoords,
+			// Not sure how necessary this is.
+			.OptimizeMeshes,
+			.OptimizeGraph,
+			.FlipUVs,
+			.FlipWindingOrder,
+			// I might want this in the future.
+			// .GenBoundingBoxes,
+		}
+
+		scene := ai.ImportFileExWithProperties(filename, IMPORT_FLAGS, nil, propertyStore)
+		if scene == nil {
+			log.logf(.Error, "Failed to load file: %s", ai.GetErrorString())
+			panic("Failed to load file!")
+		}
+		defer ai.FreeScene(scene)
+
+		if scene.mNumMeshes == 0 {
+			log.logf(.Error, "Model has no meshes!")
+			return
+		}
 
 		vertexOffset := vertexOffset
 		indiceOffset := indiceOffset
 
-		model.meshes = make([]Mesh, scene.meshes.count)
+		model.meshes = make([]Mesh, scene.mNumMeshes)
+		boneCount: u32 = 0
 		for &mesh, meshIndex in model.meshes {
-			sceneMesh := scene.meshes.data[meshIndex]
+			sceneMesh := scene.mMeshes[meshIndex]
 
-			lenVertices := u32(scene.meshes.data[meshIndex].num_indices)
-			lenIndices := u32(scene.meshes.data[meshIndex].num_triangles * 3)
+			if .TRIANGLE not_in sceneMesh.mPrimitiveTypes {
+				continue
+			}
 
 			mesh = {
-				vertices     = make([]Vertex, lenVertices),
-				indices      = make([]u32, lenIndices),
+				vertices     = make([]Vertex, u32(sceneMesh.mNumVertices)),
+				indices      = make([]u32, u32(sceneMesh.mNumFaces * 3)),
 				vertexOffset = vertexOffset,
 				indiceOffset = indiceOffset,
 			}
 
-			strLen := int(scene.meshes.data[meshIndex].name.length + 1) // +1 to capture null terminator
-			memPtr, _ := mem.alloc(size_of(c.char) * strLen)
-			mem.copy(memPtr, rawptr(scene.meshes.data[meshIndex].name.data), strLen)
-			mesh.name = cstring(memPtr)
-
-			vertexOffset += lenVertices
-			indiceOffset += lenIndices
-
-			index: u32 = 0
-			for faceIndex in 0 ..< sceneMesh.faces.count {
-				face := sceneMesh.faces.data[faceIndex]
-				triangulatedIndiceCount := (face.num_indices - 2) * 3
-
-				err: ufbx.Panic
-				tris := ufbx.catch_triangulate_face(
-					&err,
-					raw_data(mesh.indices[index:index + triangulatedIndiceCount]),
-					uint(triangulatedIndiceCount),
-					sceneMesh,
-					face,
-				)
-
-				if err.did_panic {
-					errMessage := transmute(string)err.message[0:err.message_length]
-					log.log(.Error, errMessage)
-					panic(errMessage)
-				}
-				index += triangulatedIndiceCount
-			}
-
-			for indiceIndex in 0 ..< sceneMesh.num_indices {
-				vertexIndex := sceneMesh.vertex_position.indices.data[indiceIndex]
-				position := sceneMesh.vertex_position.values.data[vertexIndex]
-				normal :=
-					sceneMesh.vertex_normal.values.data[sceneMesh.vertex_normal.indices.data[indiceIndex]]
-
-				uv := [2]f32{0, 0}
-				if sceneMesh.vertex_uv.values.count != 0 {
-					uv =
-						sceneMesh.vertex_uv.values.data[sceneMesh.vertex_uv.indices.data[indiceIndex]]
-				}
-
-				mesh.vertices[indiceIndex] = {
-					position = position,
-					texCoord = {uv.x, 1 - uv.y},
-					normal   = normal,
-					weights  = {1.0, 0.0, 0.0, 0.0},
-					bones    = {0, 0, 0, 0},
-				}
-
-				if sceneMesh.skin_deformers.count != 0 {
-					deformer := sceneMesh.skin_deformers.data[0]
-					numWeights :=
-						deformer.vertices.data[vertexIndex].num_weights <= 4 ? deformer.vertices.data[vertexIndex].num_weights : 4
-					firstWeightIndex := deformer.vertices.data[vertexIndex].weight_begin
-
-					for weightIndex in 0 ..< numWeights {
-						skinWeight := deformer.weights.data[firstWeightIndex + weightIndex]
-						boneName :=
-							deformer.clusters.data[skinWeight.cluster_index].bone_node.element.name
-
-						mesh.vertices[indiceIndex].bones[weightIndex] = boneMap[boneName.data]
-						mesh.vertices[indiceIndex].weights[weightIndex] = f32(skinWeight.weight)
-					}
-
-					if numWeights != 0 {
-						mesh.vertices[indiceIndex].weights = normalize(
-							mesh.vertices[indiceIndex].weights,
-						)
-					}
-				}
-			}
-		}
-
-		for clusterIndex in 0 ..< scene.skin_clusters.count {
-			skinCluster := scene.skin_clusters.data[clusterIndex]
-			bone := &model.skeleton[boneMap[skinCluster.bone_node.element.name.data]]
-			m := skinCluster.geometry_to_bone.cols
-			bone.inverseBind = {
-				f32(m[0][0]),
-				f32(m[1][0]),
-				f32(m[2][0]),
-				f32(m[3][0]),
-				f32(m[0][1]),
-				f32(m[1][1]),
-				f32(m[2][1]),
-				f32(m[3][1]),
-				f32(m[0][2]),
-				f32(m[1][2]),
-				f32(m[2][2]),
-				f32(m[3][2]),
-				0,
-				0,
-				0,
-				1,
-			}
-		}
-
-		model.animations = make([]Animation, scene.anim_stacks.count)
-		for animIndex in 0 ..< scene.anim_stacks.count {
-			stack := scene.anim_stacks.data[animIndex]
-
-			err: ufbx.Error
-			bakedAnim := ufbx.bake_anim(scene, stack.anim, nil, &err)
-			if err.type != .NONE {
-				log.logf(.Error, "Error baking animation: {}", err.description.data)
-				continue
-			}
-			defer ufbx.free_baked_anim(bakedAnim)
-
-			animation := &model.animations[animIndex]
-
-			strLen := int(stack.element.name.length + 1) // +1 to capture null terminator
-			memPtr, _ := mem.alloc(size_of(c.char) * strLen)
-			mem.copy(memPtr, rawptr(stack.element.name.data), strLen)
-			animation.name = cstring(memPtr)
-
-			animation.duration = bakedAnim.playback_duration
-			animation.nodes = make([]AnimationNode, bakedAnim.nodes.count)
-
-			for bakedIndex in 0 ..< bakedAnim.nodes.count {
-				bakedNode := bakedAnim.nodes.data[bakedIndex]
-				sceneNode := scene.nodes.data[bakedNode.typed_id]
-
-				animNode := &animation.nodes[bakedIndex]
-				animNode.bone = boneMap[sceneNode.element.name.data]
-				animNode.keyPositions = make([]KeyVector, bakedNode.translation_keys.count)
-				animNode.keyRotations = make([]KeyQuat, bakedNode.rotation_keys.count)
-				animNode.keyScales = make([]KeyVector, bakedNode.scale_keys.count)
-
-				for index in 0 ..< bakedNode.translation_keys.count {
-					data := bakedNode.translation_keys.data[index]
-					animNode.keyPositions[index].time = data.time
-					animNode.keyPositions[index].value = data.value
-				}
-
-				for index in 0 ..< bakedNode.rotation_keys.count {
-					data := bakedNode.rotation_keys.data[index]
-					animNode.keyRotations[index].time = data.time
-					animNode.keyRotations[index].value = data.value
-				}
-
-				for index in 0 ..< bakedNode.scale_keys.count {
-					data := bakedNode.scale_keys.data[index]
-					animNode.keyScales[index].time = data.time
-					animNode.keyScales[index].value = data.value
-				}
-			}
-		}
-	}
-
-	// TODO: I haven't implemented bones and animations for GLTF yet
-	loadGLTF :: proc(filename: cstring, model: ^Model, vertexOffset, indiceOffset: u32) {
-		copyData :: proc(accessor: ^cgltf.accessor, dst: rawptr) {
-			bufferView := accessor.buffer_view
-			data := bufferView.data
-			if data == nil {
-				data = bufferView.buffer.data
-			}
-			mem.copy(dst, rawptr(uintptr(data) + uintptr(bufferView.offset)), int(bufferView.size))
-		}
-
-		options: cgltf.options = {}
-		file, res := cgltf.parse_file(options, filename)
-		defer cgltf.free(file)
-
-		if res != .success {
-			log.log(.Error, "Failed to load gltf file!")
-			panic("Failed to load gltf file!")
-		}
-
-		if cgltf.load_buffers(options, file, filename) != .success {
-			log.log(.Error, "Failed to load buffer gltf file!")
-			panic("Failed to load buffer gltf file!")
-		}
-
-		if cgltf.validate(file) != .success {
-			log.log(.Error, "Failed to validate gltf file!")
-			panic("Failed to validate gltf file!")
-		}
-
-		model.name = fmt.caprint(file.meshes[0].name)
-
-		vertices: #soa[]Vertex
-		defer delete(vertices)
-
-		model.meshes = make([]Mesh, len(file.meshes))
-
-		vertexOffset := vertexOffset
-		indiceOffset := indiceOffset
-		for &mesh, meshIndex in model.meshes {
-			mesh.name = fmt.caprint(file.meshes[meshIndex].name)
-
-			for &primative in file.meshes[meshIndex].primitives {
-				if primative.type != .triangles {
-					continue
-				}
-
-				mesh.indices = make([]u32, int(primative.indices.count))
-
-				if primative.indices.component_type == .r_32u {
-					copyData(primative.indices, &mesh.indices[0])
-				} else if primative.indices.component_type == .r_16u {
-					data := make([]u16, int(primative.indices.count))
-					copyData(primative.indices, &data[0])
-					for &indice, index in mesh.indices {
-						indice = u32(data[index])
-					}
-					delete(data)
-				} else if primative.indices.component_type == .r_8u {
-					data := make([]u8, int(primative.indices.count))
-					copyData(primative.indices, &data[0])
-					for &indice, index in mesh.indices {
-						indice = u32(data[index])
-					}
-					delete(data)
-				}
-
-				vertices = make(#soa[]Vertex, primative.attributes[0].data.count)
-				for &attribute in primative.attributes {
-					#partial switch attribute.type {
-					case .position:
-						copyData(attribute.data, &vertices[0].position)
-					case .normal:
-						copyData(attribute.data, &vertices[0].normal)
-					case .texcoord:
-						copyData(attribute.data, &vertices[0].uv)
-					}
-				}
-			}
-
-			mesh.vertices = make([]Vertex, len(vertices))
-			for &vertex, index in mesh.vertices {
-				vertex.position = vertices[index].position
-				vertex.normal = vertices[index].normal
-				vertex.uv = vertices[index].uv
-				vertex.bones = vertices[index].bones
-				vertex.weights = {1, 0, 0, 0}
-			}
-
-			mesh.vertexOffset = vertexOffset
-			mesh.indiceOffset = indiceOffset
+			mesh.name = aiStringToCstring(&sceneMesh.mName)
 
 			vertexOffset += u32(len(mesh.vertices))
 			indiceOffset += u32(len(mesh.indices))
+
+			for vertexIndex in 0 ..< sceneMesh.mNumVertices {
+				// Were going to do some extra checks in debug builds here because UVs don't always exist
+				// Assimp should generate UVs if they don't exist so this check should be unnecessary
+				// However I have had errors from this not being the case
+				when ODIN_DEBUG {
+					mesh.vertices[vertexIndex] = {
+						position = sceneMesh.mVertices[vertexIndex],
+						normal   = sceneMesh.mNormals[vertexIndex],
+						uv       = {0, 0},
+						weights  = {0.0, 0.0, 0.0, 0.0},
+						bones    = {0, 0, 0, 0},
+					}
+
+					if sceneMesh.mNumUVComponents[0] > 0 {
+						mesh.vertices[vertexIndex].uv = {
+							sceneMesh.mTextureCoords[0][vertexIndex].x,
+							sceneMesh.mTextureCoords[0][vertexIndex].y,
+						}
+					}
+				} else {
+					mesh.vertices[vertexIndex] = {
+						position = sceneMesh.mVertices[vertexIndex],
+						normal   = sceneMesh.mNormals[vertexIndex],
+						uv       = {
+							sceneMesh.mTextureCoords[0][vertexIndex].x,
+							sceneMesh.mTextureCoords[0][vertexIndex].y,
+						},
+						weights  = {0.0, 0.0, 0.0, 0.0},
+						bones    = {0, 0, 0, 0},
+					}
+				}
+			}
+
+			for faceIndex in 0 ..< sceneMesh.mNumFaces {
+				face := sceneMesh.mFaces[faceIndex]
+
+				// Assimp should triangulate the mesh so this should be unnecessary.
+				// I'll only check this in debug builds.
+				when ODIN_DEBUG {
+					if face.mNumIndices != 3 {
+						log.logf(.Error, "Model has non-triangular faces!")
+						panic("Model has non-triangular faces!")
+					}
+				}
+
+				for indiceIndex in 0 ..< 3 {
+					mesh.indices[faceIndex * 3 + u32(indiceIndex)] = u32(
+						face.mIndices[indiceIndex],
+					)
+				}
+			}
+
+			boneCount += sceneMesh.mNumBones
+		}
+
+		strLen := len(model.meshes[0].name)
+		memPtr, _ := mem.alloc(size_of(c.char) * strLen)
+		mem.copy(memPtr, rawptr(model.meshes[0].name), strLen)
+		model.name = cstring(memPtr)
+
+		model.skeleton = make(Skeleton, boneCount)
+		boneMap := make(map[cstring]u32, boneCount)
+		defer delete(boneMap)
+
+		boneIndex: u32 = 0
+		for meshIndex in 0 ..< scene.mNumMeshes {
+			sceneMesh := scene.mMeshes[meshIndex]
+			for sceneBoneIndex in 0 ..< sceneMesh.mNumBones {
+				sceneBone := sceneMesh.mBones[sceneBoneIndex]
+				mesh := &model.meshes[meshIndex]
+				bone := &model.skeleton[boneIndex]
+
+				bone.inverseBind = aiMatrixToMat4(&sceneBone.mOffsetMatrix)
+
+				for weightIndex in 0 ..< sceneBone.mNumWeights {
+					weight := &sceneBone.mWeights[weightIndex]
+					vertexIndex := u32(weight.mVertexId)
+
+					for index in 0 ..< 4 {
+						if mesh.vertices[vertexIndex].weights[index] == 0.0 {
+							mesh.vertices[vertexIndex].weights[index] = f32(weight.mWeight)
+							mesh.vertices[vertexIndex].bones[index] = u32(boneIndex)
+							break
+						} else if index == 3 {
+							// Assimp should limit the number of weights to 4.
+							// If we reach here then something has gone wrong.
+							log.logf(
+								.Error,
+								"Vertex %s has more than 4 bone weights!",
+								vertexIndex,
+							)
+							panic("Vertex has more than 4 bone weights!")
+						}
+					}
+				}
+
+				boneMap[aiStringToCstring(&sceneBone.mName, context.temp_allocator)] = u32(
+					boneIndex,
+				)
+				boneIndex += 1
+			}
+		}
+
+		for &mesh in model.meshes {
+			for &vertex, vertexIndex in mesh.vertices {
+				if sum :=
+					   vertex.weights.x + vertex.weights.y + vertex.weights.z + vertex.weights.w;
+				   sum == 0.0 {
+					vertex.weights = {1.0, 0.0, 0.0, 0.0}
+					vertex.bones = {0, 0, 0, 0}
+				} else if sum > 1.001 || sum < 0.999 {
+					vertex.weights /= sum
+				}
+			}
+		}
+
+		if len(model.skeleton) > 0 {
+			searchNodeTree :: proc(
+				node: ^ai.Node,
+				skeleton: ^Skeleton,
+				boneMap: ^map[cstring]u32,
+			) {
+				if node == nil {
+					return
+				}
+
+				if boneIndex, isBone :=
+					   boneMap[aiStringToCstring(&node.mName, context.temp_allocator)]; isBone {
+					parent := node.mParent
+
+					parentIndex: u32 = 0
+					isParentBone := false
+					for parentIndex, isParentBone =
+						    boneMap[aiStringToCstring(&parent.mName, context.temp_allocator)];
+					    !isParentBone;
+					    parentIndex, isParentBone =
+						    boneMap[aiStringToCstring(&parent.mName, context.temp_allocator)] {
+						parent = parent.mParent
+						if parent == nil {
+							break
+						}
+					}
+					skeleton[boneIndex].parentIndex = parentIndex
+				}
+
+				for childIndex in 0 ..< node.mNumChildren {
+					searchNodeTree(node.mChildren[childIndex], skeleton, boneMap)
+				}
+			}
+
+			searchNodeTree(scene.mRootNode, &model.skeleton, &boneMap)
+			model.animations = make([]Animation, scene.mNumAnimations)
+
+			for &animation, animationIndex in model.animations {
+				sceneAnimation := scene.mAnimations[animationIndex]
+
+				ticksToSecond :=
+					1 /
+					(sceneAnimation.mTicksPerSecond == 0.0 ? 1.0 : sceneAnimation.mTicksPerSecond)
+				animation = {
+					name     = aiStringToCstring(&sceneAnimation.mName),
+					nodes    = make([]AnimationNode, len(model.skeleton)),
+					duration = sceneAnimation.mDuration * ticksToSecond,
+				}
+
+				for &node in animation.nodes {
+					node = {
+						keyPositions = {{time = animation.duration, value = {0, 0, 0}}},
+						keyRotations = {{time = animation.duration, value = IQUAT}},
+						keyScales    = {{time = animation.duration, value = {1, 1, 1}}},
+					}
+				}
+
+				for nodeIndex in 0 ..< sceneAnimation.mNumChannels {
+					animationNode := sceneAnimation.mChannels[nodeIndex]
+
+					boneIndex, exists :=
+						boneMap[aiStringToCstring(&animationNode.mNodeName, context.temp_allocator)]
+					if !exists {
+						continue
+					}
+
+					node := &animation.nodes[boneIndex]
+					node^ = {
+						keyPositions = make([]KeyVector, animationNode.mNumPositionKeys),
+						keyRotations = make([]KeyQuat, animationNode.mNumRotationKeys),
+						keyScales    = make([]KeyVector, animationNode.mNumScalingKeys),
+					}
+
+					for &key, keyIndex in node.keyPositions {
+						positionKey := &animationNode.mPositionKeys[keyIndex]
+						key = {
+							time  = positionKey.mTime * ticksToSecond,
+							value = positionKey.mValue,
+						}
+					}
+
+					for &key, keyIndex in node.keyRotations {
+						rotationKey := &animationNode.mRotationKeys[keyIndex]
+						key = {
+							time  = rotationKey.mTime * ticksToSecond,
+							value = aiQuaternionToQuat(&rotationKey.mValue),
+						}
+					}
+
+					for &key, keyIndex in node.keyScales {
+						scaleKey := &animationNode.mScalingKeys[keyIndex]
+						key = {
+							time  = scaleKey.mTime * ticksToSecond,
+							value = scaleKey.mValue,
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -2292,24 +2301,12 @@ loadModels :: proc(
 	for path, index in modelPaths {
 		modelIndex := modelOffset + index
 
-		switch ext := filepath.ext(string(path))[1:]; ext {
-		case "obj", "fbx":
-			loadFBX(
-				path,
-				&scene.models[modelIndex],
-				u32(len(scene.vertices)),
-				u32(len(scene.indices)),
-			)
-		case "gltf", "glb":
-			loadGLTF(
-				path,
-				&scene.models[modelIndex],
-				u32(len(scene.vertices)),
-				u32(len(scene.indices)),
-			)
-		case:
-			log.log(.Warning, "File formate not supported! {}", ext)
-		}
+		loadModel(
+			path,
+			&scene.models[modelIndex],
+			u32(len(scene.vertices)),
+			u32(len(scene.indices)),
+		)
 
 		for &mesh in scene.models[modelIndex].meshes {
 			append(&scene.vertices, ..mesh.vertices)
@@ -2924,6 +2921,10 @@ saveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 			scaleUniform = instance.scaleUniform,
 			scale        = instance.scale,
 		}
+	}
+	defer for &instance in sceneInfo.instances {
+		delete(instance.textures)
+		delete(instance.normals)
 	}
 
 	json_data, err := json.marshal(sceneInfo, {pretty = true})
@@ -5869,11 +5870,11 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 				transform *= scale(value)
 			}
 
-			if node.bone == 0 {
-				boneTransforms[boneOffset + node.bone] = transform
+			if nodeIndex == 0 {
+				boneTransforms[boneOffset + u32(nodeIndex)] = transform
 			} else {
-				boneTransforms[boneOffset + node.bone] =
-					boneTransforms[boneOffset + skeleton[node.bone].parentIndex] * transform
+				boneTransforms[boneOffset + u32(nodeIndex)] =
+					boneTransforms[boneOffset + skeleton[nodeIndex].parentIndex] * transform
 			}
 		}
 
@@ -5967,7 +5968,12 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 				3 * size_of(u32),
 				raw_data([]u32{u32(len(mesh.vertices)), mesh.vertexOffset, offset}),
 			)
-			vk.CmdDispatch(preComputeCommandBuffers[index], u32(ceil(f32(len(mesh.vertices)) / 64.0)), 1, 1)
+			vk.CmdDispatch(
+				preComputeCommandBuffers[index],
+				u32(ceil(f32(len(mesh.vertices)) / 64.0)),
+				1,
+				1,
+			)
 			offset += u32(len(mesh.vertices))
 		}
 	}
@@ -6262,7 +6268,11 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 				size_of(f32),
 				3 * size_of(u32),
 				raw_data(
-					[]u32{offset, sceneInstance.textureIDs[meshIndex], sceneInstance.normalIDs[meshIndex]},
+					[]u32 {
+						offset,
+						sceneInstance.textureIDs[meshIndex],
+						sceneInstance.normalIDs[meshIndex],
+					},
 				),
 			)
 
@@ -6871,8 +6881,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				imgui.DragFloat("Scale", &modelInstance.scale.x, 0.001)
 				modelInstance.scale.y = modelInstance.scale.x
 				modelInstance.scale.z = modelInstance.scale.x
-			}
-			else {
+			} else {
 				imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
 			}
 
