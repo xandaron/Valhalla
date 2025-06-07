@@ -28,6 +28,8 @@ quatFromX :: linalg.quaternion_from_euler_angle_x
 quatFromY :: linalg.quaternion_from_euler_angle_y
 quatFromZ :: linalg.quaternion_from_euler_angle_z
 
+quatFromMat3 :: linalg.quaternion_from_matrix3
+
 Mat2 :: linalg.Matrix2f32
 Mat3 :: linalg.Matrix3f32
 Mat4 :: linalg.Matrix4f32
