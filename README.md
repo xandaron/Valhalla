@@ -4,16 +4,13 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 
 ## Features
 
-- Basic 3D scene rendering
-- Customizable rendering settings
-- Support for OBJ, FBX and GLTF file formats
+- Support for many model file formats via assimp
 - Support for rigged 3D models and animations
 - Support for multiple light sources
 - Custom shaders
 - Shadow mapping
 - Real-time rendering
 - Cross-platform support (Windows, Linux)
-- Integration with Vulkan API
 
 ## Getting Started
 
@@ -21,6 +18,10 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 
 - [Odin](https://odin-lang.org/docs/install/) programming language
 - [VulkanSDK](https://vulkan.lunarg.com/) (recommended for development)
+
+#### Linux
+
+You'll also need to install [Assimp](https://github.com/assimp/assimp/releases/tag/v6.0.1) as a shared lib for linux builds.
 
 ### Setup
 
