@@ -2259,31 +2259,61 @@ loadModels :: proc(
 					}
 
 					node := &animation.nodes[boneIndex]
-					node^ = {
-						keyPositions = make([]KeyVector, animationNode.mNumPositionKeys),
-						keyRotations = make([]KeyQuat, animationNode.mNumRotationKeys),
-						keyScales    = make([]KeyVector, animationNode.mNumScalingKeys),
-					}
 
-					for &key, keyIndex in node.keyPositions {
+					offset: u32 = 0
+					if animationNode.mPositionKeys[0].mTime != 0.0 {
+						node.keyPositions = make([]KeyVector, animationNode.mNumPositionKeys + 1)
+						node.keyPositions[0] = {
+							time  = 0.0,
+							value = animationNode.mPositionKeys[animationNode.mNumPositionKeys - 1].mValue,
+						}
+						offset = 1
+					} else {
+						node.keyPositions = make([]KeyVector, animationNode.mNumPositionKeys)
+					}
+					for keyIndex in 0 ..< animationNode.mNumPositionKeys {
 						positionKey := &animationNode.mPositionKeys[keyIndex]
-						key = {
+						node.keyPositions[keyIndex + offset] = {
 							time  = positionKey.mTime * ticksToSecond,
 							value = positionKey.mValue,
 						}
 					}
 
-					for &key, keyIndex in node.keyRotations {
+					offset = 0
+					if animationNode.mRotationKeys[0].mTime != 0.0 {
+						node.keyRotations = make([]KeyQuat, animationNode.mNumRotationKeys + 1)
+						node.keyRotations[0] = {
+							time  = 0.0,
+							value = aiQuaternionToQuat(
+								&animationNode.mRotationKeys[animationNode.mNumRotationKeys - 1].mValue,
+							),
+						}
+						offset = 1
+					} else {
+						node.keyRotations = make([]KeyQuat, animationNode.mNumRotationKeys)
+					}
+					for keyIndex in 0 ..< animationNode.mNumRotationKeys {
 						rotationKey := &animationNode.mRotationKeys[keyIndex]
-						key = {
+						node.keyRotations[keyIndex + offset] = {
 							time  = rotationKey.mTime * ticksToSecond,
 							value = aiQuaternionToQuat(&rotationKey.mValue),
 						}
 					}
 
-					for &key, keyIndex in node.keyScales {
+					offset = 0
+					if animationNode.mScalingKeys[0].mTime != 0.0 {
+						node.keyScales = make([]KeyVector, animationNode.mNumScalingKeys + 1)
+						node.keyScales[0] = {
+							time  = 0.0,
+							value = animationNode.mScalingKeys[animationNode.mNumScalingKeys - 1].mValue,
+						}
+						offset = 1
+					} else {
+						node.keyScales = make([]KeyVector, animationNode.mNumScalingKeys)
+					}
+					for keyIndex in 0 ..< animationNode.mNumScalingKeys {
 						scaleKey := &animationNode.mScalingKeys[keyIndex]
-						key = {
+						node.keyScales[keyIndex + offset] = {
 							time  = scaleKey.mTime * ticksToSecond,
 							value = scaleKey.mValue,
 						}
