@@ -94,13 +94,13 @@ DEPTH_BIAS_SLOPE: f32 : 1.75
 
 
 @(private = "package")
-KeyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32)
+KeyCallback :: #type proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32)
 @(private = "package")
 MouseButtonCallback :: #type proc "c" (window: glfw.WindowHandle, button, action, mods: i32)
 @(private = "package")
-CursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64)
+CursorPosCallback :: #type proc "c" (window: glfw.WindowHandle, xpos, ypos: f64)
 @(private = "package")
-ScrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64)
+ScrollCallback :: #type proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64)
 
 
 // ###################################################################
@@ -342,7 +342,6 @@ GraphicsContext :: struct {
 	computeQueue:              vk.Queue,
 
 	// Swapchain
-	swapchainImageCount:       u32,
 	swapchainTransform:        vk.SurfaceTransformFlagsKHR,
 	swapchain:                 vk.SwapchainKHR,
 	swapchainFormat:           vk.SurfaceFormatKHR,
@@ -462,7 +461,7 @@ initVkGraphics :: proc(
 	pipelines = make([]Pipeline, len(PipelineIndex))
 
 	createRenderPass(graphicsContext)
-	createMainFramebuffers(graphicsContext)
+	createMainFrameBuffers(graphicsContext)
 
 	createGraphicsDescriptorSets(graphicsContext)
 	createComputeDescriptorSets(graphicsContext)
@@ -483,8 +482,13 @@ initVkGraphics :: proc(
 	brightness = 0.0
 	saturation = 1.0
 	exposure = 0.0
-	tonemapper = 0.0 if !HDR_ENABLED else 1.0
-	gamma = 1.0 if HDR_ENABLED else 2.2
+	when HDR_ENABLED {
+		tonemapper = 1.0
+		gamma = 1.0
+	} else {
+		tonemapper = 0.0
+		gamma = 2.2
+	}
 	scenes = make([dynamic]Scene)
 
 	if sceneFile == "" {
@@ -496,7 +500,7 @@ initVkGraphics :: proc(
 		}
 	}
 
-	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, swapchainImageCount)
+	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
 	createShadowMapFrameBuffer(graphicsContext)
 	setActiveScene(graphicsContext, 0)
 	return
@@ -678,8 +682,12 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, raw_data(mainCommandBuffers))
 	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, raw_data(shadowMapCommandBuffers))
 	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, raw_data(sceneCommandBuffers))
-	vk.FreeCommandBuffers(device, computeCommandPool, 2, raw_data(postComputeCommandBuffers))
-	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, raw_data(uiCommandBuffers))
+	when UI_ENABLED {
+		vk.FreeCommandBuffers(device, computeCommandPool, 2, raw_data(postComputeCommandBuffers))
+		vk.FreeCommandBuffers(device, graphicsCommandPool, u32(len(swapchainImages)), raw_data(uiCommandBuffers))
+	} else {
+		vk.FreeCommandBuffers(device, computeCommandPool, u32(len(swapchainImages)), raw_data(postComputeCommandBuffers))
+	}
 
 	vk.DestroyCommandPool(device, graphicsCommandPool, nil)
 	vk.DestroyCommandPool(device, computeCommandPool, nil)
@@ -709,7 +717,7 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 		cleanupBuffer(graphicsContext, &uniformBuffers[index])
 	}
 
-	for index in 0 ..< swapchainImageCount {
+	for index in 0 ..< len(swapchainImages) {
 		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.MAIN].frameBuffers[index], nil)
 		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
 	}
@@ -1209,7 +1217,7 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 
 	max := swapchainSupport.capabilities.maxImageCount
 	min := swapchainSupport.capabilities.minImageCount
-	swapchainImageCount = max if max == 1 else (2 if 2 > min else min)
+	swapchainImageCount := max if max == 1 else (2 if 2 > min else min)
 	swapchainTransform = swapchainSupport.capabilities.currentTransform
 
 	swapchainFormat = chooseFormat(swapchainSupport.formats)
@@ -1355,17 +1363,19 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		panic("Failed to allocate command buffer!")
 	}
 
-	uiCommandBuffers = make([]vk.CommandBuffer, MAX_FRAMES_IN_FLIGHT)
-	allocInfo = {
-		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-		pNext              = nil,
-		commandPool        = graphicsCommandPool,
-		level              = .PRIMARY,
-		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
-	}
-	if vk.AllocateCommandBuffers(device, &allocInfo, raw_data(uiCommandBuffers)) != .SUCCESS {
-		log.log(.Error, "Failed to allocate command buffer!")
-		panic("Failed to allocate command buffer!")
+	when UI_ENABLED {
+		uiCommandBuffers = make([]vk.CommandBuffer, len(swapchainImages))
+		allocInfo = {
+			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
+			pNext              = nil,
+			commandPool        = graphicsCommandPool,
+			level              = .PRIMARY,
+			commandBufferCount = u32(len(swapchainImages)),
+		}
+		if vk.AllocateCommandBuffers(device, &allocInfo, raw_data(uiCommandBuffers)) != .SUCCESS {
+			log.log(.Error, "Failed to allocate command buffer!")
+			panic("Failed to allocate command buffer!")
+		}
 	}
 
 	poolInfo = {
@@ -1393,18 +1403,34 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		panic("Failed to allocate command buffer!")
 	}
 
-	postComputeCommandBuffers = make([]vk.CommandBuffer, MAX_FRAMES_IN_FLIGHT)
-	allocInfo = {
-		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-		pNext              = nil,
-		commandPool        = computeCommandPool,
-		level              = .PRIMARY,
-		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
-	}
-	if vk.AllocateCommandBuffers(device, &allocInfo, raw_data(postComputeCommandBuffers)) !=
-	   .SUCCESS {
-		log.log(.Error, "Failed to allocate command buffer!")
-		panic("Failed to allocate command buffer!")
+	when UI_ENABLED {
+		postComputeCommandBuffers = make([]vk.CommandBuffer, MAX_FRAMES_IN_FLIGHT)
+		allocInfo = {
+			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
+			pNext              = nil,
+			commandPool        = computeCommandPool,
+			level              = .PRIMARY,
+			commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+		}
+		if vk.AllocateCommandBuffers(device, &allocInfo, raw_data(postComputeCommandBuffers)) !=
+		.SUCCESS {
+			log.log(.Error, "Failed to allocate command buffer!")
+			panic("Failed to allocate command buffer!")
+		}
+	} else {
+		postComputeCommandBuffers = make([]vk.CommandBuffer, len(swapchainImages))
+		allocInfo = {
+			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
+			pNext              = nil,
+			commandPool        = computeCommandPool,
+			level              = .PRIMARY,
+			commandBufferCount = u32(len(swapchainImages)),
+		}
+		if vk.AllocateCommandBuffers(device, &allocInfo, raw_data(postComputeCommandBuffers)) !=
+		.SUCCESS {
+			log.log(.Error, "Failed to allocate command buffer!")
+			panic("Failed to allocate command buffer!")
+		}
 	}
 }
 
@@ -4809,7 +4835,7 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-createMainFramebuffers :: proc(using graphicsContext: ^GraphicsContext) {
+createMainFrameBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	frameBufferInfo: vk.FramebufferCreateInfo = {
 		sType           = .FRAMEBUFFER_CREATE_INFO,
 		pNext           = nil,
@@ -4827,8 +4853,8 @@ createMainFramebuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		layers          = 1,
 	}
 
-	pipelines[PipelineIndex.MAIN].frameBuffers = make([]vk.Framebuffer, swapchainImageCount)
-	for index in 0 ..< swapchainImageCount {
+	pipelines[PipelineIndex.MAIN].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
+	for index in 0 ..< len(swapchainImages) {
 		if vk.CreateFramebuffer(
 			   device,
 			   &frameBufferInfo,
@@ -4931,7 +4957,7 @@ createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 		layers          = layerCount,
 	}
 
-	for index in 0 ..< swapchainImageCount {
+	for index in 0 ..< len(swapchainImages) {
 		if vk.CreateFramebuffer(
 			   device,
 			   &frameBufferInfo,
@@ -4946,7 +4972,7 @@ createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 updateShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
-	for index in 0 ..< swapchainImageCount {
+	for index in 0 ..< len(swapchainImages) {
 		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
 	}
 
@@ -5638,8 +5664,8 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 			layers          = 1,
 		}
 
-		imguiData.frameBuffers = make([]vk.Framebuffer, swapchainImageCount)
-		for index in 0 ..< swapchainImageCount {
+		imguiData.frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
+		for index in 0 ..< len(swapchainImages) {
 			if vk.CreateFramebuffer(
 				   device,
 				   &frameBufferInfo,
@@ -5680,7 +5706,8 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 		// (Optional) Allocation, Debugging
 		Allocator                   = nil,
 		CheckVkResultFn             = imguiCheckVkResult,
-		MinAllocationSize           = 1024 * 1024, // Minimum allocation size. Set to 1024*1024 to satisfy zealous best practices validation layer and waste a little memory.
+		// Minimum allocation size. Set to 1024*1024 to satisfy zealous best practices validation layer and waste a little memory.
+		MinAllocationSize           = 1024 * 1024,
 	}
 
 	if !implVulkan.Init(&implInitInfo) {
@@ -5939,14 +5966,22 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-
-
 		recordPreComputeBuffer(graphicsContext, bufferIndex)
 		recordShadowMapBuffer(graphicsContext, bufferIndex)
 		recordSceneBuffers(graphicsContext, bufferIndex)
 		recordMainGraphicsBuffer(graphicsContext, bufferIndex)
-		recordPostComputeBuffer(graphicsContext, bufferIndex)
+		
+		when UI_ENABLED {
+			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
+			recordPostComputeBuffer(graphicsContext, bufferIndex)
+		}
+	}
+
+	when !UI_ENABLED {
+		for bufferIndex in 0 ..< len(swapchainImages) {
+			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
+			recordPostComputeBuffer(graphicsContext, u32(bufferIndex))
+		}
 	}
 }
 
@@ -6489,24 +6524,36 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 			1,
 		)
 
-		transitionImageLayout(
-			graphicsContext,
+		vk.CmdBlitImage(
 			postComputeCommandBuffers[index],
 			outImage.vkImage,
-			.SHADER_READ_ONLY_OPTIMAL,
 			.TRANSFER_SRC_OPTIMAL,
-			{.DEPTH},
-			6,
-		)
-
-		upscaleImage(
-			postComputeCommandBuffers[index],
-			outImage.vkImage,
 			swapchainImages[index],
-			{swapchainExtent.width, swapchainExtent.height},
-			{swapchainExtent.width, swapchainExtent.height},
-			0,
-			0,
+			.TRANSFER_DST_OPTIMAL,
+			1,
+			&vk.ImageBlit {
+				srcSubresource = {
+					aspectMask = {.COLOR},
+					mipLevel = 0,
+					baseArrayLayer = 0,
+					layerCount = 1,
+				},
+				srcOffsets = {
+					{x = 0, y = 0, z = 0},
+					{x = i32(swapchainExtent.width), y = i32(swapchainExtent.height), z = 1},
+				},
+				dstSubresource = {
+					aspectMask = {.COLOR},
+					mipLevel = 0,
+					baseArrayLayer = 0,
+					layerCount = 1,
+				},
+				dstOffsets = {
+					{x = 0, y = 0, z = 0},
+					{x = i32(swapchainExtent.width), y = i32(swapchainExtent.height), z = 1},
+				},
+			},
+			.NEAREST,
 		)
 
 		transitionImageLayout(
@@ -6527,9 +6574,15 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 }
 
 updatePostComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
-	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
+	loopLength: u32
+	when UI_ENABLED {
+		loopLength = MAX_FRAMES_IN_FLIGHT 
+	} else {
+		loopLength = u32(len(swapchainImages))
+	}
+	for bufferIndex in 0 ..< loopLength {
 		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-		recordPostComputeBuffer(graphicsContext, bufferIndex)
+		recordPostComputeBuffer(graphicsContext, u32(bufferIndex))
 	}
 }
 
@@ -7214,8 +7267,8 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 
 	when UI_ENABLED {
 		drawUI(graphicsContext)
-		vk.ResetCommandBuffer(uiCommandBuffers[currentFrame], {})
-		recordUIBuffer(graphicsContext, currentFrame)
+		vk.ResetCommandBuffer(uiCommandBuffers[imageIndex], {})
+		recordUIBuffer(graphicsContext, imageIndex)
 	}
 
 	submitInfo := vk.SubmitInfo2 {
@@ -7308,16 +7361,6 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 		pNext                    = nil,
 		flags                    = {},
 		commandBufferInfoCount   = 1,
-		pCommandBufferInfos      = raw_data(
-			[]vk.CommandBufferSubmitInfo {
-				{
-					sType = .COMMAND_BUFFER_SUBMIT_INFO,
-					pNext = nil,
-					commandBuffer = postComputeCommandBuffers[currentFrame],
-					deviceMask = 0,
-				},
-			},
-		),
 		signalSemaphoreInfoCount = 1,
 		pSignalSemaphoreInfos    = raw_data(
 			[]vk.SemaphoreSubmitInfo {
@@ -7335,6 +7378,16 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 
 	fence: vk.Fence
 	when UI_ENABLED {
+		submitInfo.pCommandBufferInfos = raw_data(
+			[]vk.CommandBufferSubmitInfo {
+				{
+					sType = .COMMAND_BUFFER_SUBMIT_INFO,
+					pNext = nil,
+					commandBuffer = postComputeCommandBuffers[currentFrame],
+					deviceMask = 0,
+				},
+			},
+		)
 		submitInfo.waitSemaphoreInfoCount = 1
 		submitInfo.pWaitSemaphoreInfos = raw_data(
 			[]vk.SemaphoreSubmitInfo {
@@ -7349,6 +7402,16 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 			},
 		)
 	} else {
+		submitInfo.pCommandBufferInfos = raw_data(
+			[]vk.CommandBufferSubmitInfo {
+				{
+					sType = .COMMAND_BUFFER_SUBMIT_INFO,
+					pNext = nil,
+					commandBuffer = postComputeCommandBuffers[imageIndex],
+					deviceMask = 0,
+				},
+			},
+		)
 		submitInfo.waitSemaphoreInfoCount = 2
 		submitInfo.pWaitSemaphoreInfos = raw_data(
 			[]vk.SemaphoreSubmitInfo {
@@ -7410,7 +7473,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 					{
 						sType = .COMMAND_BUFFER_SUBMIT_INFO,
 						pNext = nil,
-						commandBuffer = uiCommandBuffers[currentFrame],
+						commandBuffer = uiCommandBuffers[imageIndex],
 						deviceMask = 0,
 					},
 				},
@@ -7435,7 +7498,6 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 			log.logf(.Error, "Failed to submit ui command buffer! {}", res)
 			panic("Failed to submit ui command buffer!")
 		}
-
 	}
 
 	presentInfo: vk.PresentInfoKHR = {
