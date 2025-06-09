@@ -123,7 +123,7 @@ Bone :: struct {
 
 Skeleton :: []Bone
 
-KeyVector :: struct {
+KeyVec3 :: struct {
 	time:  f64,
 	value: Vec3,
 }
@@ -134,9 +134,9 @@ KeyQuat :: struct {
 }
 
 AnimationNode :: struct {
-	keyPositions: []KeyVector,
+	keyPositions: []KeyVec3,
 	keyRotations: []KeyQuat,
-	keyScales:    []KeyVector,
+	keyScales:    []KeyVec3,
 }
 
 Animation :: struct {
@@ -684,9 +684,19 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, raw_data(sceneCommandBuffers))
 	when UI_ENABLED {
 		vk.FreeCommandBuffers(device, computeCommandPool, 2, raw_data(postComputeCommandBuffers))
-		vk.FreeCommandBuffers(device, graphicsCommandPool, u32(len(swapchainImages)), raw_data(uiCommandBuffers))
+		vk.FreeCommandBuffers(
+			device,
+			graphicsCommandPool,
+			u32(len(swapchainImages)),
+			raw_data(uiCommandBuffers),
+		)
 	} else {
-		vk.FreeCommandBuffers(device, computeCommandPool, u32(len(swapchainImages)), raw_data(postComputeCommandBuffers))
+		vk.FreeCommandBuffers(
+			device,
+			computeCommandPool,
+			u32(len(swapchainImages)),
+			raw_data(postComputeCommandBuffers),
+		)
 	}
 
 	vk.DestroyCommandPool(device, graphicsCommandPool, nil)
@@ -1413,7 +1423,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 			commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 		}
 		if vk.AllocateCommandBuffers(device, &allocInfo, raw_data(postComputeCommandBuffers)) !=
-		.SUCCESS {
+		   .SUCCESS {
 			log.log(.Error, "Failed to allocate command buffer!")
 			panic("Failed to allocate command buffer!")
 		}
@@ -1427,7 +1437,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 			commandBufferCount = u32(len(swapchainImages)),
 		}
 		if vk.AllocateCommandBuffers(device, &allocInfo, raw_data(postComputeCommandBuffers)) !=
-		.SUCCESS {
+		   .SUCCESS {
 			log.log(.Error, "Failed to allocate command buffer!")
 			panic("Failed to allocate command buffer!")
 		}
@@ -2288,14 +2298,14 @@ loadModels :: proc(
 
 					offset: u32 = 0
 					if animationNode.mPositionKeys[0].mTime != 0.0 {
-						node.keyPositions = make([]KeyVector, animationNode.mNumPositionKeys + 1)
+						node.keyPositions = make([]KeyVec3, animationNode.mNumPositionKeys + 1)
 						node.keyPositions[0] = {
 							time  = 0.0,
 							value = animationNode.mPositionKeys[animationNode.mNumPositionKeys - 1].mValue,
 						}
 						offset = 1
 					} else {
-						node.keyPositions = make([]KeyVector, animationNode.mNumPositionKeys)
+						node.keyPositions = make([]KeyVec3, animationNode.mNumPositionKeys)
 					}
 					for keyIndex in 0 ..< animationNode.mNumPositionKeys {
 						positionKey := &animationNode.mPositionKeys[keyIndex]
@@ -2328,14 +2338,14 @@ loadModels :: proc(
 
 					offset = 0
 					if animationNode.mScalingKeys[0].mTime != 0.0 {
-						node.keyScales = make([]KeyVector, animationNode.mNumScalingKeys + 1)
+						node.keyScales = make([]KeyVec3, animationNode.mNumScalingKeys + 1)
 						node.keyScales[0] = {
 							time  = 0.0,
 							value = animationNode.mScalingKeys[animationNode.mNumScalingKeys - 1].mValue,
 						}
 						offset = 1
 					} else {
-						node.keyScales = make([]KeyVector, animationNode.mNumScalingKeys)
+						node.keyScales = make([]KeyVec3, animationNode.mNumScalingKeys)
 					}
 					for keyIndex in 0 ..< animationNode.mNumScalingKeys {
 						scaleKey := &animationNode.mScalingKeys[keyIndex]
@@ -5970,7 +5980,7 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		recordShadowMapBuffer(graphicsContext, bufferIndex)
 		recordSceneBuffers(graphicsContext, bufferIndex)
 		recordMainGraphicsBuffer(graphicsContext, bufferIndex)
-		
+
 		when UI_ENABLED {
 			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
 			recordPostComputeBuffer(graphicsContext, bufferIndex)
@@ -6576,7 +6586,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 updatePostComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 	loopLength: u32
 	when UI_ENABLED {
-		loopLength = MAX_FRAMES_IN_FLIGHT 
+		loopLength = MAX_FRAMES_IN_FLIGHT
 	} else {
 		loopLength = u32(len(swapchainImages))
 	}
