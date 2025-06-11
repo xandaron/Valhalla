@@ -58,8 +58,8 @@ else {
     foreign import lib "system:assimp"
 }
 
-// AI_FORCE_INLINE :: Inline
-// AI_WONT_RETURN :: _Declspec(Noreturn)
+// FORCE_INLINE :: Inline
+// WONT_RETURN :: _Declspec(Noreturn)
 
 ASSIMP_AI_REAL_TEXT_PRECISION :: 9
 
@@ -69,14 +69,12 @@ Int :: c.int
 
 Uint :: c.uint
 
-/* Useful constants */
-//////////////////////////////////////////////////////////////////////////
-
 /* This is PI. Hi PI. */
-AI_MATH_PI :: 3.141592653589793238462643383279
-AI_MATH_TWO_PI :: AI_MATH_PI * 2.0
-AI_MATH_HALF_PI :: AI_MATH_PI * 0.5
+MATH_PI :: 3.141592653589793238462643383279
+// MATH_TWO_PI :: Ai_Math_Pi * 2.0
+// MATH_HALF_PI :: Ai_Math_Pi * 0.5
 
-AI_MATH_PI_F :: 3.1415926538
-AI_MATH_TWO_PI_F :: AI_MATH_PI_F * 2.0
-AI_MATH_HALF_PI_F :: AI_MATH_PI_F * 0.5
+/* And this is to avoid endless casts to float */
+MATH_PI_F :: 3.1415926538
+// MATH_TWO_PI_F :: Ai_Math_Pi_F * 2.0
+// MATH_HALF_PI_F :: Ai_Math_Pi_F * 0.5

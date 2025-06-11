@@ -92,8 +92,8 @@ Property_Store :: struct {
 /** Our own C boolean type */
 Bool :: c.int
 
-AI_FALSE :: 0
-AI_TRUE :: 1
+FALSE :: 0
+TRUE :: 1
 
 @(default_calling_convention="c", link_prefix="ai")
 foreign lib {
@@ -278,7 +278,7 @@ foreign lib {
 	*  didn't read correctly.
 	*  @param d AI_TRUE or AI_FALSE, your decision.
 	*/
-	EnableVerboseLogging :: proc(d: bool) ---
+	EnableVerboseLogging :: proc(d: Bool) ---
 
 	// --------------------------------------------------------------------------------
 	/** Detach a custom log stream from the libraries' logging system.
@@ -325,7 +325,7 @@ foreign lib {
 	* Must include a leading dot '.'. Example: ".3ds", ".md3"
 	* @return AI_TRUE if the file extension is supported.
 	*/
-	IsExtensionSupported :: proc(szExtension: cstring) -> bool ---
+	IsExtensionSupported :: proc(szExtension: cstring) -> Bool ---
 
 	// --------------------------------------------------------------------------------
 	/** Get a list of all file extensions supported by ASSIMP.

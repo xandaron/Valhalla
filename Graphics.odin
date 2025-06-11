@@ -2020,22 +2020,22 @@ loadModels :: proc(
 		propertyStore := ai.CreatePropertyStore()
 
 		// Stops Assimp from checking the area of faces preventing it from culling faces that are too small
-		ai.SetImportPropertyInteger(propertyStore, ai.AI_CONFIG_PP_FD_CHECKAREA, 0)
+		ai.SetImportPropertyInteger(propertyStore, ai.CONFIG_PP_FD_CHECKAREA, 0)
 
 		// Maximum number of bones per vertex
-		ai.SetImportPropertyInteger(propertyStore, ai.AI_CONFIG_PP_LBW_MAX_WEIGHTS, 4)
+		ai.SetImportPropertyInteger(propertyStore, ai.CONFIG_PP_LBW_MAX_WEIGHTS, 4)
 
 		// Remove point and line primitives
 		ai.SetImportPropertyInteger(
 			propertyStore,
-			ai.AI_CONFIG_PP_SBP_REMOVE,
+			ai.CONFIG_PP_SBP_REMOVE,
 			i32(ai.Primitive_Type_Flags{.POINT, .LINE}),
 		)
 
 		// Remove scene components that I don't need
 		ai.SetImportPropertyInteger(
 			propertyStore,
-			ai.AI_CONFIG_PP_RVC_FLAGS,
+			ai.CONFIG_PP_RVC_FLAGS,
 			i32(
 				ai.Component_Flags {
 					.TANGENTS_AND_BITANGENTS,
