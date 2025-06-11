@@ -605,4 +605,4 @@ Post_Process_Step_Flags :: distinct bit_set[Post_Process_Step_Flag; c.int]
 
 // aiProcessPreset_TargetRealtime_Quality :: Process_Calc_Tangent_Space | Process_Gen_Smooth_Normals | Process_Join_Identical_Vertices | Process_Improve_Cache_Locality | Process_Limit_Bone_Weights | Process_Remove_Redundant_Materials | Process_Split_Large_Meshes | Process_Triangulate | Process_Gen_Uvcoords | Process_Sort_By_Ptype | Process_Find_Degenerates | Process_Find_Invalid_Data | 0
 
-// aiProcessPreset_TargetRealtime_MaxQuality :: aiProcessPreset_TargetRealtime_Quality | Process_Find_Instances | Process_Validate_Data_Structure | Process_Optimize_Meshes | 0
+// aiProcessPreset_TargetRealtime_MaxQuality :: Process_Preset_Target_Realtime_Quality | Process_Find_Instances | Process_Validate_Data_Structure | Process_Optimize_Meshes | 0
