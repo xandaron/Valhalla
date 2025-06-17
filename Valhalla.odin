@@ -152,10 +152,6 @@ main :: proc() {
 		camera.center += movement
 
 		if mouseMode {
-			if mouseDelta != {0, 0, 0} {
-				log.log(.Debug, "Test")
-			}
-
 			if mouseDelta.xy != {0, 0} {
 				axis: Vec3 = mouseDelta.xy * matrix[2, 3]f32{
 							up.x, up.y, up.z, 
