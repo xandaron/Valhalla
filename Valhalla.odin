@@ -20,7 +20,7 @@ LOG_TO_FILE :: false
 @(private = "package")
 baseDir: string
 
-frameCount: u16 = 0
+frameCount: u32 = 0
 fpsTimer := time.now()
 
 @(private = "package")
