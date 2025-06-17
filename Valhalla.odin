@@ -29,11 +29,11 @@ delta: f64 = 0.0
 lastFrameTime := time.now()
 
 mouseMode := false
-mousePos, mouseDelta: Vec2f64 = {0, 0}, {0, 0}
-mouseSensitivity: f64 = 1
-scrollDelta: Vec2f64 = {0, 0}
+mousePos: Vec2 = {0, 0}
+mouseDelta: Vec3 = {0, 0, 0}
+mouseSensitivity: f32 = 1.0
 
-cameraAngleSpeed: f64 = 1
+cameraRotationSpeed: f32 = 1
 cameraMoveSpeed: f32 = 1
 cameraMove: Vec3 = {0, 0, 0}
 
@@ -138,48 +138,37 @@ main :: proc() {
 
 		scene := &graphicsContext.scenes[graphicsContext.activeScene]
 		camera := &scene.cameras[scene.activeCamera]
+
+		forward := (camera.center - camera.eye) / camera.distance
+		up := camera.up
+		right := cross(up, forward)
+
+		movement :=
+			delta *
+			cameraMoveSpeed *
+			cameraMove *
+			Mat3{right.x, right.y, right.z, up.x, up.y, up.z, forward.x, forward.y, forward.z}
+		camera.eye += movement
+		camera.center += movement
+
 		if mouseMode {
-			if mouseDelta != {0, 0} {
-				axis: Vec3 = {0, 0, 0}
-				forward := camera.center - camera.eye
-				if mouseDelta.x < 0 {
-					axis -= camera.up
-				} else if mouseDelta.x > 0 {
-					axis += camera.up
-				}
-				if mouseDelta.y > 0 {
-					axis += cross(camera.up, forward)
-				} else if mouseDelta.y < 0 {
-					axis -= cross(camera.up, forward)
-				}
-				rotation := rotation3(f32(radians(cameraAngleSpeed)), axis)
+			if mouseDelta != {0, 0, 0} {
+				log.log(.Debug, "Test")
+			}
+
+			if mouseDelta.xy != {0, 0} {
+				axis: Vec3 = mouseDelta.xy * matrix[2, 3]f32{
+							up.x, up.y, up.z, 
+							right.x, right.y, right.z, 
+						}
+				rotation := rotation3(radians(cameraRotationSpeed), axis)
 				forward = rotation * forward
-				camera.eye = camera.center - forward
-				mouseDelta = {0, 0}
 			}
-			if scrollDelta.y != 0 {
-				forward := (camera.center - camera.eye) / camera.distance
-				camera.distance *= 1 + f32(-scrollDelta.y * 0.1)
-				camera.eye = camera.center - forward * camera.distance
-				scrollDelta = {0, 0}
-			}
-		}
-		if cameraMove.x != 0 {
-			right := normalize(cross(camera.up, (camera.center - camera.eye) / camera.distance))
-			movement := delta * cameraMoveSpeed * cameraMove.x * right
-			camera.eye += movement
-			camera.center += movement
-		}
-		if cameraMove.y != 0 {
-			scene := &graphicsContext.scenes[graphicsContext.activeScene]
-			movement := delta * cameraMoveSpeed * cameraMove.y * camera.up
-			camera.eye += movement
-			camera.center += movement
-		}
-		if cameraMove.z != 0 {
-			movement := delta * cameraMoveSpeed * cameraMove.z * (camera.center - camera.eye)
-			camera.eye += movement
-			camera.center += movement
+
+			camera.distance *= 1 - mouseDelta.z * 0.1
+			camera.eye = camera.center - (forward * camera.distance)
+
+			mouseDelta = {0, 0, 0}
 		}
 
 		drawFrame(&graphicsContext, delta if !paused else 0)
@@ -278,25 +267,23 @@ keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods:
 }
 
 mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
-	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
 	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
 		if mouseMode {
 			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+			mouseMode = false
 		} else {
 			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+			mouseMode = true
 		}
-		mouseMode = !mouseMode
 	}
 }
 
 cursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
-	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	newPos: Vec2f64 = {xpos, ypos} * mouseSensitivity
-	mouseDelta = newPos - mousePos
+	newPos: Vec2 = {f32(xpos), f32(ypos)} * mouseSensitivity
+	mouseDelta.xy = newPos - mousePos
 	mousePos = newPos
 }
 
 scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
-	engineState := (^EngineState)(glfw.GetWindowUserPointer(window))
-	scrollDelta = {xoffset, yoffset}
+	mouseDelta.z = f32(yoffset)
 }
