@@ -77,11 +77,11 @@ void main() {
     colour *= pushConstants.exposure;
 
     switch (int(pushConstants.tonemapper)) {
-        case 0:
-            colour = narkowiczACES(colour);
-            break;
-        default:
-            break;
+    case 0:
+        colour = narkowiczACES(colour);
+        break;
+    default:
+        break;
     }
 
     imageStore(outImage, ivec2(x, y), vec4(pow(colour, vec3(1 / pushConstants.gamma)), 1.0));

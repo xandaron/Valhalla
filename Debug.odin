@@ -1,4 +1,4 @@
-#+private file
+#+private package
 
 package Valhalla
 
@@ -13,7 +13,6 @@ import dt "core:time/datetime"
 import vk "vendor:vulkan"
 
 
-@(private = "package")
 createLogPath :: proc() -> string {
 	if !os.exists("./logs") do os.make_directory("./logs")
 
@@ -49,7 +48,6 @@ createLogPath :: proc() -> string {
 //########################################################//
 
 
-@(private = "package")
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
 	context = runtimeContext
 	log.logf(.Error, "[GLFW Error]: {}", string(desc))
@@ -61,7 +59,6 @@ glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
 //########################################################//
 
 
-@(private = "package")
 vkDebugCallback :: proc "system" (
 	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
 	messageType: vk.DebugUtilsMessageTypeFlagsEXT,
@@ -78,7 +75,6 @@ vkDebugCallback :: proc "system" (
 	return false
 }
 
-@(private = "package")
 vkDecodeSeverity :: proc(
 	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
 ) -> runtime.Logger_Level {
@@ -97,7 +93,6 @@ vkDecodeSeverity :: proc(
 	panic("Unknown severity type!")
 }
 
-@(private = "package")
 vkDecodeSeverityString :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT) -> string {
 	if vk.DebugUtilsMessageSeverityFlagEXT.VERBOSE in messageSeverity {
 		return "Info"
@@ -114,7 +109,6 @@ vkDecodeSeverityString :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlag
 	panic("Unknown severity type!")
 }
 
-@(private = "package")
 vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -> string {
 	if .GENERAL in messageType {
 		return "General"
@@ -128,7 +122,6 @@ vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -
 	return "Unknown"
 }
 
-@(private = "package")
 vkSetupDebugMessenger :: proc(graphicsContext: ^GraphicsContext) {
 	createInfo := vkPopulateDebugMessengerCreateInfo()
 	if vk.CreateDebugUtilsMessengerEXT(
@@ -142,7 +135,6 @@ vkSetupDebugMessenger :: proc(graphicsContext: ^GraphicsContext) {
 	}
 }
 
-@(private = "package")
 vkPopulateDebugMessengerCreateInfo :: proc() -> (createInfo: vk.DebugUtilsMessengerCreateInfoEXT) {
 	createInfo = {
 		sType           = vk.StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
@@ -161,7 +153,6 @@ vkPopulateDebugMessengerCreateInfo :: proc() -> (createInfo: vk.DebugUtilsMessen
 //########################################################//
 
 
-@(private = "package")
 imguiCheckVkResult :: proc "c" (err: vk.Result) {
 	context = runtimeContext
 	if int(err) == 0 {return}
