@@ -4,6 +4,8 @@ struct Vertex {
     vec3 position;
     vec2 uv;
     vec3 normal;
+    vec3 tangent;
+    vec3 bitangent;
     uvec4 bones;
     vec4 weights;
 };
