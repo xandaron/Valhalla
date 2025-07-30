@@ -120,6 +120,12 @@ Stage :: enum c.int {
 // Profile IDs (opaque)
 Profile_Id :: u32
 
+// Matrix layout modes
+Matrix_Layout_Mode :: enum c.int {
+	ROW_MAJOR    = 0,
+	COLUMN_MAJOR = 1,
+}
+
 // Session description
 Session_Desc :: struct {
 	targets:                [^]Compile_Target,
@@ -128,6 +134,7 @@ Session_Desc :: struct {
 	searchPathCount:        i32,
 	preprocessorMacros:     [^]cstring,
 	preprocessorMacroCount: i32,
+	matrixLayoutMode:       Matrix_Layout_Mode,
 }
 
 // Global session description
@@ -184,6 +191,14 @@ foreign lib {
 	* @return Pointer to the created session, or NULL on failure
 	*/
 	createSession :: proc(globalSession: ^Global_Session, desc: ^Session_Desc) -> ^Session ---
+
+	/** Create a compilation session with a specific profile.
+	* @param globalSession The global session
+	* @param profile The profile ID to use (from slangc_findProfile)
+	* @param desc Session description (can be NULL for defaults)
+	* @return Pointer to the created session, or NULL on failure
+	*/
+	createSessionWithProfile :: proc(globalSession: ^Global_Session, profile: Profile_Id, desc: ^Session_Desc) -> ^Session ---
 
 	/** Release a session and free its resources.
 	* @param session The session to release
@@ -311,7 +326,27 @@ foreign lib {
 	*/
 	getVersionString :: proc() -> cstring ---
 
-	/** Shutdown the Slang system (call after all objects are released).
+	/** Check if Slang has been shut down.
+	* @return true if shutdown has been called, false otherwise
+	*/
+	isShutdown :: proc() -> bool ---
+
+	/** Shutdown the Slang system (optional cleanup - call only at application exit).
+	*
+	* WARNING: After calling this function, you cannot use any Slang functionality
+	* again in the current process. This function performs global cleanup of Slang's
+	* internal state including memory pools and module caches.
+	*
+	* This function is OPTIONAL and only needed if you want to clean up global
+	* allocations before your application exits (e.g., to avoid false positives
+	* in memory leak detectors).
+	*
+	* Safe to call multiple times - subsequent calls will be ignored.
+	*
+	* Typical usage:
+	* - Create and use Slang objects normally
+	* - Release all Slang objects (sessions, modules, etc.)
+	* - Call this function once at application shutdown (optional)
 	*/
 	shutdown :: proc() ---
 

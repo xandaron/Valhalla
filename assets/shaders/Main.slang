@@ -28,7 +28,7 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID)
 {
     VertOut output;
 
-    const float4x4 vertexTransform = transformBufferReadOnly[vertexID + pushConstants.vertexOffset];
+    const float4x4 vertexTransform = transformBufferRO[vertexID + pushConstants.vertexOffset];
     const float4 worldPosition = mul(vertexTransform, float4(vertex.position, 1.0));
     output.position = mul(uniformBuffer.viewProjection, worldPosition);
     output.worldPosition = worldPosition.xyz / worldPosition.w;

@@ -80,7 +80,8 @@ VertOut vert(Vertex input, uint vertexID: SV_VertexID)
     VertOut output;
 
     Light light = lightBuffer[pushConstants.layerIndex / 6];
-    float4 vertexPosition = mul(transformBufferReadOnly[vertexID + pushConstants.vertexOffset], float4(input.position, 1.0));
+    float4x4 vertexTransform = transformBufferRO[vertexID + pushConstants.vertexOffset];
+    float4 vertexPosition = mul(vertexTransform, float4(input.position, 1.0));
 
     uint face = pushConstants.layerIndex % 6;
     float4x4 viewProj = getView(light, face);
