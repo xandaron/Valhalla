@@ -784,6 +784,8 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 
 	vk.DestroyInstance(instance, nil)
 
+	slang.shutdown()
+
 	glfw.DestroyWindow(window)
 	glfw.Terminate()
 }
@@ -3210,11 +3212,18 @@ createBuffersDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 			binding = 4,
 			descriptorType = .STORAGE_BUFFER,
 			descriptorCount = 1,
-			stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE},
+			stageFlags = {.VERTEX, .FRAGMENT},
 			pImmutableSamplers = nil,
 		},
 		{
 			binding = 5,
+			descriptorType = .STORAGE_BUFFER,
+			descriptorCount = 1,
+			stageFlags = {.COMPUTE},
+			pImmutableSamplers = nil,
+		},
+		{
+			binding = 6,
 			descriptorType = .STORAGE_BUFFER,
 			descriptorCount = 1,
 			stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE},
@@ -3598,6 +3607,18 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext, sceneIndex
 				pNext = nil,
 				dstSet = descriptorSets[DescriptorSetIndex.BUFFERS].sets[index],
 				dstBinding = 5,
+				dstArrayElement = 0,
+				descriptorCount = 1,
+				descriptorType = .STORAGE_BUFFER,
+				pImageInfo = nil,
+				pBufferInfo = &transformBufferInfo,
+				pTexelBufferView = nil,
+			},
+			{
+				sType = .WRITE_DESCRIPTOR_SET,
+				pNext = nil,
+				dstSet = descriptorSets[DescriptorSetIndex.BUFFERS].sets[index],
+				dstBinding = 6,
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .STORAGE_BUFFER,
@@ -3997,6 +4018,18 @@ updateSceneInstanceModel :: proc(using graphicsContext: ^GraphicsContext, sceneI
 				pNext = nil,
 				dstSet = descriptorSets[DescriptorSetIndex.BUFFERS].sets[index],
 				dstBinding = 4,
+				dstArrayElement = 0,
+				descriptorCount = 1,
+				descriptorType = .STORAGE_BUFFER,
+				pImageInfo = nil,
+				pBufferInfo = &transformBufferInfo,
+				pTexelBufferView = nil,
+			},
+			{
+				sType = .WRITE_DESCRIPTOR_SET,
+				pNext = nil,
+				dstSet = descriptorSets[DescriptorSetIndex.BUFFERS].sets[index],
+				dstBinding = 5,
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .STORAGE_BUFFER,
@@ -4632,7 +4665,9 @@ createShaderModules :: proc(
 	entryPoints: []cstring,
 	stages: []slang.Stage,
 ) -> []vk.ShaderModule {
-	searchPaths := []cstring{"./assets/shaders/"}
+	diagnosticsBlob: ^slang.Blob
+
+	searchPaths := []cstring{"assets/shaders/"}
 
 	desc := slang.Global_Session_Desc {
 		searchPaths     = raw_data(searchPaths),
@@ -4651,14 +4686,16 @@ createShaderModules :: proc(
 		searchPathCount        = i32(len(searchPaths)),
 		preprocessorMacros     = nil,
 		preprocessorMacroCount = 0,
+		matrixLayoutMode       = .COLUMN_MAJOR,
 	}
-	session := slang.createSession(globalSession, &sessionDesc)
+	session := slang.createSessionWithProfile(globalSession, slang.findProfile(globalSession, "spirv_1_6"), &sessionDesc)
 	if session == nil {
 		panic("Failed to create session")
 	}
 
-	module := slang.loadModule(session, filepath, nil)
+	module := slang.loadModule(session, filepath, &diagnosticsBlob)
 	if module == nil {
+		log.log(.Error, cstring(slang.getBlobData(diagnosticsBlob)))
 		panic("Failed to load module")
 	}
 
@@ -4684,20 +4721,32 @@ createShaderModules :: proc(
 		session,
 		raw_data(components),
 		i32(len(components)),
-		nil,
+		&diagnosticsBlob,
 	)
+	if str := cstring(slang.getBlobData(diagnosticsBlob)); str != "" {
+		log.log(.Error, str)
+		slang.releaseBlob(diagnosticsBlob)
+	}
 	if program == nil {
 		panic("Failed to create program")
 	}
 
-	linkedProgram := slang.linkComponentType(program, nil)
+	linkedProgram := slang.linkComponentType(program, &diagnosticsBlob)
+	if str := cstring(slang.getBlobData(diagnosticsBlob)); str != "" {
+		log.log(.Error, str)
+		slang.releaseBlob(diagnosticsBlob)
+	}
 	if linkedProgram == nil {
 		panic("Failed to link program")
 	}
 
 	shaderModules := make([]vk.ShaderModule, len(entryPoints))
-	for i in 0 ..< len(entryPoints) {
-		codeBlob := slang.getEntryPointCode(linkedProgram, i32(i), 0, nil)
+	for &module, i in shaderModules {
+		codeBlob := slang.getEntryPointCode(linkedProgram, i32(i), 0, &diagnosticsBlob)
+		if str := cstring(slang.getBlobData(diagnosticsBlob)); str != "" {
+			log.log(.Error, str)
+			slang.releaseBlob(diagnosticsBlob)
+		}
 		if codeBlob == nil {
 			panic("Failed to get entry point code")
 		}
@@ -4709,7 +4758,7 @@ createShaderModules :: proc(
 			codeSize = int(slang.getBlobSize(codeBlob)),
 			pCode    = (^u32)(slang.getBlobData(codeBlob)),
 		}
-		if vk.CreateShaderModule(device, &createInfo, nil, &shaderModules[i]) != .SUCCESS {
+		if vk.CreateShaderModule(device, &createInfo, nil, &module) != .SUCCESS {
 			log.log(.Error, "Failed to create shader module")
 			panic("Failed to create shader module")
 		}
@@ -4727,7 +4776,6 @@ createShaderModules :: proc(
 
 	slang.releaseSession(session)
 	slang.releaseGlobalSession(globalSession)
-	slang.shutdown()
 
 	return shaderModules
 }

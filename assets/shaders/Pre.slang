@@ -25,5 +25,5 @@ void comp(uint3 dispatchThreadID : SV_DispatchThreadID)
     for (uint index = 0; index < 4; index++) {
         boneTransform += vertex.weights[index] * boneBuffer[boneOffset + vertex.bones[index]];
     }
-    transformBufferReadWrite[pushConstants.transformOffset + dispatchThreadID.x] = mul(instanceBuffer[pushConstants.instance].model, boneTransform);
+    transformBufferRW[pushConstants.transformOffset + dispatchThreadID.x] = mul(instanceBuffer[pushConstants.instance].model, boneTransform);
 }

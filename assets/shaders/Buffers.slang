@@ -26,13 +26,11 @@ StructuredBuffer<InstanceInfo> instanceBuffer;
 [[vk::binding(3, 0)]]
 StructuredBuffer<float4x4> boneBuffer;
 
-// Read-only version for vertex shader
 [[vk::binding(4, 0)]]
-StructuredBuffer<float4x4> transformBufferReadOnly;
+StructuredBuffer<float4x4> transformBufferRO;
 
-// Read-write version for compute shader
-[[vk::binding(4, 0)]]
-RWStructuredBuffer<float4x4> transformBufferReadWrite;
+[[vk::binding(5, 0)]]
+RWStructuredBuffer<float4x4> transformBufferRW;
 
 struct Light
 {
@@ -42,5 +40,5 @@ struct Light
     float far;
 };
 
-[[vk::binding(5, 0)]]
+[[vk::binding(6, 0)]]
 StructuredBuffer<Light> lightBuffer;
