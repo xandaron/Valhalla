@@ -1,6 +1,5 @@
-
-#include "Buffers.slang"
-#include "Textures.slang"
+import "Buffers.slang";
+import "Textures.slang";
 
 struct PushConstants {
     float contrast;

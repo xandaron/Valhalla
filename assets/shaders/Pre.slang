@@ -1,5 +1,5 @@
-#define WRITE_TRANSFORM_BUFFER
-#include "Buffers.slang"
+import "Vertex.slang";
+import "Buffers.slang";
 
 struct PushConstants {
     uint instance;
@@ -25,5 +25,5 @@ void comp(uint3 dispatchThreadID : SV_DispatchThreadID)
     for (uint index = 0; index < 4; index++) {
         boneTransform += vertex.weights[index] * boneBuffer[boneOffset + vertex.bones[index]];
     }
-    transformBuffer[pushConstants.transformOffset + dispatchThreadID.x] = mul(instanceBuffer[pushConstants.instance].model, boneTransform);
+    transformBufferReadWrite[pushConstants.transformOffset + dispatchThreadID.x] = mul(instanceBuffer[pushConstants.instance].model, boneTransform);
 }
