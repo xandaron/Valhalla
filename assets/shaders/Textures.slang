@@ -1,4 +1,3 @@
-
 [[vk::binding(0, 1)]]
 Sampler2DArray albedoArray;
 

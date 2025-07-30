@@ -19,6 +19,7 @@ import tinyfd "tinyfiledialogs"
 import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
+import "slang"
 
 
 // ###################################################################
@@ -4625,41 +4626,110 @@ updateShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	createShadowMapFrameBuffer(graphicsContext)
 }
 
-createShaderModule :: proc(
+createShaderModules :: proc(
 	using graphicsContext: ^GraphicsContext,
-	filename: string,
-) -> (
-	shaderModule: vk.ShaderModule,
-) {
-	loadShaderFile :: proc(filepath: string) -> (data: []byte) {
-		fileHandle, err := os.open(filepath, mode = (os.O_RDONLY | os.O_APPEND))
-		if err != 0 {
-			log.log(.Error, "Shader file couldn't be opened!")
-			panic("Shader file couldn't be opened!")
-		}
-		defer os.close(fileHandle)
-		success: bool
-		if data, success = os.read_entire_file_from_handle(fileHandle); !success {
-			log.log(.Error, "Shader file couldn't be read!")
-			panic("Shader file couldn't be read!")
-		}
-		return
+	filepath: cstring,
+	entryPoints: []cstring,
+	stages: []slang.Stage,
+) -> []vk.ShaderModule {
+	searchPaths := []cstring{"./assets/shaders/"}
+
+	desc := slang.Global_Session_Desc {
+		searchPaths     = raw_data(searchPaths),
+		searchPathCount = i32(len(searchPaths)),
+	}
+	globalSession := slang.createGlobalSessionWithDesc(&desc)
+	if globalSession == nil {
+		panic("Failed to create global session")
 	}
 
-	code := loadShaderFile(filename)
-	createInfo: vk.ShaderModuleCreateInfo = {
-		sType    = .SHADER_MODULE_CREATE_INFO,
-		pNext    = nil,
-		flags    = {},
-		codeSize = len(code),
-		pCode    = (^u32)(raw_data(code)),
+	compileTargets := []slang.Compile_Target{.SPIRV}
+	sessionDesc := slang.Session_Desc {
+		targets                = raw_data(compileTargets),
+		targetCount            = i32(len(compileTargets)),
+		searchPaths            = raw_data(searchPaths),
+		searchPathCount        = i32(len(searchPaths)),
+		preprocessorMacros     = nil,
+		preprocessorMacroCount = 0,
 	}
-	if vk.CreateShaderModule(device, &createInfo, nil, &shaderModule) != .SUCCESS {
-		log.log(.Error, "Failed to create shader module")
-		panic("Failed to create shader module")
+	session := slang.createSession(globalSession, &sessionDesc)
+	if session == nil {
+		panic("Failed to create session")
 	}
-	delete(code)
-	return
+
+	module := slang.loadModule(session, filepath, nil)
+	if module == nil {
+		panic("Failed to load module")
+	}
+
+	components := make([]slang.Component_Type, len(entryPoints) + 1)
+	defer delete(components)
+	components[0] = {
+		kind = .MODULE,
+		module = module,
+	}
+
+	for i in 0 ..< len(entryPoints) {
+		entryPoint := slang.findEntryPoint(module, entryPoints[i], stages[i], nil)
+		if entryPoint == nil {
+			panic("Failed to find entry point")
+		}
+		components[i + 1] = {
+			kind = .ENTRY_POINT,
+			entryPoint = entryPoint,
+		}
+	}
+
+	program := slang.createCompositeComponentType(
+		session,
+		raw_data(components),
+		i32(len(components)),
+		nil,
+	)
+	if program == nil {
+		panic("Failed to create program")
+	}
+
+	linkedProgram := slang.linkComponentType(program, nil)
+	if linkedProgram == nil {
+		panic("Failed to link program")
+	}
+
+	shaderModules := make([]vk.ShaderModule, len(entryPoints))
+	for i in 0 ..< len(entryPoints) {
+		codeBlob := slang.getEntryPointCode(linkedProgram, i32(i), 0, nil)
+		if codeBlob == nil {
+			panic("Failed to get entry point code")
+		}
+	
+		createInfo: vk.ShaderModuleCreateInfo = {
+			sType    = .SHADER_MODULE_CREATE_INFO,
+			pNext    = nil,
+			flags    = {},
+			codeSize = int(slang.getBlobSize(codeBlob)),
+			pCode    = (^u32)(slang.getBlobData(codeBlob)),
+		}
+		if vk.CreateShaderModule(device, &createInfo, nil, &shaderModules[i]) != .SUCCESS {
+			log.log(.Error, "Failed to create shader module")
+			panic("Failed to create shader module")
+		}
+
+		slang.releaseBlob(codeBlob)
+	}
+
+	slang.releaseComponentType(linkedProgram)
+	slang.releaseComponentType(program)
+
+	for component in components[1:] {
+		slang.releaseEntryPoint(component.entryPoint)
+	}
+	slang.releaseModule(module)
+
+	slang.releaseSession(session)
+	slang.releaseGlobalSession(globalSession)
+	slang.shutdown()
+
+	return shaderModules
 }
 
 createGraphicsPipelines :: proc(
@@ -4704,29 +4774,31 @@ createGraphicsPipelines :: proc(
 		panic("Failed to create pipeline layout!")
 	}
 
-	shadowShaderStages := [?]vk.ShaderStageFlag{.VERTEX, .FRAGMENT}
-	shadowShaderFiles := [?]string {
-		"./assets/shaders/light.vert.spv",
-		"./assets/shaders/light.frag.spv",
+	shadowEntryPoints := [?]cstring{"vert", "frag"}
+	shadowShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
+	shadowShaderModules := createShaderModules(
+		graphicsContext,
+		"./assets/shaders/Light.slang",
+		shadowEntryPoints[:],
+		{.VERTEX, .FRAGMENT},
+	)
+	defer {
+		for module in shadowShaderModules {
+			vk.DestroyShaderModule(device, module, nil)
+		}
+		delete(shadowShaderModules)
 	}
-
-	shadowShaderStagesInfo := make([]vk.PipelineShaderStageCreateInfo, len(shadowShaderFiles))
-	for path, index in shadowShaderFiles {
-		shadowShaderStagesInfo[index] = {
+	shadowShaderStages := [?]vk.ShaderStageFlag{.VERTEX, .FRAGMENT}
+	for &info, index in shadowShaderStagesInfo {
+		info = {
 			sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 			pNext               = nil,
 			flags               = {},
 			stage               = {shadowShaderStages[index]},
-			module              = createShaderModule(graphicsContext, path),
+			module              = shadowShaderModules[index],
 			pName               = "main",
 			pSpecializationInfo = nil,
 		}
-	}
-	defer {
-		for stage in shadowShaderStagesInfo {
-			vk.DestroyShaderModule(device, stage.module, nil)
-		}
-		delete(shadowShaderStagesInfo)
 	}
 
 	pipelineInfos[0] = {
@@ -4734,7 +4806,7 @@ createGraphicsPipelines :: proc(
 		pNext               = nil,
 		flags               = {},
 		stageCount          = u32(len(shadowShaderStagesInfo)),
-		pStages             = raw_data(shadowShaderStagesInfo),
+		pStages             = &shadowShaderStagesInfo[0],
 		pVertexInputState   = &{
 			sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 			pNext = nil,
@@ -4874,29 +4946,31 @@ createGraphicsPipelines :: proc(
 		panic("Failed to create pipeline layout!")
 	}
 
-	mainShaderStages := [?]vk.ShaderStageFlag{.VERTEX, .FRAGMENT}
-	mainShaderFiles := [?]string {
-		"./assets/shaders/main.vert.spv",
-		"./assets/shaders/main.frag.spv",
+	mainEntryPoints := [?]cstring{"vert", "frag"}
+	mainShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
+	mainShaderModules := createShaderModules(
+		graphicsContext,
+		"./assets/shaders/Main.slang",
+		mainEntryPoints[:],
+		{.VERTEX, .FRAGMENT},
+	)
+	defer {
+		for module in mainShaderModules {
+			vk.DestroyShaderModule(device, module, nil)
+		}
+		delete(mainShaderModules)
 	}
-
-	mainShaderStagesInfo := make([]vk.PipelineShaderStageCreateInfo, len(mainShaderFiles))
-	for path, index in mainShaderFiles {
-		mainShaderStagesInfo[index] = {
+	mainShaderStages := [?]vk.ShaderStageFlag{.VERTEX, .FRAGMENT}
+	for &info, index in mainShaderStagesInfo {
+		info = {
 			sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 			pNext               = nil,
 			flags               = {},
 			stage               = {mainShaderStages[index]},
-			module              = createShaderModule(graphicsContext, path),
+			module              = mainShaderModules[index],
 			pName               = "main",
 			pSpecializationInfo = nil,
 		}
-	}
-	defer {
-		for stage in mainShaderStagesInfo {
-			vk.DestroyShaderModule(device, stage.module, nil)
-		}
-		delete(mainShaderStagesInfo)
 	}
 
 	pipelineInfos[1] = {
@@ -4904,7 +4978,7 @@ createGraphicsPipelines :: proc(
 		pNext               = nil,
 		flags               = {},
 		stageCount          = u32(len(mainShaderStagesInfo)),
-		pStages             = raw_data(mainShaderStagesInfo),
+		pStages             = &mainShaderStagesInfo[0],
 		pVertexInputState   = &{
 			sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 			pNext = nil,
@@ -5009,16 +5083,15 @@ createGraphicsPipelines :: proc(
 	}
 
 	vkPipelines: [PIPELINE_COUNT]vk.Pipeline
-	if vk.CreateGraphicsPipelines(
+	if res := vk.CreateGraphicsPipelines(
 		   device,
 		   pipelineCache,
 		   PIPELINE_COUNT,
 		   &pipelineInfos[0],
 		   nil,
 		   &vkPipelines[0],
-	   ) !=
-	   .SUCCESS {
-		log.log(.Error, "Failed to create pipeline!")
+	   ); res != .SUCCESS {
+		log.logf(.Error, "Failed to create pipeline! %v", int(res))
 		panic("Failed to create pipeline!")
 	}
 
@@ -5066,16 +5139,28 @@ createComputePipelines :: proc(
 		panic("Failed to create postprocess pipeline layout!")
 	}
 
+	preEntryPoints := [?]cstring{"comp"}
+	preComputeShaderModules := createShaderModules(
+		graphicsContext,
+		"./assets/shaders/Pre.slang",
+		preEntryPoints[:],
+		{.COMPUTE},
+	)
+	defer {
+		for module in preComputeShaderModules {
+			vk.DestroyShaderModule(device, module, nil)
+		}
+		delete(preComputeShaderModules)
+	}
 	preComputeShaderStageInfo: vk.PipelineShaderStageCreateInfo = {
 		sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 		pNext               = nil,
 		flags               = {},
 		stage               = {.COMPUTE},
-		module              = createShaderModule(graphicsContext, "./assets/shaders/pre.comp.spv"),
+		module              = preComputeShaderModules[0],
 		pName               = "main",
 		pSpecializationInfo = nil,
 	}
-	defer vk.DestroyShaderModule(device, preComputeShaderStageInfo.module, nil)
 
 	pipelineInfos[0] = {
 		sType              = .COMPUTE_PIPELINE_CREATE_INFO,
@@ -5115,19 +5200,28 @@ createComputePipelines :: proc(
 		panic("Failed to create postprocess pipeline layout!")
 	}
 
+	postEntryPoints := [?]cstring{"comp"}
+	postShaderModules := createShaderModules(
+		graphicsContext,
+		"./assets/shaders/Post.slang",
+		postEntryPoints[:],
+		{.COMPUTE},
+	)
+	defer {
+		for module in postShaderModules {
+			vk.DestroyShaderModule(device, module, nil)
+		}
+		delete(postShaderModules)
+	}
 	postShaderStageInfo: vk.PipelineShaderStageCreateInfo = {
 		sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 		pNext               = nil,
 		flags               = {},
 		stage               = {.COMPUTE},
-		module              = createShaderModule(
-			graphicsContext,
-			"./assets/shaders/post.comp.spv",
-		),
+		module              = postShaderModules[0],
 		pName               = "main",
 		pSpecializationInfo = nil,
 	}
-	defer vk.DestroyShaderModule(device, postShaderStageInfo.module, nil)
 
 	pipelineInfos[1] = {
 		sType              = .COMPUTE_PIPELINE_CREATE_INFO,

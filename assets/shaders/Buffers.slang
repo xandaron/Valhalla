@@ -1,4 +1,4 @@
-#include "Vertex.slang"
+import "Vertex.slang";
 
 [[vk::binding(0, 0)]]
 StructuredBuffer<Vertex> vertexBuffer;
@@ -26,13 +26,13 @@ StructuredBuffer<InstanceInfo> instanceBuffer;
 [[vk::binding(3, 0)]]
 StructuredBuffer<float4x4> boneBuffer;
 
-#ifdef WRITE_TRANSFORM_BUFFER
+// Read-only version for vertex shader
 [[vk::binding(4, 0)]]
-RWStructuredBuffer<float4x4> transformBuffer;
-#else
+StructuredBuffer<float4x4> transformBufferReadOnly;
+
+// Read-write version for compute shader
 [[vk::binding(4, 0)]]
-StructuredBuffer<float4x4> transformBuffer;
-#endif
+RWStructuredBuffer<float4x4> transformBufferReadWrite;
 
 struct Light
 {
