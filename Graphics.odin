@@ -15,11 +15,11 @@ import "core:strings"
 import "imgui"
 import implGLFW "imgui/imgui_impl_glfw"
 import implVulkan "imgui/imgui_impl_vulkan"
+import "slang"
 import tinyfd "tinyfiledialogs"
 import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
-import "slang"
 
 
 // ###################################################################
@@ -239,14 +239,14 @@ RenderPass :: struct {
 }
 
 DescriptorSetIndex :: enum {
-	BUFFERS = 0,
+	BUFFERS  = 0,
 	TEXTURES = 1,
 }
 
 DescriptorSet :: struct {
 	layout: vk.DescriptorSetLayout,
 	pool:   vk.DescriptorPool,
-	sets:    [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	sets:   [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 PipelineIndex :: enum {
@@ -1126,9 +1126,9 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesNV = {
-		sType = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV,
-		pNext = &sync2,
-		computeDerivativeGroupQuads = true,
+		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV,
+		pNext                        = &sync2,
+		computeDerivativeGroupQuads  = true,
 		computeDerivativeGroupLinear = false,
 	}
 
@@ -1352,8 +1352,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		level              = .SECONDARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if vk.AllocateCommandBuffers(device, &allocInfo, &shadowMapCommandBuffers[0]) !=
-	   .SUCCESS {
+	if vk.AllocateCommandBuffers(device, &allocInfo, &shadowMapCommandBuffers[0]) != .SUCCESS {
 		log.log(.Error, "Failed to allocate command buffer!")
 		panic("Failed to allocate command buffer!")
 	}
@@ -1402,8 +1401,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if vk.AllocateCommandBuffers(device, &allocInfo, &preComputeCommandBuffers[0]) !=
-	   .SUCCESS {
+	if vk.AllocateCommandBuffers(device, &allocInfo, &preComputeCommandBuffers[0]) != .SUCCESS {
 		log.log(.Error, "Failed to allocate command buffer!")
 		panic("Failed to allocate command buffer!")
 	}
@@ -3354,19 +3352,17 @@ createTexturesDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	if vk.CreateDescriptorSetLayout(
-			device,
-			&layoutInfo,
-			nil,
-			&descriptorSets[DescriptorSetIndex.TEXTURES].layout,
-		) !=
-		.SUCCESS {
+		   device,
+		   &layoutInfo,
+		   nil,
+		   &descriptorSets[DescriptorSetIndex.TEXTURES].layout,
+	   ) !=
+	   .SUCCESS {
 		log.log(.Error, "Failed to create descriptor set layout!")
 		panic("Failed to create descriptor set layout!")
 	}
 
-	poolSizes: []vk.DescriptorPoolSize = {
-		{type = .COMBINED_IMAGE_SAMPLER, descriptorCount = 3},
-	}
+	poolSizes: []vk.DescriptorPoolSize = {{type = .COMBINED_IMAGE_SAMPLER, descriptorCount = 3}}
 
 	poolInfo: vk.DescriptorPoolCreateInfo = {
 		sType         = .DESCRIPTOR_POOL_CREATE_INFO,
@@ -3378,12 +3374,12 @@ createTexturesDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	if vk.CreateDescriptorPool(
-			device,
-			&poolInfo,
-			nil,
-			&descriptorSets[DescriptorSetIndex.TEXTURES].pool,
-		) !=
-		.SUCCESS {
+		   device,
+		   &poolInfo,
+		   nil,
+		   &descriptorSets[DescriptorSetIndex.TEXTURES].pool,
+	   ) !=
+	   .SUCCESS {
 		log.log(.Error, "Failed to create descriptor pool!")
 		panic("Failed to create descriptor pool!")
 	}
@@ -3402,11 +3398,11 @@ createTexturesDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	if vk.AllocateDescriptorSets(
-			device,
-			&allocInfo,
-			raw_data(descriptorSets[DescriptorSetIndex.TEXTURES].sets[:]),
-		) !=
-		.SUCCESS {
+		   device,
+		   &allocInfo,
+		   raw_data(descriptorSets[DescriptorSetIndex.TEXTURES].sets[:]),
+	   ) !=
+	   .SUCCESS {
 		log.log(.Error, "Failed to allocate descriptor sets!")
 		panic("Failed to allocate descriptor sets!")
 	}
@@ -4688,7 +4684,11 @@ createShaderModules :: proc(
 		preprocessorMacroCount = 0,
 		matrixLayoutMode       = .COLUMN_MAJOR,
 	}
-	session := slang.createSessionWithProfile(globalSession, slang.findProfile(globalSession, "spirv_1_6"), &sessionDesc)
+	session := slang.createSessionWithProfile(
+		globalSession,
+		slang.findProfile(globalSession, "spirv_1_6"),
+		&sessionDesc,
+	)
 	if session == nil {
 		panic("Failed to create session")
 	}
@@ -4702,7 +4702,7 @@ createShaderModules :: proc(
 	components := make([]slang.Component_Type, len(entryPoints) + 1)
 	defer delete(components)
 	components[0] = {
-		kind = .MODULE,
+		kind   = .MODULE,
 		module = module,
 	}
 
@@ -4712,7 +4712,7 @@ createShaderModules :: proc(
 			panic("Failed to find entry point")
 		}
 		components[i + 1] = {
-			kind = .ENTRY_POINT,
+			kind       = .ENTRY_POINT,
 			entryPoint = entryPoint,
 		}
 	}
@@ -4750,7 +4750,7 @@ createShaderModules :: proc(
 		if codeBlob == nil {
 			panic("Failed to get entry point code")
 		}
-	
+
 		createInfo: vk.ShaderModuleCreateInfo = {
 			sType    = .SHADER_MODULE_CREATE_INFO,
 			pNext    = nil,
@@ -5132,13 +5132,13 @@ createGraphicsPipelines :: proc(
 
 	vkPipelines: [PIPELINE_COUNT]vk.Pipeline
 	if res := vk.CreateGraphicsPipelines(
-		   device,
-		   pipelineCache,
-		   PIPELINE_COUNT,
-		   &pipelineInfos[0],
-		   nil,
-		   &vkPipelines[0],
-	   ); res != .SUCCESS {
+		device,
+		pipelineCache,
+		PIPELINE_COUNT,
+		&pipelineInfos[0],
+		nil,
+		&vkPipelines[0],
+	); res != .SUCCESS {
 		log.logf(.Error, "Failed to create pipeline! %v", int(res))
 		panic("Failed to create pipeline!")
 	}
@@ -5154,7 +5154,7 @@ createComputePipelines :: proc(
 	PIPELINE_COUNT: u32 : 2
 	pipelineInfos: [PIPELINE_COUNT]vk.ComputePipelineCreateInfo
 
-	layouts : [len(DescriptorSetIndex)]vk.DescriptorSetLayout = {
+	layouts: [len(DescriptorSetIndex)]vk.DescriptorSetLayout = {
 		descriptorSets[DescriptorSetIndex.BUFFERS].layout,
 		descriptorSets[DescriptorSetIndex.TEXTURES].layout,
 	}
@@ -6230,7 +6230,7 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 		{.COLOR},
 		1,
 	)
-	
+
 	sets: [len(DescriptorSetIndex)]vk.DescriptorSet = {
 		descriptorSets[DescriptorSetIndex.BUFFERS].sets[currentFrame],
 		descriptorSets[DescriptorSetIndex.TEXTURES].sets[currentFrame],
@@ -6694,6 +6694,146 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 		}
 	}
 
+	constructSceneEditor :: proc(using graphicsContext: ^GraphicsContext) {
+		scene := &scenes[activeScene]
+
+		if imgui.BeginMenuBar() {
+			constructMenuBar(graphicsContext)
+			imgui.EndMenuBar()
+		}
+
+		imgui.Text(fmt.ctprintf("FPS: {:.2f}", fps))
+
+		if imgui.Button("Toggle Time", {100, 20}) {
+			paused = !paused
+		}
+
+		// These all have to be seperate otherwise the ui will gain and loose options as the user interacts with them
+		if imgui.DragFloat("Contrast", &contrast, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Brightness", &brightness, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Saturation", &saturation, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Exposure", &exposure, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Gamma", &gamma, 0.01) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragInt4("Clear Colour", &scene.clearColour) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.DragFloat("Ambient Light", &scene.ambientLight, 0.001) {
+			updateCommandBuffers(graphicsContext)
+		}
+		if imgui.Checkbox("Draw Light Sources", &drawLights) {
+			updateCommandBuffers(graphicsContext)
+		}
+
+		if imgui.BeginCombo("Scene Selection", scene.name) {
+			for &s, index in scenes {
+				if activeScene != u32(index) && imgui.Selectable(s.name) {
+					setActiveScene(graphicsContext, u32(index))
+					updateCommandBuffers(graphicsContext)
+				}
+			}
+			imgui.EndCombo()
+		}
+
+		if imgui.CollapsingHeader("Cameras") {
+			constructCamerasHeader(graphicsContext)
+			if imgui.Button("Add Camera") {
+				count: u32 = 0
+				for &camera in scene.cameras {
+					if strings.compare(string(camera.name)[:len(camera.name) - 3], "Camera") == 0 {
+						count += 1
+					}
+				}
+				newCamera: Camera = {
+					name     = fmt.caprintf("Camera{:3d}", count),
+					eye      = {0.0, 0.2, -0.4},
+					center   = {0.0, 0.0, 0.0},
+					up       = {0.0, 1.0, 0.0},
+					distance = 1.0,
+					fov      = 45.0,
+					mode     = .PERSPECTIVE,
+				}
+				append(&scene.cameras, newCamera)
+			}
+		}
+
+		if imgui.CollapsingHeader("Lights") {
+			constructLightsHeader(graphicsContext)
+			if imgui.Button("Add Light") {
+				count: u32 = 0
+				for &light in scene.pointLights {
+					if strings.compare(string(light.name)[:len(light.name) - 3], "Light") == 0 {
+						count += 1
+					}
+				}
+
+				newLight: PointLight = {
+					name          = fmt.caprintf("Light{:3d}", count),
+					position      = {0, 2, 0},
+					colour        = {1, 1, 1},
+					intensity     = 1,
+					rotationAngle = 0,
+					rotationAxis  = {0, 1, 0},
+				}
+				append(&scene.pointLights, newLight)
+
+				if vk.DeviceWaitIdle(device) != .SUCCESS {
+					panic("Failed to wait for device?")
+				}
+
+				updateSceneLights(graphicsContext, activeScene)
+				updateCommandBuffers(graphicsContext)
+			}
+		}
+
+		if imgui.CollapsingHeader("Objects") {
+			constructObjectsHeader(graphicsContext)
+			if imgui.Button("Add Object") {
+				count: u32 = 0
+				for &instance in scene.instances {
+					if strings.compare(string(instance.name)[:len(instance.name) - 3], "Object") ==
+					   0 {
+						count += 1
+					}
+				}
+				newInstance: Instance = {
+					name         = fmt.caprintf("Object{:3d}", count),
+					modelID      = 0,
+					animID       = 0,
+					textureIDs   = {0},
+					normalIDs    = {0},
+					position     = {0, 0, 0},
+					rotation     = {0, 0, 0},
+					scale        = {0.2, 0.2, 0.2},
+					positionKeys = make([]u32, len(scene.models[0].skeleton)),
+					rotationKeys = make([]u32, len(scene.models[0].skeleton)),
+					scaleKeys    = make([]u32, len(scene.models[0].skeleton)),
+					animTimer    = 0.0,
+				}
+				scene.boneCount += len(scene.models[0].skeleton)
+				scene.instanceVerticesCount += len(scene.models[0].meshes[0].vertices)
+				append(&scene.instances, newInstance)
+				if vk.DeviceWaitIdle(device) != .SUCCESS {
+					panic("Failed to wait for device idle?")
+				}
+				updateSceneInstanceBuffer(graphicsContext, activeScene)
+
+				updatePreComputeBuffers(graphicsContext)
+				updateShadowMapBuffers(graphicsContext)
+				updateSceneBuffers(graphicsContext)
+			}
+		}
+	}
+
 	constructCamerasHeader :: proc(using graphicsContext: ^GraphicsContext) {
 		scene := &scenes[activeScene]
 
@@ -6886,144 +7026,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			}
 			imgui.EndDisabled()
 			imgui.TreePop()
-		}
-	}
-
-	constructSceneEditor :: proc(using graphicsContext: ^GraphicsContext) {
-		scene := &scenes[activeScene]
-
-		if imgui.BeginMenuBar() {
-			constructMenuBar(graphicsContext)
-			imgui.EndMenuBar()
-		}
-
-		if imgui.Button("Toggle Time", {100, 20}) {
-			paused = !paused
-		}
-
-		// These all have to be seperate otherwise the ui will gain and loose options as the user interacts with them
-		if imgui.DragFloat("Contrast", &contrast, 0.01) {
-			updateCommandBuffers(graphicsContext)
-		}
-		if imgui.DragFloat("Brightness", &brightness, 0.01) {
-			updateCommandBuffers(graphicsContext)
-		}
-		if imgui.DragFloat("Saturation", &saturation, 0.01) {
-			updateCommandBuffers(graphicsContext)
-		}
-		if imgui.DragFloat("Exposure", &exposure, 0.01) {
-			updateCommandBuffers(graphicsContext)
-		}
-		if imgui.DragFloat("Gamma", &gamma, 0.01) {
-			updateCommandBuffers(graphicsContext)
-		}
-		if imgui.DragInt4("Clear Colour", &scene.clearColour) {
-			updateCommandBuffers(graphicsContext)
-		}
-		if imgui.DragFloat("Ambient Light", &scene.ambientLight, 0.001) {
-			updateCommandBuffers(graphicsContext)
-		}
-		if imgui.Checkbox("Draw Light Sources", &drawLights) {
-			updateCommandBuffers(graphicsContext)
-		}
-
-		if imgui.BeginCombo("Scene Selection", scene.name) {
-			for &s, index in scenes {
-				if activeScene != u32(index) && imgui.Selectable(s.name) {
-					setActiveScene(graphicsContext, u32(index))
-					updateCommandBuffers(graphicsContext)
-				}
-			}
-			imgui.EndCombo()
-		}
-
-		if imgui.CollapsingHeader("Cameras") {
-			constructCamerasHeader(graphicsContext)
-			if imgui.Button("Add Camera") {
-				count: u32 = 0
-				for &camera in scene.cameras {
-					if strings.compare(string(camera.name)[:len(camera.name) - 3], "Camera") == 0 {
-						count += 1
-					}
-				}
-				newCamera: Camera = {
-					name     = fmt.caprintf("Camera{:3d}", count),
-					eye      = {0.0, 0.2, -0.4},
-					center   = {0.0, 0.0, 0.0},
-					up       = {0.0, 1.0, 0.0},
-					distance = 1.0,
-					fov      = 45.0,
-					mode     = .PERSPECTIVE,
-				}
-				append(&scene.cameras, newCamera)
-			}
-		}
-
-		if imgui.CollapsingHeader("Lights") {
-			constructLightsHeader(graphicsContext)
-			if imgui.Button("Add Light") {
-				count: u32 = 0
-				for &light in scene.pointLights {
-					if strings.compare(string(light.name)[:len(light.name) - 3], "Light") == 0 {
-						count += 1
-					}
-				}
-
-				newLight: PointLight = {
-					name          = fmt.caprintf("Light{:3d}", count),
-					position      = {0, 2, 0},
-					colour        = {1, 1, 1},
-					intensity     = 1,
-					rotationAngle = 0,
-					rotationAxis  = {0, 1, 0},
-				}
-				append(&scene.pointLights, newLight)
-
-				if vk.DeviceWaitIdle(device) != .SUCCESS {
-					panic("Failed to wait for device?")
-				}
-
-				updateSceneLights(graphicsContext, activeScene)
-				updateCommandBuffers(graphicsContext)
-			}
-		}
-
-		if imgui.CollapsingHeader("Objects") {
-			constructObjectsHeader(graphicsContext)
-			if imgui.Button("Add Object") {
-				count: u32 = 0
-				for &instance in scene.instances {
-					if strings.compare(string(instance.name)[:len(instance.name) - 3], "Object") ==
-					   0 {
-						count += 1
-					}
-				}
-				newInstance: Instance = {
-					name         = fmt.caprintf("Object{:3d}", count),
-					modelID      = 0,
-					animID       = 0,
-					textureIDs   = {0},
-					normalIDs    = {0},
-					position     = {0, 0, 0},
-					rotation     = {0, 0, 0},
-					scale        = {0.2, 0.2, 0.2},
-					positionKeys = make([]u32, len(scene.models[0].skeleton)),
-					rotationKeys = make([]u32, len(scene.models[0].skeleton)),
-					scaleKeys    = make([]u32, len(scene.models[0].skeleton)),
-					animTimer    = 0.0,
-				}
-				scene.boneCount += len(scene.models[0].skeleton)
-				scene.instanceVerticesCount += len(scene.models[0].meshes[0].vertices)
-				append(&scene.instances, newInstance)
-				if vk.DeviceWaitIdle(device) != .SUCCESS {
-					panic("Failed to wait for device idle?")
-				}
-				updateSceneInstanceBuffer(graphicsContext, activeScene)
-
-				updatePreComputeBuffers(graphicsContext)
-				updateShadowMapBuffers(graphicsContext)
-				updateSceneBuffers(graphicsContext)
-			}
 		}
 	}
 
