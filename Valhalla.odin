@@ -22,6 +22,8 @@ baseDir: string
 
 frameCount: u32 = 0
 fpsTimer := time.now()
+@(private = "package")
+fps: f64 = 0.0
 
 @(private = "package")
 paused := false
@@ -154,8 +156,8 @@ main :: proc() {
 		if mouseMode {
 			if mouseDelta.xy != {0, 0} {
 				axis: Vec3 = mouseDelta.xy * matrix[2, 3]f32{
-							up.x, up.y, up.z, 
-							right.x, right.y, right.z, 
+							up.x, up.y, up.z,
+							right.x, right.y, right.z,
 						}
 				rotation := rotation3(radians(cameraRotationSpeed), axis)
 				forward = rotation * forward
@@ -177,13 +179,7 @@ main :: proc() {
 calcFrameRate :: proc(window: glfw.WindowHandle) {
 	frameCount += 1
 	if timeDelta := time.duration_seconds(time.since(fpsTimer)); timeDelta >= 1 {
-		glfw.SetWindowTitle(
-			window,
-			strings.clone_to_cstring(
-				fmt.tprintf("{:.2f}", (f64)(frameCount) / timeDelta),
-				context.temp_allocator,
-			),
-		)
+		fps = f64(frameCount) / timeDelta
 		frameCount = 0
 		fpsTimer = time.now()
 	}
