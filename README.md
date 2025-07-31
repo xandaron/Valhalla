@@ -38,6 +38,10 @@ odin build . -out:bin/build.exe
 
 ## Demo
 
+![Rigged Zombie](demo/Zombie.gif)
+
+*A demo of a rigged 3D model and animation.*
+
 ![RGB Bunny Box](demo/RGB_Bunny_Box.gif)
 
 *The RGB Bunny Box showcases a rendered scene of the Stanford bunny inside a box, lit by Red, Green, and Blue point lights rotating around the Y-axis.*
@@ -45,10 +49,6 @@ odin build . -out:bin/build.exe
 ![GUI Demo](demo/GUI_Demo.gif)
 
 *A demo of imgui in action.*
-
-![Rigged Zombie](demo/Zombie_Walking.gif)
-
-*A demo of a rigged 3D model and animation.*
 
 ![CMY Bunny](demo/CMY_Bunny.gif)
 

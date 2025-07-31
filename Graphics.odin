@@ -509,7 +509,7 @@ initVkGraphics :: proc(
 		gamma = 1.0
 	} else {
 		tonemapper = 0.0
-		gamma = 2.2
+		gamma =  2.2
 	}
 	scenes = make([dynamic]Scene)
 
@@ -6482,7 +6482,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				createNewScene(graphicsContext)
 				setActiveScene(graphicsContext, u32(len(scenes) - 1))
 			}
-			if imgui.MenuItem("Load") {
+			if imgui.MenuItem("Open") {
 				filterPatterns := []cstring{"*.json"}
 				path, _ := filepath.abs("./assets/scenes/")
 				defer delete(path)
@@ -6490,7 +6490,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					baseDir,
 					string(
 						tinyfd.openFileDialog(
-							"Load Scene",
+							"Open Scene",
 							fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
 							i32(len(filterPatterns)),
 							raw_data(filterPatterns),
