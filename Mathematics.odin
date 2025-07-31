@@ -79,9 +79,12 @@ lerp :: proc {
 	linalg.lerp,
 	vector3Lerp,
 	vector4Lerp,
-	linalg.quaternion_nlerp_f16,
-	linalg.quaternion_nlerp_f32,
-	linalg.quaternion_nlerp_f64,
+}
+
+slerp :: proc {
+	linalg.quaternion_slerp_f16,
+	linalg.quaternion_slerp_f32,
+	linalg.quaternion_slerp_f64,
 }
 
 lookAt :: proc(eye, center, up: Vec3) -> Mat4 {

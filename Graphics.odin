@@ -2113,16 +2113,6 @@ loadModels :: proc(
 
 			for faceIndex in 0 ..< sceneMesh.mNumFaces {
 				face := sceneMesh.mFaces[faceIndex]
-
-				// Assimp should triangulate the mesh so this should be unnecessary.
-				// I'll only check this in debug builds.
-				when ODIN_DEBUG {
-					if face.mNumIndices != 3 {
-						log.logf(.Error, "Model has non-triangular faces!")
-						panic("Model has non-triangular faces!")
-					}
-				}
-
 				for indiceIndex in 0 ..< 3 {
 					mesh.indices[faceIndex * 3 + u32(indiceIndex)] = u32(
 						face.mIndices[indiceIndex],
@@ -5621,7 +5611,6 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 
 		model := &scene.models[instance.modelID]
 
-		// If the skeleton is empty, or the model has no animations, use the identity matrix.
 		if len(model.skeleton) == 0 || len(model.animations) == 0 {
 			instanceData[instanceIndex].boneOffset = 0
 			continue
@@ -5686,7 +5675,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 				nextTime := node.keyRotations[instance.rotationKeys[nodeIndex] + 1].time
 				timeDiff := f32((instance.animTimer - thisTime) / (nextTime - thisTime))
 				transform *= quatToRotation(
-					lerp(
+					slerp(
 						node.keyRotations[instance.rotationKeys[nodeIndex]].value,
 						node.keyRotations[instance.rotationKeys[nodeIndex] + 1].value,
 						f32(timeDiff),
@@ -7004,7 +6993,13 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					}
 					imgui.EndCombo()
 				}
-				imgui.DragScalar("Animation Timer", .Double, &modelInstance.animTimer, 0.01)
+				if imgui.DragScalar("Animation Timer", .Double, &modelInstance.animTimer, 0.01) {
+					if modelInstance.animTimer < 0 {
+						modelInstance.animTimer =
+							scene.models[modelInstance.modelID].animations[modelInstance.animID].duration +
+							modelInstance.animTimer
+					}
+				}
 			}
 			imgui.BeginDisabled(len(scene.instances) == 1)
 			if imgui.Button("Delete") {
