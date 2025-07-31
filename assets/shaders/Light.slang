@@ -13,56 +13,61 @@ ConstantBuffer<PushConstants> pushConstants;
 #define PI 3.14159265358979323846264338327950288
 #define tanHalfFOVReciprocal (1.0 / tan(PI / 4.0))
 
-float4x4 getProjection(Light light)
-{
+float4x4 projection(Light light) {
     return float4x4(
         float4(tanHalfFOVReciprocal, 0, 0, 0),
         float4(0, tanHalfFOVReciprocal, 0, 0),
-        float4(0, 0, light.far / (light.near - light.far), -1),
-        float4(0, 0, -(light.far * light.near) / (light.far - light.near), 0));
+        float4(0, 0, light.far / (light.near - light.far), -(light.far * light.near) / (light.far - light.near)),
+        float4(0, 0, -1, 0),
+    );
 }
 
-float4x4 getView(Light light, uint face)
+float4x4 view(Light light, uint face)
 {
-    // Cube map face view matrices
     switch (face)
     {
     case 0: // +X
-        return mul(getProjection(light), float4x4(
-                                             float4(0, 0, -1, 0),
-                                             float4(0, -1, 0, 0),
-                                             float4(-1, 0, 0, 0),
-                                             float4(light.position.z, light.position.y, light.position.x, 1)));
+        return float4x4(
+            float4(0, 0, -1, light.position.z),
+            float4(0, -1, 0, light.position.y),
+            float4(-1, 0, 0, light.position.x),
+            float4(0, 0, 0, 1)
+        );
     case 1: // -X
-        return mul(getProjection(light), float4x4(
-                                             float4(0, 0, 1, 0),
-                                             float4(0, -1, 0, 0),
-                                             float4(1, 0, 0, 0),
-                                             float4(-light.position.z, light.position.y, -light.position.x, 1)));
+        return float4x4(
+            float4(0, 0, 1, -light.position.z),
+            float4(0, -1, 0, light.position.y),
+            float4(1, 0, 0, -light.position.x),
+            float4(0, 0, 0, 1)
+        );
     case 2: // +Y
-        return mul(getProjection(light), float4x4(
-                                             float4(1, 0, 0, 0),
-                                             float4(0, 0, -1, 0),
-                                             float4(0, 1, 0, 0),
-                                             float4(-light.position.x, -light.position.z, light.position.y, 1)));
+        return float4x4(
+            float4(1, 0, 0, -light.position.x),
+            float4(0, 0, 1, -light.position.z),
+            float4(0, -1, 0, light.position.y),
+            float4(0, 0, 0, 1)
+        );
     case 3: // -Y
-        return mul(getProjection(light), float4x4(
-                                             float4(1, 0, 0, 0),
-                                             float4(0, 0, 1, 0),
-                                             float4(0, -1, 0, 0),
-                                             float4(-light.position.x, light.position.z, -light.position.y, 1)));
+        return float4x4(
+            float4(1, 0, 0, -light.position.x),
+            float4(0, 0, -1, light.position.z),
+            float4(0, 1, 0, -light.position.y),
+            float4(0, 0, 0, 1)
+        );
     case 4: // +Z
-        return mul(getProjection(light), float4x4(
-                                             float4(1, 0, 0, 0),
-                                             float4(0, -1, 0, 0),
-                                             float4(0, 0, -1, 0),
-                                             float4(-light.position.x, light.position.y, light.position.z, 1)));
+        return float4x4(
+            float4(1, 0, 0, -light.position.x),
+            float4(0, -1, 0, light.position.y),
+            float4(0, 0, -1, light.position.z),
+            float4(0, 0, 0, 1)
+        );
     case 5: // -Z
-        return mul(getProjection(light), float4x4(
-                                             float4(-1, 0, 0, 0),
-                                             float4(0, -1, 0, 0),
-                                             float4(0, 0, 1, 0),
-                                             float4(light.position.x, light.position.y, -light.position.z, 1)));
+        return float4x4(
+            float4(-1, 0, 0, light.position.x),
+            float4(0, -1, 0, light.position.y),
+            float4(0, 0, 1, -light.position.z),
+            float4(0, 0, 0, 1)
+        );
     }
     return float4x4(1.0); // Fallback, should never happen
 }
@@ -70,7 +75,7 @@ float4x4 getView(Light light, uint face)
 struct VertOut
 {
     float4 position : SV_Position;
-    uint layer : SV_ViewportArrayIndex;
+    uint layer : SV_RenderTargetArrayIndex;
     float depth;
 };
 
@@ -84,7 +89,7 @@ VertOut vert(Vertex input, uint vertexID: SV_VertexID)
     float4 vertexPosition = mul(vertexTransform, float4(input.position, 1.0));
 
     uint face = pushConstants.layerIndex % 6;
-    float4x4 viewProj = getView(light, face);
+    float4x4 viewProj = mul(projection(light), view(light, face));
 
     output.position = mul(viewProj, vertexPosition);
     output.layer = pushConstants.layerIndex;

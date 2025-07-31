@@ -17,11 +17,31 @@ struct VertOut
 {
     float4 position : SV_Position;
     float3 worldPosition : POSITION;
-    float3 normal : NORMAL;
-    float3 tangent : TANGENT;
-    float3 bitangent : BITANGENT;
+    float3x3 TBN;
     float2 uv : TEXCOORD0;
 };
+
+float3x3 inverse3x3(float3x3 m)
+{
+    float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+              - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+              + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+
+    float invDet = 1.0 / det;
+
+    float3x3 inv;
+    inv[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * invDet;
+    inv[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * invDet;
+    inv[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * invDet;
+    inv[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * invDet;
+    inv[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * invDet;
+    inv[1][2] = (m[0][2] * m[1][0] - m[0][0] * m[1][2]) * invDet;
+    inv[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * invDet;
+    inv[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) * invDet;
+    inv[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * invDet;
+
+    return inv;
+}
 
 [shader("vertex")]
 VertOut vert(Vertex vertex, uint vertexID: SV_VertexID)
@@ -33,10 +53,12 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID)
     output.position = mul(uniformBuffer.viewProjection, worldPosition);
     output.worldPosition = worldPosition.xyz / worldPosition.w;
 
-    output.normal = normalize(mul((float3x3)vertexTransform, vertex.normal));
-    output.tangent = normalize(mul((float3x3)vertexTransform, vertex.tangent));
-    output.bitangent = normalize(mul((float3x3)vertexTransform, vertex.bitangent));
-
+    // I think this is correct but I'm seeing weird artifacts
+    output.TBN = mul(transpose(inverse3x3((float3x3)vertexTransform)), transpose(float3x3(
+        vertex.tangent,
+        vertex.bitangent,
+        vertex.normal,
+    )));
     output.uv = vertex.uv;
 
     return output;
@@ -72,15 +94,10 @@ FragOut frag(VertOut input)
 
     float3 cumulativeColour = { 0.0, 0.0, 0.0 };
 
-    const float3 albedo = pow(albedoArray.Sample(float3(input.uv, pushConstants.albedoTextureIndex)).xyz, 1 / 2.2);
+    const float3 albedo = pow(albedoArray.Sample(float3(input.uv, pushConstants.albedoTextureIndex)).xyz, 1.0 / 2.2);
 
-    const float3x3 TBN = transpose(float3x3(
-        input.tangent,
-        input.bitangent,
-        input.normal
-    ));
-    const float3 normalSample = 2 * normalArray.Sample(float3(input.uv, pushConstants.normalTextureIndex)).xyz - 1;
-    const float3 normal = normalize(mul(TBN, normalSample));
+    const float3 normalSample = 2.0 * normalArray.Sample(float3(input.uv, pushConstants.normalTextureIndex)).xyz - 1.0;
+    const float3 normal = normalize(mul(input.TBN, normalSample));
 
     for (uint index = 0; index < uniformBuffer.lightCount; index++)
     {

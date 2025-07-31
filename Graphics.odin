@@ -4213,7 +4213,7 @@ updateSceneLights :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u
 				sType = .WRITE_DESCRIPTOR_SET,
 				pNext = nil,
 				dstSet = descriptorSets[DescriptorSetIndex.BUFFERS].sets[index],
-				dstBinding = 5,
+				dstBinding = 6,
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .STORAGE_BUFFER,
