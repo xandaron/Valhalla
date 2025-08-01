@@ -528,6 +528,100 @@ initVkGraphics :: proc(
 	return
 }
 
+@(private = "package")
+cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
+	graphicsContext := graphicsContext
+	if vk.DeviceWaitIdle(device) != .SUCCESS {
+		panic("Failed to wait for device idle!")
+	}
+
+	for index := len(scenes) - 1; index >= 0; index -= 1 {
+		cleanupScene(graphicsContext, u32(index))
+	}
+	delete(scenes)
+
+	when UI_ENABLED {
+		cleanupImgui(graphicsContext)
+		vk.DestroyDescriptorPool(device, imguiData.descriptorPool, nil)
+	}
+
+	vk.FreeCommandBuffers(device, computeCommandPool, 2, &preComputeCommandBuffers[0])
+	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &mainCommandBuffers[0])
+	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &shadowMapCommandBuffers[0])
+	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &sceneCommandBuffers[0])
+	when UI_ENABLED {
+		vk.FreeCommandBuffers(device, computeCommandPool, 2, &postComputeCommandBuffers[0])
+		vk.FreeCommandBuffers(
+			device,
+			graphicsCommandPool,
+			u32(len(swapchainImages)),
+			&uiCommandBuffers[0],
+		)
+	} else {
+		vk.FreeCommandBuffers(
+			device,
+			computeCommandPool,
+			u32(len(swapchainImages)),
+			raw_data(postComputeCommandBuffers),
+		)
+	}
+
+	vk.DestroyCommandPool(device, graphicsCommandPool, nil)
+	vk.DestroyCommandPool(device, computeCommandPool, nil)
+
+	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		vk.DestroyFence(device, inFlightFrames[index], nil)
+		vk.DestroySemaphore(device, preComputeFinished[index], nil)
+		vk.DestroySemaphore(device, rendersFinished[index], nil)
+		vk.DestroySemaphore(device, computeFinished[index], nil)
+		vk.DestroySemaphore(device, uiFinished[index], nil)
+		vk.DestroySemaphore(device, imagesAvailable[index], nil)
+	}
+
+	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		cleanupBuffer(graphicsContext, &uniformBuffers[index])
+	}
+
+	for index in 0 ..< len(swapchainImages) {
+		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.MAIN].frameBuffers[index], nil)
+		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
+	}
+	delete(pipelines[PipelineIndex.MAIN].frameBuffers)
+	delete(pipelines[PipelineIndex.LIGHT].frameBuffers)
+
+	cleanupSwapchain(graphicsContext)
+	cleanupPipelines(graphicsContext)
+
+	vk.DestroyRenderPass(device, pipelines[PipelineIndex.LIGHT].renderPass, nil)
+	vk.DestroyRenderPass(device, pipelines[PipelineIndex.MAIN].renderPass, nil)
+
+	cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].colour)
+	cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].depth)
+	cleanupImage(graphicsContext, &pipelines[PipelineIndex.MAIN].colour)
+	cleanupImage(graphicsContext, &pipelines[PipelineIndex.MAIN].depth)
+
+	for &descriptorSet in descriptorSets {
+		vk.DestroyDescriptorPool(device, descriptorSet.pool, nil)
+		vk.DestroyDescriptorSetLayout(device, descriptorSet.layout, nil)
+	}
+
+	cleanupSamplers(graphicsContext)
+
+	vk.DestroyDevice(device, nil)
+	vk.DestroySurfaceKHR(instance, surface, nil)
+
+	when ODIN_DEBUG {
+		vk.DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nil)
+	}
+
+	vk.DestroyInstance(instance, nil)
+
+	slang.shutdown()
+
+	glfw.DestroyWindow(window)
+	glfw.Terminate()
+}
+
 createInstance :: proc(using graphicsContext: ^GraphicsContext) {
 	appInfo: vk.ApplicationInfo = {
 		sType              = .APPLICATION_INFO,
@@ -681,113 +775,6 @@ updateGLFWScrollCallback :: proc(
 	scrollCallback: ScrollCallback,
 ) {
 	glfw.SetScrollCallback(graphicsContext.window, scrollCallback)
-}
-
-@(private = "package")
-cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
-	graphicsContext := graphicsContext
-	if vk.DeviceWaitIdle(device) != .SUCCESS {
-		panic("Failed to wait for device idle!")
-	}
-
-	for index := len(scenes) - 1; index >= 0; index -= 1 {
-		cleanupScene(graphicsContext, u32(index))
-	}
-	delete(scenes)
-
-	when UI_ENABLED {
-		cleanupImgui(graphicsContext)
-		vk.DestroyDescriptorPool(device, imguiData.descriptorPool, nil)
-	}
-
-	vk.FreeCommandBuffers(device, computeCommandPool, 2, &preComputeCommandBuffers[0])
-	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &mainCommandBuffers[0])
-	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &shadowMapCommandBuffers[0])
-	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &sceneCommandBuffers[0])
-	when UI_ENABLED {
-		vk.FreeCommandBuffers(device, computeCommandPool, 2, &postComputeCommandBuffers[0])
-		vk.FreeCommandBuffers(
-			device,
-			graphicsCommandPool,
-			u32(len(swapchainImages)),
-			&uiCommandBuffers[0],
-		)
-	} else {
-		vk.FreeCommandBuffers(
-			device,
-			computeCommandPool,
-			u32(len(swapchainImages)),
-			raw_data(postComputeCommandBuffers),
-		)
-	}
-
-	vk.DestroyCommandPool(device, graphicsCommandPool, nil)
-	vk.DestroyCommandPool(device, computeCommandPool, nil)
-
-	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.DestroyFence(device, inFlightFrames[index], nil)
-		vk.DestroySemaphore(device, preComputeFinished[index], nil)
-		vk.DestroySemaphore(device, rendersFinished[index], nil)
-		vk.DestroySemaphore(device, computeFinished[index], nil)
-		vk.DestroySemaphore(device, uiFinished[index], nil)
-		vk.DestroySemaphore(device, imagesAvailable[index], nil)
-	}
-
-	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		cleanupBuffer(graphicsContext, &uniformBuffers[index])
-	}
-
-	for index in 0 ..< len(swapchainImages) {
-		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.MAIN].frameBuffers[index], nil)
-		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
-	}
-	delete(pipelines[PipelineIndex.MAIN].frameBuffers)
-	delete(pipelines[PipelineIndex.LIGHT].frameBuffers)
-
-	cleanupSwapchain(graphicsContext)
-
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.PRECOMPUTE].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.PRECOMPUTE].layout, nil)
-
-	// LIGHT
-	cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].colour)
-	cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].depth)
-
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.LIGHT].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.LIGHT].layout, nil)
-	vk.DestroyRenderPass(device, pipelines[PipelineIndex.LIGHT].renderPass, nil)
-
-	// MAIN
-	cleanupImage(graphicsContext, &pipelines[PipelineIndex.MAIN].colour)
-	cleanupImage(graphicsContext, &pipelines[PipelineIndex.MAIN].depth)
-
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.MAIN].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.MAIN].layout, nil)
-	vk.DestroyRenderPass(device, pipelines[PipelineIndex.MAIN].renderPass, nil)
-
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.POSTPROCESS].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.POSTPROCESS].layout, nil)
-
-	for &descriptorSet in descriptorSets {
-		vk.DestroyDescriptorPool(device, descriptorSet.pool, nil)
-		vk.DestroyDescriptorSetLayout(device, descriptorSet.layout, nil)
-	}
-
-	cleanupSamplers(graphicsContext)
-
-	vk.DestroyDevice(device, nil)
-	vk.DestroySurfaceKHR(instance, surface, nil)
-
-	when ODIN_DEBUG {
-		vk.DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nil)
-	}
-
-	vk.DestroyInstance(instance, nil)
-
-	slang.shutdown()
-
-	glfw.DestroyWindow(window)
-	glfw.Terminate()
 }
 
 
@@ -3456,6 +3443,11 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext, sceneIndex
 		imageLayout = .SHADER_READ_ONLY_OPTIMAL,
 	}
 
+	if renderedImage.vkImage != 0 {
+		cleanupImage(graphicsContext, &renderedImage)
+		cleanupImage(graphicsContext, &processedImage)
+	}
+
 	renderedImage.format = .R16G16B16A16_SFLOAT
 	createImage(
 		graphicsContext,
@@ -4103,7 +4095,7 @@ updateSceneTextures :: proc(using graphicsContext: ^GraphicsContext, sceneIndex:
 				sType = .WRITE_DESCRIPTOR_SET,
 				pNext = nil,
 				dstSet = descriptorSets[DescriptorSetIndex.TEXTURES].sets[index],
-				dstBinding = 4,
+				dstBinding = 0,
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .COMBINED_IMAGE_SAMPLER,
@@ -4137,7 +4129,7 @@ updateSceneNormals :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: 
 				sType = .WRITE_DESCRIPTOR_SET,
 				pNext = nil,
 				dstSet = descriptorSets[DescriptorSetIndex.TEXTURES].sets[index],
-				dstBinding = 5,
+				dstBinding = 1,
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .COMBINED_IMAGE_SAMPLER,
@@ -5289,6 +5281,27 @@ createComputePipelines :: proc(
 	pipelines[PipelineIndex.POSTPROCESS].pipeline = vkPipelines[1]
 }
 
+cleanupPipelines :: proc(using graphicsContext: ^GraphicsContext) {
+	vk.DestroyPipeline(device, pipelines[PipelineIndex.PRECOMPUTE].pipeline, nil)
+	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.PRECOMPUTE].layout, nil)
+
+	vk.DestroyPipeline(device, pipelines[PipelineIndex.LIGHT].pipeline, nil)
+	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.LIGHT].layout, nil)
+
+	vk.DestroyPipeline(device, pipelines[PipelineIndex.MAIN].pipeline, nil)
+	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.MAIN].layout, nil)
+
+	vk.DestroyPipeline(device, pipelines[PipelineIndex.POSTPROCESS].pipeline, nil)
+	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.POSTPROCESS].layout, nil)
+}
+
+reloadShaders :: proc(using graphicsContext: ^GraphicsContext) {
+	cleanupPipelines(graphicsContext)
+	createGraphicsPipelines(graphicsContext)
+	createComputePipelines(graphicsContext)
+	updateDescriptorSets(graphicsContext, activeScene)
+}
+
 
 // ###################################################################
 // #                              Imgui                              #
@@ -5747,22 +5760,13 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
+		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
+
 		recordPreComputeBuffer(graphicsContext, bufferIndex)
 		recordShadowMapBuffer(graphicsContext, bufferIndex)
 		recordSceneBuffers(graphicsContext, bufferIndex)
 		recordMainGraphicsBuffer(graphicsContext, bufferIndex)
-
-		when UI_ENABLED {
-			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-			recordPostComputeBuffer(graphicsContext, bufferIndex)
-		}
-	}
-
-	when !UI_ENABLED {
-		for bufferIndex in 0 ..< len(swapchainImages) {
-			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-			recordPostComputeBuffer(graphicsContext, u32(bufferIndex))
-		}
+		recordPostComputeBuffer(graphicsContext, bufferIndex)
 	}
 }
 
@@ -6551,8 +6555,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			if imgui.BeginMenu("Import") {
 				if imgui.MenuItem("Model") {
 					filterPatterns := []cstring{"*.gltf", "*.glb", "*.fbx", "*.obj"}
-					path, _ := filepath.abs("./assets/models/")
-					defer delete(path)
+					path, _ := filepath.abs("./assets/models/", context.temp_allocator)
 					file, err := filepath.rel(
 						baseDir,
 						string(
@@ -6565,8 +6568,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 								0,
 							),
 						),
+						context.temp_allocator
 					)
-					defer delete(file)
 
 					if file != "" {
 						alreadyLoaded := false
@@ -6591,8 +6594,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				}
 				if imgui.MenuItem("Texture") {
 					filterPatterns := []cstring{"*.jpg", "*.jpeg", "*.png"}
-					path, _ := filepath.abs("./assets/textures/")
-					defer delete(path)
+					path, _ := filepath.abs("./assets/textures/", context.temp_allocator)
 					file, err := filepath.rel(
 						baseDir,
 						string(
@@ -6605,8 +6607,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 								0,
 							),
 						),
+						context.temp_allocator,
 					)
-					defer delete(file)
 
 					extension := filepath.ext(file)[1:]
 					if file != "" && extension == "png" ||
@@ -6727,10 +6729,13 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			for &s, index in scenes {
 				if activeScene != u32(index) && imgui.Selectable(s.name) {
 					setActiveScene(graphicsContext, u32(index))
-					updateCommandBuffers(graphicsContext)
 				}
 			}
 			imgui.EndCombo()
+		}
+
+		if imgui.CollapsingHeader("Shaders") {
+			constructShaderEditor(graphicsContext)
 		}
 
 		if imgui.CollapsingHeader("Cameras") {
@@ -6820,6 +6825,17 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				updateShadowMapBuffers(graphicsContext)
 				updateSceneBuffers(graphicsContext)
 			}
+		}
+	}
+
+	constructShaderEditor :: proc(using graphicsContext: ^GraphicsContext) {
+		if imgui.Button("Reload Shaders") {
+			if vk.DeviceWaitIdle(device) != .SUCCESS {
+				panic("Failed to wait for device idle?")
+			}
+
+			reloadShaders(graphicsContext)
+			updateCommandBuffers(graphicsContext)
 		}
 	}
 

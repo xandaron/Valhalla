@@ -1,8 +1,9 @@
 bin/*
-logs/*
-NSight/*
+logs/
+NSight/
 imgui.ini
-.zed/*
-.vscode/*
+.zed/
+.vscode/
 ols.json
-docs/*
+docs/
+assets_game/
