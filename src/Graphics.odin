@@ -3,6 +3,11 @@
 package Valhalla
 
 import ai "../assimp"
+import "../imgui"
+import imguiGLFW "../imgui/imgui_impl_glfw"
+import imguiVulkan "../imgui/imgui_impl_vulkan"
+import "../slang"
+import tinyfd "../tinyfiledialogs"
 import "base:runtime"
 import "core:c"
 import "core:encoding/json"
@@ -12,11 +17,6 @@ import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
-import "../imgui"
-import imguiGLFW "../imgui/imgui_impl_glfw"
-import imguiVulkan "../imgui/imgui_impl_vulkan"
-import "../slang"
-import tinyfd "../tinyfiledialogs"
 import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -188,6 +188,7 @@ Image :: struct {
 LightData :: struct #align (16) {
 	position:        Vec4,
 	colourIntensity: Vec4,
+	dropoff:         f32,
 	near:            f32,
 	far:             f32,
 }
@@ -263,12 +264,11 @@ Pipeline :: struct {
 }
 
 PointLight :: struct {
-	name:          cstring,
-	position:      Vec3,
-	colour:        Vec3,
-	intensity:     f32,
-	rotationAngle: f32,
-	rotationAxis:  Vec3,
+	name:      cstring,
+	position:  Vec3,
+	colour:    Vec3,
+	intensity: f32,
+	dropoff:   f32,
 }
 
 Instance :: struct {
@@ -509,7 +509,7 @@ initVkGraphics :: proc(
 		gamma = 1.0
 	} else {
 		tonemapper = 0.0
-		gamma =  2.2
+		gamma = 2.2
 	}
 	scenes = make([dynamic]Scene)
 
@@ -2832,12 +2832,10 @@ createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
 
 	scene.pointLights = make([dynamic]PointLight, 1)
 	scene.pointLights[0] = {
-		name          = strings.clone_to_cstring("white light"),
-		position      = {0, 2, 0},
-		colour        = {1, 1, 1},
-		intensity     = 1,
-		rotationAngle = 0,
-		rotationAxis  = {0, 1, 0},
+		name      = strings.clone_to_cstring("white light"),
+		position  = {0, 2, 0},
+		colour    = {1, 1, 1},
+		intensity = 1,
 	}
 
 	scene.cameras = make([dynamic]Camera, 1)
@@ -3919,6 +3917,18 @@ updateSceneInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, scene
 				pBufferInfo = &transformBufferInfo,
 				pTexelBufferView = nil,
 			},
+			{
+				sType = .WRITE_DESCRIPTOR_SET,
+				pNext = nil,
+				dstSet = descriptorSets[DescriptorSetIndex.BUFFERS].sets[index],
+				dstBinding = 5,
+				dstArrayElement = 0,
+				descriptorCount = 1,
+				descriptorType = .STORAGE_BUFFER,
+				pImageInfo = nil,
+				pBufferInfo = &transformBufferInfo,
+				pTexelBufferView = nil,
+			},
 		}
 
 		vk.UpdateDescriptorSets(
@@ -4689,7 +4699,11 @@ createShaderModules :: proc(
 	}
 
 	for i in 0 ..< len(entryPoints) {
-		entryPoint := slang.findEntryPoint(module, entryPoints[i], stages[i], nil)
+		entryPoint := slang.findEntryPoint(module, entryPoints[i], stages[i], &diagnosticsBlob)
+		if str := cstring(slang.getBlobData(diagnosticsBlob)); str != "" {
+			log.log(.Error, str)
+			slang.releaseBlob(diagnosticsBlob)
+		}
 		if entryPoint == nil {
 			panic("Failed to find entry point")
 		}
@@ -4808,7 +4822,7 @@ createGraphicsPipelines :: proc(
 	shadowShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
 	shadowShaderModules := createShaderModules(
 		graphicsContext,
-		"./assets/shaders/Light.slang",
+		"./assets/shaders/Shadow.slang",
 		shadowEntryPoints[:],
 		{.VERTEX, .FRAGMENT},
 	)
@@ -5540,12 +5554,6 @@ updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 		direction: Vec3
 		lookAtVector: Vec3
 
-		if light.rotationAxis != {0, 0, 0} {
-			light.position =
-				rotation3(f32(radians(light.rotationAngle * delta)), light.rotationAxis) *
-				light.position
-		}
-
 		direction = normalize(Vec3{0, 0, 0} - light.position)
 		lookAtVector = Vec3{0, 0, 0}
 		up: Vec3
@@ -5559,6 +5567,7 @@ updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 		lightData[i] = {
 			position        = Vec4{light.position.x, light.position.y, light.position.z, 1},
 			colourIntensity = Vec4{colourIntensity.x, colourIntensity.y, colourIntensity.z, 0},
+			dropoff         = light.dropoff,
 			near            = 0.01,
 			far             = 1000.0,
 		}
@@ -5760,13 +5769,23 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
 
 		recordPreComputeBuffer(graphicsContext, bufferIndex)
 		recordShadowMapBuffer(graphicsContext, bufferIndex)
 		recordSceneBuffers(graphicsContext, bufferIndex)
 		recordMainGraphicsBuffer(graphicsContext, bufferIndex)
-		recordPostComputeBuffer(graphicsContext, bufferIndex)
+
+		when UI_ENABLED {
+			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
+			recordPostComputeBuffer(graphicsContext, bufferIndex)
+		}
+	}
+
+	when !UI_ENABLED {
+		for bufferIndex in 0 ..< u32(len(swapchainImages)) {
+			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
+			recordPostComputeBuffer(graphicsContext, bufferIndex)
+		}
 	}
 }
 
@@ -5837,13 +5856,6 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 	if vk.EndCommandBuffer(preComputeCommandBuffers[index]) != .SUCCESS {
 		log.log(.Error, "Failed to record command buffer!")
 		panic("Failed to record command buffer!")
-	}
-}
-
-updatePreComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
-	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.ResetCommandBuffer(preComputeCommandBuffers[bufferIndex], {})
-		recordPreComputeBuffer(graphicsContext, bufferIndex)
 	}
 }
 
@@ -5950,13 +5962,6 @@ recordMainGraphicsBuffer :: proc(using graphicsContext: ^GraphicsContext, index:
 	}
 }
 
-updateMainGraphicsBuffers :: proc(using graphicsContext: ^GraphicsContext) {
-	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
-		recordMainGraphicsBuffer(graphicsContext, bufferIndex)
-	}
-}
-
 recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	scene := &scenes[activeScene]
 
@@ -6056,13 +6061,6 @@ recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u3
 	}
 }
 
-updateShadowMapBuffers :: proc(using graphicsContext: ^GraphicsContext) {
-	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
-		recordShadowMapBuffer(graphicsContext, bufferIndex)
-	}
-}
-
 recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	scene := &scenes[activeScene]
 
@@ -6159,13 +6157,6 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 	if vk.EndCommandBuffer(sceneCommandBuffers[index]) != .SUCCESS {
 		log.log(.Error, "Failed to record command buffer!")
 		panic("Failed to record command buffer!")
-	}
-}
-
-updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext) {
-	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
-		recordSceneBuffers(graphicsContext, bufferIndex)
 	}
 }
 
@@ -6377,19 +6368,6 @@ recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: 
 	}
 }
 
-updatePostComputeBuffers :: proc(using graphicsContext: ^GraphicsContext) {
-	loopLength: u32
-	when UI_ENABLED {
-		loopLength = MAX_FRAMES_IN_FLIGHT
-	} else {
-		loopLength = u32(len(swapchainImages))
-	}
-	for bufferIndex in 0 ..< loopLength {
-		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-		recordPostComputeBuffer(graphicsContext, u32(bufferIndex))
-	}
-}
-
 recordUIBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
@@ -6568,7 +6546,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 								0,
 							),
 						),
-						context.temp_allocator
+						context.temp_allocator,
 					)
 
 					if file != "" {
@@ -6771,12 +6749,10 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				}
 
 				newLight: PointLight = {
-					name          = fmt.caprintf("Light{:3d}", count),
-					position      = {0, 2, 0},
-					colour        = {1, 1, 1},
-					intensity     = 1,
-					rotationAngle = 0,
-					rotationAxis  = {0, 1, 0},
+					name      = fmt.caprintf("Light{:3d}", count),
+					position  = {0, 2, 0},
+					colour    = {1, 1, 1},
+					intensity = 1,
 				}
 				append(&scene.pointLights, newLight)
 
@@ -6799,20 +6775,23 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 						count += 1
 					}
 				}
+
 				newInstance: Instance = {
 					name         = fmt.caprintf("Object{:3d}", count),
 					modelID      = 0,
 					animID       = 0,
-					textureIDs   = {0},
-					normalIDs    = {0},
+					textureIDs   = make([]u32, 1),
+					normalIDs    = make([]u32, 1),
 					position     = {0, 0, 0},
 					rotation     = {0, 0, 0},
-					scale        = {0.2, 0.2, 0.2},
+					scale        = {1, 1, 1},
 					positionKeys = make([]u32, len(scene.models[0].skeleton)),
 					rotationKeys = make([]u32, len(scene.models[0].skeleton)),
 					scaleKeys    = make([]u32, len(scene.models[0].skeleton)),
 					animTimer    = 0.0,
 				}
+				newInstance.textureIDs[0] = 0
+				newInstance.normalIDs[0] = 0
 				scene.boneCount += len(scene.models[0].skeleton)
 				scene.instanceVerticesCount += len(scene.models[0].meshes[0].vertices)
 				append(&scene.instances, newInstance)
@@ -6820,10 +6799,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					panic("Failed to wait for device idle?")
 				}
 				updateSceneInstanceBuffer(graphicsContext, activeScene)
-
-				updatePreComputeBuffers(graphicsContext)
-				updateShadowMapBuffers(graphicsContext)
-				updateSceneBuffers(graphicsContext)
+				updateCommandBuffers(graphicsContext)
 			}
 		}
 	}
@@ -6885,11 +6861,9 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				continue
 			}
 			imgui.DragFloat3("Position", &light.position, 0.001)
-			imgui.DragFloat3("Colour", &light.colour, 0.01, 0.0, 1.0)
+			imgui.DragFloat3("Colour", &light.colour, 0.01, 0.1, 1.0)
 			imgui.DragFloat("Intensity", &light.intensity, 0.01)
-			imgui.SeparatorText("Movement")
-			imgui.DragFloat("Degrees", &light.rotationAngle, 0.001)
-			imgui.DragFloat3("Axis", &light.rotationAxis, 0.001)
+			imgui.DragFloat("Dropoff", &light.dropoff, 0.1)
 			imgui.BeginDisabled(len(scene.pointLights) == 1)
 			if imgui.Button("Delete") {
 				delete(light.name)
@@ -7020,6 +6994,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			imgui.BeginDisabled(len(scene.instances) == 1)
 			if imgui.Button("Delete") {
 				delete(modelInstance.name)
+				delete(modelInstance.textureIDs)
+				delete(modelInstance.normalIDs)
 				delete(modelInstance.positionKeys)
 				delete(modelInstance.rotationKeys)
 				delete(modelInstance.scaleKeys)
@@ -7077,7 +7053,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 		&imageIndex,
 	); result == .ERROR_OUT_OF_DATE_KHR {
 		recreateSwapchain(graphicsContext)
-		updatePostComputeBuffers(graphicsContext)
+		updateCommandBuffers(graphicsContext)
 		return
 	} else if result != .SUCCESS && result != .SUBOPTIMAL_KHR {
 		log.logf(.Error, "Failed to aquire swapchain image! {}", result)
@@ -7343,7 +7319,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	if result := vk.QueuePresentKHR(presentQueue, &presentInfo);
 	   result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR {
 		recreateSwapchain(graphicsContext)
-		updatePostComputeBuffers(graphicsContext)
+		updateCommandBuffers(graphicsContext)
 	} else if result != .SUCCESS {
 		log.logf(.Error, "Failed to present swapchain image! {}", result)
 		panic("Failed to present swapchain image!")
