@@ -2,7 +2,7 @@
 
 package Valhalla
 
-import ai "assimp"
+import ai "../assimp"
 import "base:runtime"
 import "core:c"
 import "core:encoding/json"
@@ -12,11 +12,11 @@ import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
-import "imgui"
-import implGLFW "imgui/imgui_impl_glfw"
-import implVulkan "imgui/imgui_impl_vulkan"
-import "slang"
-import tinyfd "tinyfiledialogs"
+import "../imgui"
+import imguiGLFW "../imgui/imgui_impl_glfw"
+import imguiVulkan "../imgui/imgui_impl_vulkan"
+import "../slang"
+import tinyfd "../tinyfiledialogs"
 import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -5354,14 +5354,14 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 	imgui.StyleColorsClassic()
 
-	implVulkan.LoadFunctions(
+	imguiVulkan.LoadFunctions(
 		proc "c" (function_name: cstring, user_data: rawptr) -> vk.ProcVoidFunction {
 			return vk.GetInstanceProcAddr((vk.Instance)(user_data), function_name)
 		},
 		instance,
 	)
 
-	if !implGLFW.InitForVulkan(window, true) {
+	if !imguiGLFW.InitForVulkan(window, true) {
 		log.log(.Fatal, "Failed to initialize imgui for vulkan, quitting application.")
 		return
 	}
@@ -5473,7 +5473,7 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 		}
 	}
 
-	implInitInfo: implVulkan.InitInfo = {
+	implInitInfo: imguiVulkan.InitInfo = {
 		Instance                    = instance,
 		PhysicalDevice              = physicalDevice,
 		Device                      = device,
@@ -5504,15 +5504,15 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) {
 		MinAllocationSize           = 1024 * 1024,
 	}
 
-	if !implVulkan.Init(&implInitInfo) {
+	if !imguiVulkan.Init(&implInitInfo) {
 		log.log(.Fatal, "Failed to init vulkan impl.")
 		panic("Failed to init vulkan impl.")
 	}
 }
 
 cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
-	implVulkan.Shutdown()
-	implGLFW.Shutdown()
+	imguiVulkan.Shutdown()
+	imguiGLFW.Shutdown()
 	imgui.DestroyContext(imguiData.uiContext)
 
 	for &frameBuffer in imguiData.frameBuffers {
@@ -6414,7 +6414,7 @@ recordUIBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 	vk.CmdBeginRenderPass(uiCommandBuffers[index], &renderPassInfo, .INLINE)
 
 	imgui.Render()
-	implVulkan.RenderDrawData(imgui.GetDrawData(), uiCommandBuffers[index])
+	imguiVulkan.RenderDrawData(imgui.GetDrawData(), uiCommandBuffers[index])
 
 	vk.CmdEndRenderPass(uiCommandBuffers[index])
 
@@ -7040,8 +7040,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 		}
 	}
 
-	implVulkan.NewFrame()
-	implGLFW.NewFrame()
+	imguiVulkan.NewFrame()
+	imguiGLFW.NewFrame()
 	imgui.NewFrame()
 
 	if showMetrics {
