@@ -1950,7 +1950,6 @@ cleanupSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-// TODO: Use Assimp to load models so I can load muiltiple file types using the same function.
 loadModels :: proc(
 	using graphicsContext: ^GraphicsContext,
 	sceneIndex: u32,
@@ -2079,6 +2078,9 @@ loadModels :: proc(
 			}
 
 			mesh.name = aiStringToCstring(&sceneMesh.mName)
+			if mesh.name == "" {
+				mesh.name = cstring("Unnamed Mesh")
+			}
 
 			vertexOffset += u32(len(mesh.vertices))
 			indiceOffset += u32(len(mesh.indices))
@@ -6790,8 +6792,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					scaleKeys    = make([]u32, len(scene.models[0].skeleton)),
 					animTimer    = 0.0,
 				}
-				newInstance.textureIDs[0] = 0
-				newInstance.normalIDs[0] = 0
 				scene.boneCount += len(scene.models[0].skeleton)
 				scene.instanceVerticesCount += len(scene.models[0].meshes[0].vertices)
 				append(&scene.instances, newInstance)
@@ -6912,6 +6912,9 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 						delete(modelInstance.scaleKeys)
 
 						modelInstance.modelID = u32(i)
+						modelInstance.textureIDs = make([]u32, len(model.meshes))
+						modelInstance.normalIDs = make([]u32, len(model.meshes))
+
 						skeletonLength := len(scene.models[modelInstance.modelID].skeleton)
 						scene.boneCount += skeletonLength
 						for &mesh in scene.models[modelInstance.modelID].meshes {

@@ -118,7 +118,7 @@ main :: proc() {
 
 	#partial switch initVkGraphics(
 		&graphicsContext,
-		"./assets_game/scenes/wizard.json",
+		"./assets/scenes/shambler_gltf.json",
 		&glfwCallbacks,
 	) {
 	case .FailedToLoadSceneFile, .FailedToParseJson:
