@@ -1,4 +1,5 @@
 import "Vertex.slang";
+import "Light.slang";
 
 [[vk::binding(0, 0)]]
 StructuredBuffer<Vertex> vertexBuffer;
@@ -31,14 +32,6 @@ StructuredBuffer<float4x4> transformBufferRO;
 
 [[vk::binding(5, 0)]]
 RWStructuredBuffer<float4x4> transformBufferRW;
-
-struct Light
-{
-    float4 position;
-    float4 colourIntensity;
-    float near;
-    float far;
-};
 
 [[vk::binding(6, 0)]]
 StructuredBuffer<Light> lightBuffer;

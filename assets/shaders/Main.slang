@@ -1,4 +1,5 @@
 import "Vertex.slang";
+import "Light.slang";
 import "Buffers.slang";
 import "Textures.slang";
 
@@ -53,13 +54,13 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID)
     output.position = mul(uniformBuffer.viewProjection, worldPosition);
     output.worldPosition = worldPosition.xyz / worldPosition.w;
 
-    // I think this is correct but I'm seeing weird artifacts
+    // I need to figue this out. I think the tangent and bitangent are not being set correctly.
     float3x3 t = (float3x3)vertexTransform;
     float3x3 tt = transpose(inverse3x3((float3x3)vertexTransform));
     output.TBN = transpose(float3x3(
-        vertex.tangent,
-        vertex.bitangent,
-        vertex.normal,
+        float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.tangent)),
+        float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.bitangent)),
+        normalize(mul(tt, vertex.normal)),
     ));
     output.uv = vertex.uv;
 
@@ -77,8 +78,8 @@ FragOut frag(VertOut input)
     FragOut output;
 
     #define SAMPLES 20
-    #define BIAS 0.015
-    #define DISK_RADIUS 0.02
+    #define BIAS 0.002
+    #define DISK_RADIUS 0.001
 
     // Sample offset directions for shadow sampling
     static const float3 sampleOffsetDirections[SAMPLES] = {
@@ -125,13 +126,15 @@ FragOut frag(VertOut input)
 
         shadow /= float(SAMPLES);
 
+        const float scalingFactor = 1.0 / max(lightDistance - light.dropoff, 1.0);
+
         const float lambertainCoefficient = clamp(dot(normal, negativeLightDirection), 0.0, 1.0);
-        cumulativeColour += shadow * lambertainCoefficient * light.colourIntensity.xyz / lightDistance;
+        cumulativeColour += shadow * lambertainCoefficient * light.colourIntensity.xyz * scalingFactor;
     }
 
     cumulativeColour = max(cumulativeColour, float3(pushConstants.ambientLight, pushConstants.ambientLight, pushConstants.ambientLight));
 
-    // output.colour = float4(albedo * cumulativeColour, 1.0);
-    output.colour = float4(normal, 1.0);
+    output.colour = float4(albedo * cumulativeColour, 1.0);
+    // output.colour = float4(normal, 1.0);
     return output;
 }
