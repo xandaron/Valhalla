@@ -54,11 +54,13 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID)
     output.worldPosition = worldPosition.xyz / worldPosition.w;
 
     // I think this is correct but I'm seeing weird artifacts
-    output.TBN = mul(transpose(inverse3x3((float3x3)vertexTransform)), transpose(float3x3(
+    float3x3 t = (float3x3)vertexTransform;
+    float3x3 tt = transpose(inverse3x3((float3x3)vertexTransform));
+    output.TBN = transpose(float3x3(
         vertex.tangent,
         vertex.bitangent,
         vertex.normal,
-    )));
+    ));
     output.uv = vertex.uv;
 
     return output;
@@ -129,6 +131,7 @@ FragOut frag(VertOut input)
 
     cumulativeColour = max(cumulativeColour, float3(pushConstants.ambientLight, pushConstants.ambientLight, pushConstants.ambientLight));
 
-    output.colour = float4(albedo * cumulativeColour, 1.0);
+    // output.colour = float4(albedo * cumulativeColour, 1.0);
+    output.colour = float4(normal, 1.0);
     return output;
 }
