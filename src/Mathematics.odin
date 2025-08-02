@@ -3,6 +3,8 @@ package Valhalla
 import "core:math"
 import "core:math/linalg"
 
+PI :: math.PI
+
 floor :: math.floor
 ceil :: math.ceil
 round :: math.round
@@ -10,6 +12,10 @@ round :: math.round
 sin :: math.sin
 cos :: math.cos
 tan :: math.tan
+
+asin :: math.asin
+acos :: math.acos
+atan :: math.atan
 
 log2 :: math.log2
 
