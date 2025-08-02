@@ -167,6 +167,7 @@ Mesh :: struct {
 	indices:      []u32,
 	vertexOffset: u32,
 	indiceOffset: u32,
+	boundingBox:  AABB,
 }
 
 Model :: struct {
@@ -263,50 +264,24 @@ Pipeline :: struct {
 	layout:   vk.PipelineLayout,
 }
 
-PointLight :: struct {
-	name:      cstring,
-	position:  Vec3,
-	colour:    Vec3,
-	intensity: f32,
-	dropoff:   f32,
-}
-
-Instance :: struct {
-	name:         cstring,
-	position:     Vec3,
-	rotation:     Vec3,
-	scaleUniform: bool,
-	scale:        Vec3,
-	modelID:      u32,
-	animID:       u32,
-	textureIDs:   []u32,
-	normalIDs:    []u32,
+@(private = "package")
+SceneInstanceData :: struct {
+	modelIdx:     u32,
+	animIdx:      u32,
+	textureIdxs:  []u32,
+	normalIdxs:   []u32,
 	positionKeys: []u32,
 	rotationKeys: []u32,
 	scaleKeys:    []u32,
 	animTimer:    f64,
 }
 
-Scene :: struct {
-	filePath:              string,
-	name:                  cstring,
-	clearColour:           [4]i32,
-	ambientLight:          f32,
-
-	// Scene
-	instances:             [dynamic]Instance,
+@(private = "package")
+SceneGraphicalData :: struct {
 	instanceVerticesCount: int,
-	pointLights:           [dynamic]PointLight,
-	cameras:               [dynamic]Camera,
-	activeCamera:          u32,
-
-	// Assets
-	modelPaths:            [dynamic]cstring,
 	models:                [dynamic]Model,
-	texturePaths:          [dynamic]cstring,
 	textures:              Image,
 	textureCount:          u32,
-	normalPaths:           [dynamic]cstring,
 	normals:               Image,
 	normalCount:           u32,
 	vertices:              [dynamic]Vertex,
@@ -320,22 +295,6 @@ Scene :: struct {
 	boneBuffers:           [MAX_FRAMES_IN_FLIGHT]Buffer,
 	lightBuffers:          [MAX_FRAMES_IN_FLIGHT]Buffer,
 	transformBuffers:      [MAX_FRAMES_IN_FLIGHT]Buffer,
-}
-
-@(private = "package")
-CameraMode :: enum {
-	PERSPECTIVE,
-	ORTHOGRAPHIC,
-}
-
-@(private = "package")
-Camera :: struct {
-	name:            cstring,
-	eye, center, up: Vec3,
-	near, far:       f32,
-	distance:        f32,
-	fov:             f32,
-	mode:            CameraMode,
 }
 
 @(private = "package")
@@ -394,10 +353,6 @@ GraphicsContext :: struct {
 	sceneCommandBuffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	postComputeCommandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	uiCommandBuffers:          [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-
-	// Scene Data
-	scenes:                    [dynamic]Scene,
-	activeScene:               u32,
 	samplers:                  []vk.Sampler,
 
 	// Buffer
@@ -410,6 +365,7 @@ GraphicsContext :: struct {
 	// Util
 	currentFrame:              u32,
 	drawLights:                bool,
+	scene:                     ^Scene,
 
 	// Rendering push constants
 	contrast:                  f32,
@@ -427,13 +383,7 @@ GraphicsContext :: struct {
 
 
 @(private = "package")
-initVkGraphics :: proc(
-	using graphicsContext: ^GraphicsContext,
-	sceneFile: string = "",
-	glfwCallbacks: ^GLFWCallbacks,
-) -> (
-	err: LoadSceneError = .None,
-) {
+initVkGraphics :: proc(using graphicsContext: ^GraphicsContext, glfwCallbacks: ^GLFWCallbacks) {
 	when ODIN_DEBUG {
 		glfw.SetErrorCallback(glfwErrorCallback)
 	}
@@ -454,6 +404,8 @@ initVkGraphics :: proc(
 	createLogicalDevice(graphicsContext)
 	createSwapchain(graphicsContext)
 	createCommandBuffers(graphicsContext)
+
+	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
 
 	bufferSize := size_of(UniformBuffer)
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -511,20 +463,7 @@ initVkGraphics :: proc(
 		tonemapper = 0.0
 		gamma = 2.2
 	}
-	scenes = make([dynamic]Scene)
 
-	if sceneFile == "" {
-		createNewScene(graphicsContext)
-	} else {
-		_, err = loadScene(graphicsContext, sceneFile)
-		if err == .FailedToLoadSceneFile || err == .FailedToParseJson {
-			createNewScene(graphicsContext)
-		}
-	}
-
-	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
-	createShadowMapFrameBuffer(graphicsContext)
-	setActiveScene(graphicsContext, 0)
 	return
 }
 
@@ -534,11 +473,6 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	if vk.DeviceWaitIdle(device) != .SUCCESS {
 		panic("Failed to wait for device idle!")
 	}
-
-	for index := len(scenes) - 1; index >= 0; index -= 1 {
-		cleanupScene(graphicsContext, u32(index))
-	}
-	delete(scenes)
 
 	when UI_ENABLED {
 		cleanupImgui(graphicsContext)
@@ -1950,11 +1884,7 @@ cleanupSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 // ###################################################################
 
 
-loadModels :: proc(
-	using graphicsContext: ^GraphicsContext,
-	sceneIndex: u32,
-	modelPaths: []cstring,
-) {
+loadModels :: proc(scene: ^Scene, modelPaths: []cstring) {
 	loadModel :: proc(filename: cstring, model: ^Model, vertexOffset, indiceOffset: u32) {
 		aiStringToCstring :: proc(aiStr: ^ai.String, allocator := context.allocator) -> cstring {
 			strLen := int(aiStr.length) / size_of(c.char)
@@ -1962,6 +1892,10 @@ loadModels :: proc(
 			mem.copy(memPtr, rawptr(&aiStr.data), strLen)
 			(^u8)(uintptr(memPtr) + uintptr(strLen * size_of(c.char)))^ = 0 // Null terminate the string
 			return cstring(memPtr)
+		}
+
+		aiVectorToVec3 :: proc(aiVec: ^ai.Vector3D) -> Vec3 {
+			return {aiVec.x, aiVec.y, aiVec.z}
 		}
 
 		aiQuaternionToQuat :: proc(aiQuat: ^ai.Quaternion) -> (ret: Quat) {
@@ -2042,8 +1976,7 @@ loadModels :: proc(
 			// Correct the UVs and winding order for Vulkan.
 			.FlipUVs,
 			.FlipWindingOrder,
-			// I might want this in the future.
-			// .GenBoundingBoxes,
+			.GenBoundingBoxes,
 		}
 
 		scene := ai.ImportFileExWithProperties(filename, IMPORT_FLAGS, nil, propertyStore)
@@ -2071,10 +2004,14 @@ loadModels :: proc(
 			}
 
 			mesh = {
-				vertices     = make([]Vertex, u32(sceneMesh.mNumVertices)),
-				indices      = make([]u32, u32(sceneMesh.mNumFaces * 3)),
+				vertices = make([]Vertex, u32(sceneMesh.mNumVertices)),
+				indices = make([]u32, u32(sceneMesh.mNumFaces * 3)),
 				vertexOffset = vertexOffset,
 				indiceOffset = indiceOffset,
+				boundingBox = {
+					min = aiVectorToVec3(&sceneMesh.mAABB.mMin),
+					max = aiVectorToVec3(&sceneMesh.mAABB.mMax),
+				},
 			}
 
 			mesh.name = aiStringToCstring(&sceneMesh.mName)
@@ -2303,8 +2240,6 @@ loadModels :: proc(
 			}
 		}
 	}
-
-	scene := &scenes[sceneIndex]
 
 	modelOffset := len(scene.models)
 	resize(&scene.models, modelOffset + len(modelPaths))
@@ -2687,22 +2622,26 @@ cleanupImage :: proc(using graphicsContext: ^GraphicsContext, image: ^Image) {
 
 
 @(private = "package")
-LoadSceneError :: enum {
+LoadSceneAssetsError :: enum {
 	None,
-	FailedToLoadSceneFile,
-	FailedToParseJson,
-	FailedToLoadModel,
-	FailedToLoadTexture,
+	ModelLoadError,
+	ImageLoadError,
 }
 
+@(private = "package")
 loadSceneAssets :: proc(
-	using graphicsContext: ^GraphicsContext,
-	sceneIndex: u32,
+	graphicsContext: ^GraphicsContext,
+	scene: ^Scene,
 ) -> (
-	err: LoadSceneError = .None,
+	err: LoadSceneAssetsError = .None,
 ) {
-	scene := &scenes[sceneIndex]
-	loadModels(graphicsContext, sceneIndex, scene.modelPaths[:])
+	scene.graphicsData = {
+		models   = make([dynamic]Model),
+		vertices = make([dynamic]Vertex),
+		indices  = make([dynamic]u32),
+	}
+
+	loadModels(scene, scene.modelPaths[:])
 
 	loadBufferToGPU(
 		graphicsContext,
@@ -2725,13 +2664,13 @@ loadSceneAssets :: proc(
 	scene.normalCount = u32(len(scene.normalPaths))
 
 	for &inst in scene.instances {
-		skeletonLength := len(scene.models[inst.modelID].skeleton)
+		skeletonLength := len(scene.models[inst.modelIdx].skeleton)
 		scene.boneCount += skeletonLength
 		inst.positionKeys = make([]u32, skeletonLength)
 		inst.rotationKeys = make([]u32, skeletonLength)
 		inst.scaleKeys = make([]u32, skeletonLength)
 		inst.animTimer = 0.0
-		for &mesh in scene.models[inst.modelID].meshes {
+		for &mesh in scene.models[inst.modelIdx].meshes {
 			scene.instanceVerticesCount += len(mesh.vertices)
 		}
 	}
@@ -2752,7 +2691,7 @@ loadSceneAssets :: proc(
 			&scene.instanceBuffers[i].memory,
 		)
 		vk.MapMemory(
-			device,
+			graphicsContext.device,
 			scene.instanceBuffers[i].memory,
 			0,
 			vk.DeviceSize(instanceBufferSize),
@@ -2769,7 +2708,7 @@ loadSceneAssets :: proc(
 			&scene.boneBuffers[i].memory,
 		)
 		vk.MapMemory(
-			device,
+			graphicsContext.device,
 			scene.boneBuffers[i].memory,
 			0,
 			vk.DeviceSize(boneBufferSize),
@@ -2786,7 +2725,7 @@ loadSceneAssets :: proc(
 			&scene.lightBuffers[i].memory,
 		)
 		vk.MapMemory(
-			device,
+			graphicsContext.device,
 			scene.lightBuffers[i].memory,
 			0,
 			vk.DeviceSize(lightBufferSize),
@@ -2806,267 +2745,26 @@ loadSceneAssets :: proc(
 	return
 }
 
-// ATM we can't have a truly "empty" scene as we have to make buffers and images that must exist.
-// It might be possible to make the buffers optional to solve this?
-// I've heard of bindless buffers and images. Maybe that could be a solution?
-createNewScene :: proc(using graphicsContext: ^GraphicsContext) {
-	index := u32(len(scenes))
-
-	scene: Scene
-
-	scene.filePath = ""
-	scene.name = strings.clone_to_cstring("New Scene")
-	scene.clearColour = {150, 150, 150, 255}
-	scene.ambientLight = 0.01
-
-	scene.instances = make([dynamic]Instance, 1)
-	scene.instances[0] = {
-		name       = strings.clone_to_cstring("cube"),
-		modelID    = 0,
-		textureIDs = make([]u32, 1),
-		normalIDs  = make([]u32, 1),
-		position   = {0, 0, 0},
-		rotation   = {0, 0, 0},
-		scale      = {0.2, 0.2, 0.2},
-	}
-	scene.instances[0].textureIDs[0] = 0
-	scene.instances[0].normalIDs[0] = 0
-
-	scene.pointLights = make([dynamic]PointLight, 1)
-	scene.pointLights[0] = {
-		name      = strings.clone_to_cstring("white light"),
-		position  = {0, 2, 0},
-		colour    = {1, 1, 1},
-		intensity = 1,
-	}
-
-	scene.cameras = make([dynamic]Camera, 1)
-	scene.cameras[0] = {
-		name     = strings.clone_to_cstring("main"),
-		eye      = {0.0, 0.2, -0.4},
-		center   = {0.0, 0.0, 0.0},
-		up       = {0.0, 1.0, 0.0},
-		distance = 1.0,
-		fov      = 45.0,
-		mode     = .PERSPECTIVE,
-	}
-	scene.activeCamera = 0
-
-	scene.modelPaths = make([dynamic]cstring, 1)
-	scene.modelPaths[0] = strings.clone_to_cstring("./assets/models/cube/cube.fbx")
-
-	scene.models = make([dynamic]Model)
-
-	scene.texturePaths = make([dynamic]cstring, 1)
-	scene.texturePaths[0] = strings.clone_to_cstring("./assets/textures/missing_texture.jpg")
-	scene.textureCount = 1
-
-	scene.normalPaths = make([dynamic]cstring, 1)
-	scene.normalPaths[0] = strings.clone_to_cstring("./assets/textures/normal.jpg")
-	scene.normalCount = 1
-
-	scene.vertices = make([dynamic]Vertex)
-	scene.indices = make([dynamic]u32)
-
-	append(&scenes, scene)
-
-	loadSceneAssets(graphicsContext, index)
-}
-
-InstanceJSON :: struct {
-	name:         cstring `json:name`,
-	model:        i32 `json:model`,
-	textures:     []i32 `json:textures`,
-	normals:      []i32 `json:normals`,
-	position:     Vec3 `json:position`,
-	rotation:     Vec3 `json:rotation`,
-	scaleUniform: bool `json:scale_uniform`,
-	scale:        Vec3 `json:scale`,
-}
-
-SceneJSON :: struct {
-	name:          cstring `json:name`,
-	clear_colour:  [4]i32 `json:clear_colour`,
-	ambient_light: f32 `json:ambient_light`,
-	cameras:       []Camera `json:cameras`,
-	lights:        []PointLight `json:lights`,
-	models:        []cstring `json:models`,
-	textures:      []cstring `json:textures`,
-	normals:       []cstring `json:normals`,
-	instances:     []InstanceJSON `json:instances`,
-}
-
-saveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[sceneIndex]
-
-	sceneInfo: SceneJSON = {
-		name          = scene.name,
-		clear_colour  = scene.clearColour,
-		ambient_light = scene.ambientLight,
-		cameras       = scene.cameras[:],
-		lights        = scene.pointLights[:],
-		models        = scene.modelPaths[1:],
-		textures      = scene.texturePaths[1:],
-		normals       = scene.normalPaths[1:],
-		instances     = make([]InstanceJSON, len(scene.instances)),
-	}
-	defer delete(sceneInfo.instances)
-
-	for &instance, index in scene.instances {
-		textureIDs := make([]i32, len(instance.textureIDs))
-		normalIDs := make([]i32, len(instance.normalIDs))
-
-		for index := 0; index < len(textureIDs); index += 1 {
-			textureIDs[index] = i32(instance.textureIDs[index]) - 1
-			normalIDs[index] = i32(instance.normalIDs[index]) - 1
-		}
-
-		sceneInfo.instances[index] = {
-			name         = instance.name,
-			model        = i32(instance.modelID) - 1,
-			textures     = textureIDs,
-			normals      = normalIDs,
-			position     = instance.position,
-			rotation     = instance.rotation,
-			scaleUniform = instance.scaleUniform,
-			scale        = instance.scale,
-		}
-	}
-	defer for &instance in sceneInfo.instances {
-		delete(instance.textures)
-		delete(instance.normals)
-	}
-
-	json_data, err := json.marshal(sceneInfo, {pretty = true})
-	if err != nil {
-		panic("Couldn't marshal data")
-	}
-	defer delete(json_data)
-
-	werr := os.write_entire_file_or_err(scene.filePath, json_data)
-	if werr != nil {
-		panic("Couldn't write file")
-	}
-}
-
 @(private = "package")
-loadScene :: proc(
-	using graphicsContext: ^GraphicsContext,
-	sceneFile: string,
-) -> (
-	index: u32,
-	err: LoadSceneError = .None,
-) {
-	index = u32(len(scenes))
-
-	data, rerr := os.read_entire_file_or_err(sceneFile)
-	if rerr != nil {
-		return 0, .FailedToLoadSceneFile
-	}
-	defer delete(data)
-
-	sceneJson: SceneJSON
-	merr := json.unmarshal(data, &sceneJson)
-	if merr != nil {
-		return 0, .FailedToParseJson
-	}
-
-	scene: Scene = {
-		name         = sceneJson.name,
-		clearColour  = sceneJson.clear_colour,
-		ambientLight = sceneJson.ambient_light,
-		instances    = make([dynamic]Instance, len(sceneJson.instances)),
-		pointLights  = make([dynamic]PointLight),
-		cameras      = make([dynamic]Camera),
-		modelPaths   = make([dynamic]cstring),
-		models       = make([dynamic]Model),
-		texturePaths = make([dynamic]cstring),
-		normalPaths  = make([dynamic]cstring),
-		vertices     = make([dynamic]Vertex),
-		indices      = make([dynamic]u32),
-	}
-	scene.filePath, _ = filepath.abs(sceneFile)
-
-	for &instance, instanceIndex in sceneJson.instances {
-		textureIDs := make([]u32, len(instance.textures))
-		normalIDs := make([]u32, len(instance.normals))
-
-		for index := 0; index < len(textureIDs); index += 1 {
-			textureIDs[index] = u32(instance.textures[index] + 1)
-			normalIDs[index] = u32(instance.normals[index] + 1)
-		}
-
-		scene.instances[instanceIndex] = {
-			name         = instance.name,
-			modelID      = u32(instance.model + 1),
-			textureIDs   = textureIDs[:],
-			normalIDs    = normalIDs[:],
-			position     = instance.position,
-			rotation     = instance.rotation,
-			scaleUniform = instance.scaleUniform,
-			scale        = instance.scale,
-		}
-	}
-
-	append(&scene.modelPaths, strings.clone_to_cstring("./assets/models/cube/cube.fbx"))
-	append(&scene.texturePaths, strings.clone_to_cstring("./assets/textures/missing_texture.jpg"))
-	append(&scene.normalPaths, strings.clone_to_cstring("./assets/textures/normal.jpg"))
-
-	append(&scene.pointLights, ..sceneJson.lights)
-	append(&scene.cameras, ..sceneJson.cameras)
-	append(&scene.modelPaths, ..sceneJson.models)
-	append(&scene.texturePaths, ..sceneJson.textures)
-	append(&scene.normalPaths, ..sceneJson.normals)
-	append(&scenes, scene)
-
-	delete(sceneJson.lights)
-	delete(sceneJson.cameras)
-	delete(sceneJson.models)
-	delete(sceneJson.textures)
-	delete(sceneJson.normals)
-
-	for &instance in sceneJson.instances {
-		delete(instance.textures)
-		delete(instance.normals)
-	}
-	delete(sceneJson.instances)
-
-	if err = loadSceneAssets(graphicsContext, index); err != .None {
-		// TODO: This error should just be info not crashing. Should handle files not existing by using a replacement texture/model?
-		panic("Load error")
-	}
-	return
-}
-
-@(private = "package")
-closeScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	if vk.DeviceWaitIdle(device) != .SUCCESS {
-		panic("Failed to wait for device idle?")
-	}
-
-	cleanupScene(graphicsContext, sceneIndex)
-	if len(scenes) == 0 {
-		createNewScene(graphicsContext)
-	}
-}
-
-@(private = "package")
-setActiveScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	paused = true
+setActiveScene :: proc(using graphicsContext: ^GraphicsContext, newScene: ^Scene) {
+	globals.paused = true
 
 	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
 		panic("Failed to wait for device idle!")
 	}
 
-	activeScene = sceneIndex
+	graphicsContext.scene = newScene
 
 	updateShadowMapFrameBuffer(graphicsContext)
-	updateDescriptorSets(graphicsContext, sceneIndex)
+	updateDescriptorSets(graphicsContext)
 	updateCommandBuffers(graphicsContext)
 }
 
-cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := scenes[sceneIndex]
+@(private = "package")
+cleanupScene :: proc(graphicsContext: ^GraphicsContext, scene: ^SceneGraphicalData) {
+	if vk.DeviceWaitIdle(graphicsContext.device) != .SUCCESS {
+		panic("Failed to wait for device idle?")
+	}
 
 	cleanupBuffer(graphicsContext, &scene.indexBuffer)
 	cleanupBuffer(graphicsContext, &scene.vertexBuffer)
@@ -3080,16 +2778,6 @@ cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 
 	cleanupImage(graphicsContext, &scene.textures)
 	cleanupImage(graphicsContext, &scene.normals)
-
-	for &texturePath in scene.texturePaths {
-		delete(texturePath)
-	}
-	delete(scene.texturePaths)
-
-	for &normalPath in scene.normalPaths {
-		delete(normalPath)
-	}
-	delete(scene.normalPaths)
 
 	for &model in scene.models {
 		delete(model.name)
@@ -3116,35 +2804,6 @@ cleanupScene :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
 	delete(scene.vertices)
 	delete(scene.indices)
 	delete(scene.models)
-
-	for &modelPath in scene.modelPaths {
-		delete(modelPath)
-	}
-	delete(scene.modelPaths)
-
-	for &instance in scene.instances {
-		delete(instance.name)
-		delete(instance.textureIDs)
-		delete(instance.normalIDs)
-		delete(instance.scaleKeys)
-		delete(instance.positionKeys)
-		delete(instance.rotationKeys)
-	}
-	delete(scene.instances)
-
-	for &light in scene.pointLights {
-		delete(light.name)
-	}
-	delete(scene.pointLights)
-
-	for &camera in scene.cameras {
-		delete(camera.name)
-	}
-	delete(scene.cameras)
-	delete(scene.name)
-	delete(scene.filePath)
-
-	unordered_remove(&scenes, sceneIndex)
 }
 
 
@@ -3385,9 +3044,7 @@ createTexturesDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[activeScene]
-
+updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	vertexBufferInfo: vk.DescriptorBufferInfo = {
 		buffer = scene.vertexBuffer.buffer,
 		offset = 0,
@@ -3809,9 +3466,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 }
 
-updateSceneInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[sceneIndex]
-
+updateSceneInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 	instanceBufferSize := size_of(Instance) * len(scene.instances)
 	instanceBufferInfo: vk.DescriptorBufferInfo = {
 		offset = 0,
@@ -3943,9 +3598,7 @@ updateSceneInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, scene
 	}
 }
 
-updateSceneInstanceModel :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[sceneIndex]
-
+updateSceneInstanceModel :: proc(using graphicsContext: ^GraphicsContext) {
 	boneBufferSize := size_of(Mat4) * scene.boneCount
 	boneBufferInfo: vk.DescriptorBufferInfo = {
 		offset = 0,
@@ -4039,9 +3692,7 @@ updateSceneInstanceModel :: proc(using graphicsContext: ^GraphicsContext, sceneI
 	}
 }
 
-updateSceneModels :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[sceneIndex]
-
+updateSceneModels :: proc(using graphicsContext: ^GraphicsContext) {
 	cleanupBuffer(graphicsContext, &scene.vertexBuffer)
 	cleanupBuffer(graphicsContext, &scene.indexBuffer)
 
@@ -4092,9 +3743,7 @@ updateSceneModels :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u
 	}
 }
 
-updateSceneTextures :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[sceneIndex]
-
+updateSceneTextures :: proc(using graphicsContext: ^GraphicsContext) {
 	textureImageInfo: vk.DescriptorImageInfo = {
 		sampler     = samplers[scene.textures.sampler],
 		imageView   = scene.textures.view,
@@ -4126,9 +3775,7 @@ updateSceneTextures :: proc(using graphicsContext: ^GraphicsContext, sceneIndex:
 	}
 }
 
-updateSceneNormals :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[sceneIndex]
-
+updateSceneNormals :: proc(using graphicsContext: ^GraphicsContext) {
 	normalImageInfo: vk.DescriptorImageInfo = {
 		sampler     = samplers[scene.normals.sampler],
 		imageView   = scene.normals.view,
@@ -4161,8 +3808,7 @@ updateSceneNormals :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: 
 	}
 }
 
-updateSceneLights :: proc(using graphicsContext: ^GraphicsContext, sceneIndex: u32) {
-	scene := &scenes[sceneIndex]
+updateSceneLights :: proc(using graphicsContext: ^GraphicsContext) {
 	updateShadowMapFrameBuffer(graphicsContext)
 
 	shadowImageInfo: vk.DescriptorImageInfo = {
@@ -4536,8 +4182,6 @@ createMainFrameBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
-	scene := &scenes[activeScene]
-
 	pipelines[PipelineIndex.LIGHT].colour.format = .R32_SFLOAT
 
 	layerCount := u32(len(scene.pointLights)) * 6
@@ -4639,12 +4283,13 @@ createShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 updateShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext) {
-	for index in 0 ..< len(swapchainImages) {
-		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
+	if pipelines[PipelineIndex.LIGHT].colour != {} {
+		for index in 0 ..< len(swapchainImages) {
+			vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
+		}
+		cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].colour)
+		cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].depth)
 	}
-
-	cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].colour)
-	cleanupImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].depth)
 
 	createShadowMapFrameBuffer(graphicsContext)
 }
@@ -5315,7 +4960,7 @@ reloadShaders :: proc(using graphicsContext: ^GraphicsContext) {
 	cleanupPipelines(graphicsContext)
 	createGraphicsPipelines(graphicsContext)
 	createComputePipelines(graphicsContext)
-	updateDescriptorSets(graphicsContext, activeScene)
+	updateDescriptorSets(graphicsContext)
 }
 
 
@@ -5548,8 +5193,6 @@ cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 
 
 updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
-	scene := &scenes[activeScene]
-
 	lightData := make([]LightData, len(scene.pointLights))
 	defer delete(lightData)
 	for &light, i in scene.pointLights {
@@ -5582,8 +5225,6 @@ updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 }
 
 updateUniformBuffer :: proc(using graphicsContext: ^GraphicsContext) {
-	scene := &scenes[activeScene]
-
 	camera := scene.cameras[scene.activeCamera]
 	view := lookAt(camera.eye, camera.center, camera.up)
 	projection: Mat4
@@ -5616,8 +5257,6 @@ updateUniformBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
-	scene := &scenes[activeScene]
-
 	boneTransforms := make([]Mat4, scene.boneCount)
 	instanceData := make([]InstanceInfo, len(scene.instances))
 	defer delete(boneTransforms)
@@ -5629,11 +5268,11 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 		instanceData[instanceIndex] = {
 			model      = translate(
 				instance.position,
-			) * quatToRotation(quatFromX(radians(instance.rotation.x)) * quatFromY(radians(instance.rotation.y)) * quatFromZ(radians(instance.rotation.z))) * scale(instance.scale),
+			) * quatToRotation(eulerToQuat(radians(instance.rotation.x), radians(instance.rotation.y), radians(instance.rotation.z), .XYZ)) * scale(instance.scale),
 			boneOffset = boneOffset,
 		}
 
-		model := &scene.models[instance.modelID]
+		model := &scene.models[instance.modelIdx]
 
 		if len(model.skeleton) == 0 || len(model.animations) == 0 {
 			instanceData[instanceIndex].boneOffset = 0
@@ -5642,7 +5281,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 
 		skeleton := &model.skeleton
 
-		animation := model.animations[instance.animID]
+		animation := model.animations[instance.animIdx]
 		instance.animTimer += f64(delta)
 		if instance.animTimer >= animation.duration {
 			instance.animTimer -= animation.duration
@@ -5792,8 +5431,6 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
-	scene := &scenes[activeScene]
-
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
@@ -5836,7 +5473,7 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 			1 * size_of(u32),
 			&instanceIndex,
 		)
-		for &mesh in scene.models[scene.instances[instanceIndex].modelID].meshes {
+		for &mesh in scene.models[scene.instances[instanceIndex].modelIdx].meshes {
 			vk.CmdPushConstants(
 				preComputeCommandBuffers[index],
 				pipelines[PipelineIndex.PRECOMPUTE].layout,
@@ -5862,8 +5499,6 @@ recordPreComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u
 }
 
 recordMainGraphicsBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
-	scene := &scenes[activeScene]
-
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
@@ -5965,8 +5600,6 @@ recordMainGraphicsBuffer :: proc(using graphicsContext: ^GraphicsContext, index:
 }
 
 recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
-	scene := &scenes[activeScene]
-
 	lightCount := u32(len(scene.pointLights))
 	shadowImageCount := lightCount * 6
 
@@ -6033,7 +5666,7 @@ recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u3
 
 		offset: u32 = 0
 		for &inst, instanceIndex in scene.instances {
-			for &mesh in scene.models[inst.modelID].meshes {
+			for &mesh in scene.models[inst.modelIdx].meshes {
 				vk.CmdPushConstants(
 					shadowMapCommandBuffers[index],
 					pipelines[PipelineIndex.LIGHT].layout,
@@ -6064,8 +5697,6 @@ recordShadowMapBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u3
 }
 
 recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
-	scene := &scenes[activeScene]
-
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
@@ -6127,7 +5758,7 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 
 	offset: u32 = 0
 	for &sceneInstance, instanceIndex in scene.instances {
-		for &mesh, meshIndex in scene.models[sceneInstance.modelID].meshes {
+		for &mesh, meshIndex in scene.models[sceneInstance.modelIdx].meshes {
 			vk.CmdPushConstants(
 				sceneCommandBuffers[index],
 				pipelines[PipelineIndex.MAIN].layout,
@@ -6137,8 +5768,8 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 				raw_data(
 					[]u32 {
 						offset - mesh.vertexOffset,
-						sceneInstance.textureIDs[meshIndex],
-						sceneInstance.normalIDs[meshIndex],
+						sceneInstance.textureIdxs[meshIndex],
+						sceneInstance.normalIdxs[meshIndex],
 					},
 				),
 			)
@@ -6163,8 +5794,6 @@ recordSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, index: u32) 
 }
 
 recordPostComputeBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
-	scene := &scenes[activeScene]
-
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
@@ -6457,226 +6086,16 @@ recordUIBuffer :: proc(using graphicsContext: ^GraphicsContext, index: u32) {
 }
 
 drawUI :: proc(using graphicsContext: ^GraphicsContext) {
-	constructMenuBar :: proc(using graphicsContext: ^GraphicsContext) {
-		scene := &scenes[activeScene]
-
-		if imgui.BeginMenu("File") {
-			imgui.SeparatorText("Scene Files")
-			if imgui.MenuItem("New") {
-				createNewScene(graphicsContext)
-				setActiveScene(graphicsContext, u32(len(scenes) - 1))
-			}
-			if imgui.MenuItem("Open") {
-				filterPatterns := []cstring{"*.json"}
-				path, _ := filepath.abs("./assets/scenes/")
-				defer delete(path)
-				file, _ := filepath.rel(
-					baseDir,
-					string(
-						tinyfd.openFileDialog(
-							"Open Scene",
-							fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
-							i32(len(filterPatterns)),
-							raw_data(filterPatterns),
-							".json",
-							0,
-						),
-					),
-				)
-				defer delete(file)
-
-				extension := filepath.ext(file)
-				if file != "" && extension[1:] == "json" {
-					_, _ = loadScene(graphicsContext, file)
-				}
-			}
-			if imgui.MenuItem("Save") {
-				if scene.filePath == "" {
-					filterPatterns := []cstring{"*.json"}
-					path := strings.clone_from_cstring(
-						tinyfd.saveFileDialog(
-							"Save Scene",
-							fmt.caprintf(
-								"{}{}",
-								filepath.abs("./assets/scenes/"),
-								filepath.SEPARATOR,
-								allocator = context.temp_allocator,
-							),
-							i32(len(filterPatterns)),
-							raw_data(filterPatterns),
-							".json",
-						),
-					)
-					scene.filePath = path
-				}
-				saveScene(graphicsContext, activeScene)
-			}
-			if imgui.MenuItem("Save AS...") {
-				filterPatterns := []cstring{"*.json"}
-				path := string(
-					tinyfd.saveFileDialog(
-						"Save Scene",
-						strings.clone_to_cstring(scene.filePath, context.temp_allocator),
-						i32(len(filterPatterns)),
-						raw_data(filterPatterns),
-						".json",
-					),
-				)
-				if path != "" {
-					scene.filePath = path
-					saveScene(graphicsContext, activeScene)
-				}
-			}
-			if imgui.MenuItem("Close") {
-				closeScene(graphicsContext, activeScene)
-				setActiveScene(graphicsContext, 0)
-			}
-			imgui.SeparatorText("Assets")
-			if imgui.BeginMenu("Import") {
-				if imgui.MenuItem("Model") {
-					filterPatterns := []cstring{"*.gltf", "*.glb", "*.fbx", "*.obj"}
-					path, _ := filepath.abs("./assets/models/", context.temp_allocator)
-					file, err := filepath.rel(
-						baseDir,
-						string(
-							tinyfd.openFileDialog(
-								"Load Model",
-								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
-								i32(len(filterPatterns)),
-								raw_data(filterPatterns),
-								".gltf .glb .fbx .obj",
-								0,
-							),
-						),
-						context.temp_allocator,
-					)
-
-					if file != "" {
-						alreadyLoaded := false
-						for &loadedFile in scene.modelPaths {
-							if file == string(loadedFile) {
-								alreadyLoaded = true
-								break
-							}
-						}
-
-						if !alreadyLoaded {
-							f := strings.clone_to_cstring(file)
-							loadModels(graphicsContext, activeScene, {f})
-							append(&scene.modelPaths, f)
-							if vk.DeviceWaitIdle(device) != .SUCCESS {
-								panic("Failed to wait for device idle?")
-							}
-							updateSceneModels(graphicsContext, activeScene)
-							updateCommandBuffers(graphicsContext)
-						}
-					}
-				}
-				if imgui.MenuItem("Texture") {
-					filterPatterns := []cstring{"*.jpg", "*.jpeg", "*.png"}
-					path, _ := filepath.abs("./assets/textures/", context.temp_allocator)
-					file, err := filepath.rel(
-						baseDir,
-						string(
-							tinyfd.openFileDialog(
-								"Load Texture",
-								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
-								i32(len(filterPatterns)),
-								raw_data(filterPatterns),
-								".jpg .jpeg .png",
-								0,
-							),
-						),
-						context.temp_allocator,
-					)
-
-					extension := filepath.ext(file)[1:]
-					if file != "" && extension == "png" ||
-					   extension == "jpg" ||
-					   extension == "jpeg" {
-						alreadyLoaded := false
-						for &loadedFile in scene.texturePaths {
-							if file == string(loadedFile) {
-								alreadyLoaded = true
-								break
-							}
-						}
-
-						if !alreadyLoaded {
-							f := strings.clone_to_cstring(file)
-							addImages(graphicsContext, &scene.textures, scene.textureCount, {f})
-							updateSceneTextures(graphicsContext, activeScene)
-							append(&scene.texturePaths, f)
-							scene.textureCount += 1
-							if vk.DeviceWaitIdle(device) != .SUCCESS {
-								panic("Idle?")
-							}
-							updateCommandBuffers(graphicsContext)
-						}
-					}
-				}
-				if imgui.MenuItem("Normal Map") {
-					filterPatterns := []cstring{"*.jpg", "*.jpeg", "*.png"}
-					path, _ := filepath.abs("./assets/textures/")
-					defer delete(path)
-					file, _ := filepath.rel(
-						baseDir,
-						string(
-							tinyfd.openFileDialog(
-								"Load Normal",
-								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
-								i32(len(filterPatterns)),
-								raw_data(filterPatterns),
-								".jpg .jpeg, .png",
-								0,
-							),
-						),
-					)
-					defer delete(file)
-
-					extension := filepath.ext(file)[1:]
-					if file != "" && extension == "png" ||
-					   extension == "jpg" ||
-					   extension == "jpeg" {
-						alreadyLoaded := false
-						for &loadedFile in scene.texturePaths {
-							if file == string(loadedFile) {
-								alreadyLoaded = true
-								break
-							}
-						}
-
-						if !alreadyLoaded {
-							f := strings.clone_to_cstring(file)
-							addImages(graphicsContext, &scene.normals, scene.normalCount, {f})
-							updateSceneNormals(graphicsContext, activeScene)
-							append(&scene.normalPaths, f)
-							scene.normalCount += 1
-							if vk.DeviceWaitIdle(device) != .SUCCESS {
-								panic("Idle?")
-							}
-							updateCommandBuffers(graphicsContext)
-						}
-					}
-				}
-				imgui.EndMenu()
-			}
-			imgui.EndMenu()
-		}
-	}
-
 	constructSceneEditor :: proc(using graphicsContext: ^GraphicsContext) {
-		scene := &scenes[activeScene]
-
 		if imgui.BeginMenuBar() {
 			constructMenuBar(graphicsContext)
 			imgui.EndMenuBar()
 		}
 
-		imgui.Text(fmt.ctprintf("FPS: {:.2f}", fps))
+		imgui.Text(fmt.ctprintf("FPS: {:.2f}", globals.fps))
 
 		if imgui.Button("Toggle Time", {100, 20}) {
-			paused = !paused
+			globals.paused = !globals.paused
 		}
 
 		// These all have to be seperate otherwise the ui will gain and loose options as the user interacts with them
@@ -6706,10 +6125,8 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 		}
 
 		if imgui.BeginCombo("Scene Selection", scene.name) {
-			for &s, index in scenes {
-				if activeScene != u32(index) && imgui.Selectable(s.name) {
-					setActiveScene(graphicsContext, u32(index))
-				}
+			for &s, index in globals.scenes {
+				switchScene(u32(index))
 			}
 			imgui.EndCombo()
 		}
@@ -6762,7 +6179,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					panic("Failed to wait for device?")
 				}
 
-				updateSceneLights(graphicsContext, activeScene)
+				updateSceneLights(graphicsContext)
 				updateCommandBuffers(graphicsContext)
 			}
 		}
@@ -6780,10 +6197,10 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 
 				newInstance: Instance = {
 					name         = fmt.caprintf("Object{:3d}", count),
-					modelID      = 0,
-					animID       = 0,
-					textureIDs   = make([]u32, 1),
-					normalIDs    = make([]u32, 1),
+					modelIdx     = 0,
+					animIdx      = 0,
+					textureIdxs  = make([]u32, 1),
+					normalIdxs   = make([]u32, 1),
 					position     = {0, 0, 0},
 					rotation     = {0, 0, 0},
 					scale        = {1, 1, 1},
@@ -6798,9 +6215,216 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				if vk.DeviceWaitIdle(device) != .SUCCESS {
 					panic("Failed to wait for device idle?")
 				}
-				updateSceneInstanceBuffer(graphicsContext, activeScene)
+				updateSceneInstanceBuffer(graphicsContext)
 				updateCommandBuffers(graphicsContext)
 			}
+		}
+	}
+
+	constructMenuBar :: proc(using graphicsContext: ^GraphicsContext) {
+		if imgui.BeginMenu("File") {
+			imgui.SeparatorText("Scene Files")
+			if imgui.MenuItem("New") {
+				createNewScene()
+			}
+			if imgui.MenuItem("Open") {
+				filterPatterns := []cstring{"*.json"}
+				path, _ := filepath.abs("./assets/scenes/")
+				defer delete(path)
+				file, _ := filepath.rel(
+					globals.baseDir,
+					string(
+						tinyfd.openFileDialog(
+							"Open Scene",
+							fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+							i32(len(filterPatterns)),
+							raw_data(filterPatterns),
+							".json",
+							0,
+						),
+					),
+				)
+				defer delete(file)
+
+				extension := filepath.ext(file)
+				if file != "" && extension[1:] == "json" {
+					if loadScene(file) != .None {
+						panic("Failed to load scene")
+					}
+				}
+			}
+			if imgui.MenuItem("Save") {
+				if scene.filePath == "" {
+					filterPatterns := []cstring{"*.json"}
+					path := strings.clone_from_cstring(
+						tinyfd.saveFileDialog(
+							"Save Scene",
+							fmt.caprintf(
+								"{}{}",
+								filepath.abs("./assets/scenes/"),
+								filepath.SEPARATOR,
+								allocator = context.temp_allocator,
+							),
+							i32(len(filterPatterns)),
+							raw_data(filterPatterns),
+							".json",
+						),
+					)
+					scene.filePath = path
+				}
+				saveScene(globals.activeScene)
+			}
+			if imgui.MenuItem("Save AS...") {
+				filterPatterns := []cstring{"*.json"}
+				path := string(
+					tinyfd.saveFileDialog(
+						"Save Scene",
+						strings.clone_to_cstring(scene.filePath, context.temp_allocator),
+						i32(len(filterPatterns)),
+						raw_data(filterPatterns),
+						".json",
+					),
+				)
+				if path != "" {
+					scene.filePath = path
+					saveScene(globals.activeScene)
+				}
+			}
+			if imgui.MenuItem("Close") {
+				closeScene(globals.activeScene)
+				switchScene(0)
+			}
+			imgui.SeparatorText("Assets")
+			if imgui.BeginMenu("Import") {
+				if imgui.MenuItem("Model") {
+					filterPatterns := []cstring{"*.gltf", "*.glb", "*.fbx", "*.obj"}
+					path, _ := filepath.abs("./assets/models/", context.temp_allocator)
+					file, err := filepath.rel(
+						globals.baseDir,
+						string(
+							tinyfd.openFileDialog(
+								"Load Model",
+								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+								i32(len(filterPatterns)),
+								raw_data(filterPatterns),
+								".gltf .glb .fbx .obj",
+								0,
+							),
+						),
+						context.temp_allocator,
+					)
+
+					if file != "" {
+						alreadyLoaded := false
+						for &loadedFile in scene.modelPaths {
+							if file == string(loadedFile) {
+								alreadyLoaded = true
+								break
+							}
+						}
+
+						if !alreadyLoaded {
+							f := strings.clone_to_cstring(file)
+							loadModels(scene, {f})
+							append(&scene.modelPaths, f)
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Failed to wait for device idle?")
+							}
+							updateSceneModels(graphicsContext)
+							updateCommandBuffers(graphicsContext)
+						}
+					}
+				}
+				if imgui.MenuItem("Texture") {
+					filterPatterns := []cstring{"*.jpg", "*.jpeg", "*.png"}
+					path, _ := filepath.abs("./assets/textures/", context.temp_allocator)
+					file, err := filepath.rel(
+						globals.baseDir,
+						string(
+							tinyfd.openFileDialog(
+								"Load Texture",
+								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+								i32(len(filterPatterns)),
+								raw_data(filterPatterns),
+								".jpg .jpeg .png",
+								0,
+							),
+						),
+						context.temp_allocator,
+					)
+
+					extension := filepath.ext(file)[1:]
+					if file != "" && extension == "png" ||
+					   extension == "jpg" ||
+					   extension == "jpeg" {
+						alreadyLoaded := false
+						for &loadedFile in scene.texturePaths {
+							if file == string(loadedFile) {
+								alreadyLoaded = true
+								break
+							}
+						}
+
+						if !alreadyLoaded {
+							f := strings.clone_to_cstring(file)
+							addImages(graphicsContext, &scene.textures, scene.textureCount, {f})
+							updateSceneTextures(graphicsContext)
+							append(&scene.texturePaths, f)
+							scene.textureCount += 1
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Idle?")
+							}
+							updateCommandBuffers(graphicsContext)
+						}
+					}
+				}
+				if imgui.MenuItem("Normal Map") {
+					filterPatterns := []cstring{"*.jpg", "*.jpeg", "*.png"}
+					path, _ := filepath.abs("./assets/textures/")
+					defer delete(path)
+					file, _ := filepath.rel(
+						globals.baseDir,
+						string(
+							tinyfd.openFileDialog(
+								"Load Normal",
+								fmt.ctprintf("{}{}", path, filepath.SEPARATOR),
+								i32(len(filterPatterns)),
+								raw_data(filterPatterns),
+								".jpg .jpeg, .png",
+								0,
+							),
+						),
+					)
+					defer delete(file)
+
+					extension := filepath.ext(file)[1:]
+					if file != "" && extension == "png" ||
+					   extension == "jpg" ||
+					   extension == "jpeg" {
+						alreadyLoaded := false
+						for &loadedFile in scene.texturePaths {
+							if file == string(loadedFile) {
+								alreadyLoaded = true
+								break
+							}
+						}
+
+						if !alreadyLoaded {
+							f := strings.clone_to_cstring(file)
+							addImages(graphicsContext, &scene.normals, scene.normalCount, {f})
+							updateSceneNormals(graphicsContext)
+							append(&scene.normalPaths, f)
+							scene.normalCount += 1
+							if vk.DeviceWaitIdle(device) != .SUCCESS {
+								panic("Idle?")
+							}
+							updateCommandBuffers(graphicsContext)
+						}
+					}
+				}
+				imgui.EndMenu()
+			}
+			imgui.EndMenu()
 		}
 	}
 
@@ -6816,8 +6440,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	constructCamerasHeader :: proc(using graphicsContext: ^GraphicsContext) {
-		scene := &scenes[activeScene]
-
 		for index := len(scene.cameras) - 1; index >= 0; index -= 1 {
 			camera := &scene.cameras[index]
 			if !imgui.TreeNode(camera.name) {
@@ -6853,8 +6475,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	constructLightsHeader :: proc(using graphicsContext: ^GraphicsContext) {
-		scene := &scenes[activeScene]
-
 		for index := len(scene.pointLights) - 1; index >= 0; index -= 1 {
 			light := &scene.pointLights[index]
 			if !imgui.TreeNode(light.name) {
@@ -6871,7 +6491,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				if vk.DeviceWaitIdle(device) != .SUCCESS {
 					panic("Failed to wait for device?")
 				}
-				updateSceneLights(graphicsContext, activeScene)
+				updateSceneLights(graphicsContext)
 				updateCommandBuffers(graphicsContext)
 			}
 			imgui.EndDisabled()
@@ -6880,8 +6500,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	constructObjectsHeader :: proc(using graphicsContext: ^GraphicsContext) {
-		scene := &scenes[activeScene]
-
 		for index := len(scene.instances) - 1; index >= 0; index -= 1 {
 			modelInstance := &scene.instances[index]
 			if !imgui.TreeNode(modelInstance.name) {
@@ -6900,24 +6518,24 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
 			}
 
-			if imgui.BeginCombo("Model", scene.models[modelInstance.modelID].name) {
+			if imgui.BeginCombo("Model", scene.models[modelInstance.modelIdx].name) {
 				for &model, i in scene.models {
-					if u32(i) != modelInstance.modelID && imgui.Selectable(model.name) {
-						scene.boneCount -= len(scene.models[modelInstance.modelID].skeleton)
-						for &mesh in scene.models[modelInstance.modelID].meshes {
+					if u32(i) != modelInstance.modelIdx && imgui.Selectable(model.name) {
+						scene.boneCount -= len(scene.models[modelInstance.modelIdx].skeleton)
+						for &mesh in scene.models[modelInstance.modelIdx].meshes {
 							scene.instanceVerticesCount -= len(mesh.vertices)
 						}
 						delete(modelInstance.positionKeys)
 						delete(modelInstance.rotationKeys)
 						delete(modelInstance.scaleKeys)
 
-						modelInstance.modelID = u32(i)
-						modelInstance.textureIDs = make([]u32, len(model.meshes))
-						modelInstance.normalIDs = make([]u32, len(model.meshes))
+						modelInstance.modelIdx = u32(i)
+						modelInstance.textureIdxs = make([]u32, len(model.meshes))
+						modelInstance.normalIdxs = make([]u32, len(model.meshes))
 
-						skeletonLength := len(scene.models[modelInstance.modelID].skeleton)
+						skeletonLength := len(scene.models[modelInstance.modelIdx].skeleton)
 						scene.boneCount += skeletonLength
-						for &mesh in scene.models[modelInstance.modelID].meshes {
+						for &mesh in scene.models[modelInstance.modelIdx].meshes {
 							scene.instanceVerticesCount += len(mesh.vertices)
 						}
 
@@ -6928,7 +6546,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 						if vk.DeviceWaitIdle(device) != .SUCCESS {
 							panic("Failed to wait for device idle?")
 						}
-						updateSceneInstanceModel(graphicsContext, activeScene)
+						updateSceneInstanceModel(graphicsContext)
 						updateCommandBuffers(graphicsContext)
 					}
 				}
@@ -6936,18 +6554,18 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			}
 
 			imgui.SeparatorText("Meshes")
-			for &mesh, meshIndex in scene.models[modelInstance.modelID].meshes {
+			for &mesh, meshIndex in scene.models[modelInstance.modelIdx].meshes {
 				if !imgui.TreeNode(mesh.name) {
 					continue
 				}
 				if imgui.BeginCombo(
 					"Texture",
-					scene.texturePaths[modelInstance.textureIDs[meshIndex]],
+					scene.texturePaths[modelInstance.textureIdxs[meshIndex]],
 				) {
 					for &texture, i in scene.texturePaths {
-						if u32(i) != modelInstance.textureIDs[meshIndex] &&
+						if u32(i) != modelInstance.textureIdxs[meshIndex] &&
 						   imgui.Selectable(texture) {
-							modelInstance.textureIDs[meshIndex] = u32(i)
+							modelInstance.textureIdxs[meshIndex] = u32(i)
 							if vk.DeviceWaitIdle(device) != .SUCCESS {
 								panic("Failed to wait for device idle?")
 							}
@@ -6958,12 +6576,12 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				}
 				if imgui.BeginCombo(
 					"Normal Map",
-					scene.normalPaths[modelInstance.normalIDs[meshIndex]],
+					scene.normalPaths[modelInstance.normalIdxs[meshIndex]],
 				) {
 					for &normal, i in scene.normalPaths {
-						if u32(i) != modelInstance.normalIDs[meshIndex] &&
+						if u32(i) != modelInstance.normalIdxs[meshIndex] &&
 						   imgui.Selectable(normal) {
-							modelInstance.normalIDs[meshIndex] = u32(i)
+							modelInstance.normalIdxs[meshIndex] = u32(i)
 							if vk.DeviceWaitIdle(device) != .SUCCESS {
 								panic("Failed to wait for device idle?")
 							}
@@ -6975,13 +6593,16 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				imgui.TreePop()
 			}
 
-			animations := &scene.models[modelInstance.modelID].animations
+			animations := &scene.models[modelInstance.modelIdx].animations
 			if len(animations) > 0 {
 				imgui.SeparatorText("Animations")
-				if imgui.BeginCombo("Animation Selection", animations[modelInstance.animID].name) {
+				if imgui.BeginCombo(
+					"Animation Selection",
+					animations[modelInstance.animIdx].name,
+				) {
 					for &anim, i in animations {
-						if modelInstance.animID != u32(i) && imgui.Selectable(anim.name) {
-							modelInstance.animID = u32(i)
+						if modelInstance.animIdx != u32(i) && imgui.Selectable(anim.name) {
+							modelInstance.animIdx = u32(i)
 						}
 					}
 					imgui.EndCombo()
@@ -6989,7 +6610,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				if imgui.DragScalar("Animation Timer", .Double, &modelInstance.animTimer, 0.01) {
 					if modelInstance.animTimer < 0 {
 						modelInstance.animTimer =
-							scene.models[modelInstance.modelID].animations[modelInstance.animID].duration +
+							scene.models[modelInstance.modelIdx].animations[modelInstance.animIdx].duration +
 							modelInstance.animTimer
 					}
 				}
@@ -6997,13 +6618,13 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			imgui.BeginDisabled(len(scene.instances) == 1)
 			if imgui.Button("Delete") {
 				delete(modelInstance.name)
-				delete(modelInstance.textureIDs)
-				delete(modelInstance.normalIDs)
+				delete(modelInstance.textureIdxs)
+				delete(modelInstance.normalIdxs)
 				delete(modelInstance.positionKeys)
 				delete(modelInstance.rotationKeys)
 				delete(modelInstance.scaleKeys)
-				scene.boneCount -= len(scene.models[modelInstance.modelID].skeleton)
-				for &mesh in scene.models[modelInstance.modelID].meshes {
+				scene.boneCount -= len(scene.models[modelInstance.modelIdx].skeleton)
+				for &mesh in scene.models[modelInstance.modelIdx].meshes {
 					scene.instanceVerticesCount -= len(mesh.vertices)
 				}
 				unordered_remove(&scene.instances, index)
@@ -7011,7 +6632,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				if vk.DeviceWaitIdle(device) != .SUCCESS {
 					panic("Failed to wait for device idle?")
 				}
-				updateSceneInstanceBuffer(graphicsContext, activeScene)
+				updateSceneInstanceBuffer(graphicsContext)
 				updateCommandBuffers(graphicsContext)
 			}
 			imgui.EndDisabled()
@@ -7023,12 +6644,12 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 	imguiGLFW.NewFrame()
 	imgui.NewFrame()
 
-	if showMetrics {
+	if globals.showMetrics {
 		imgui.SetNextWindowBgAlpha(1.0)
 		imgui.ShowMetricsWindow()
 	}
 
-	if showDemo {
+	if globals.showDemo {
 		imgui.SetNextWindowBgAlpha(1.0)
 		imgui.ShowDemoWindow()
 	}

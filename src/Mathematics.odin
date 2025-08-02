@@ -61,11 +61,28 @@ rotation3 :: linalg.matrix3_rotate
 rotation4 :: linalg.matrix4_rotate
 quatToRotation :: linalg.matrix4_from_quaternion
 
-invert :: linalg.matrix4_inverse
+inverse :: linalg.matrix4_inverse
 
 quatLerp :: linalg.quaternion_nlerp
+eulerToQuat :: linalg.quaternion_from_euler_angles
 
 pow :: linalg.pow
+
+minVec3 :: proc(a, b: Vec3) -> Vec3 {
+	return {
+		min(a.x, b.x),
+		min(a.y, b.y),
+		min(a.z, b.z),
+	}
+}
+
+maxVec3 :: proc(a, b: Vec3) -> Vec3 {
+	return {
+		max(a.x, b.x),
+		max(a.y, b.y),
+		max(a.z, b.z),
+	}
+}
 
 vector3Lerp :: proc(a, b: Vec3, t: f32) -> Vec3 {
 	return a + (b - a) * t
