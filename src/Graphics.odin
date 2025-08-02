@@ -6149,7 +6149,6 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					eye      = {0.0, 0.2, -0.4},
 					center   = {0.0, 0.0, 0.0},
 					up       = {0.0, 1.0, 0.0},
-					distance = 1.0,
 					fov      = 45.0,
 					mode     = .PERSPECTIVE,
 				}

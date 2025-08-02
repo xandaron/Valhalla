@@ -91,7 +91,6 @@ Camera :: struct {
 	name:            cstring,
 	eye, center, up: Vec3,
 	near, far:       f32,
-	distance:        f32,
 	fov:             f32,
 	mode:            CameraMode,
 }
@@ -205,7 +204,7 @@ main :: proc() {
 		scene := &globals.scenes[globals.activeScene]
 		camera := &scene.cameras[scene.activeCamera]
 
-		forward := (camera.center - camera.eye) / camera.distance
+		forward := normalize(camera.center - camera.eye)
 		up := camera.up
 		right := cross(up, forward)
 
@@ -228,8 +227,27 @@ main :: proc() {
 				forward = rotation * forward
 			}
 
-			camera.distance *= 1 - mouseDelta.z * 0.1
-			camera.eye = camera.center - (forward * camera.distance)
+			distance := length(camera.center - camera.eye) * (1 - mouseDelta.z * 0.1)
+
+			minPitch: f32 : PI * -70.0 / 180.0
+			maxPitch: f32 : PI * 70.0 / 180.0
+			pitch := asin(forward.y)
+
+			if pitch > maxPitch {
+				pitch = maxPitch
+			} else if pitch < minPitch {
+				pitch = minPitch
+			}
+
+			// Project forward onto xz-plane
+			xzDir := normalize(Vec3{forward.x, 0, forward.z})
+
+			// Reconstruct forward with capped angle
+			forward = normalize(
+				xzDir * cos(pitch) +
+				Vec3{0, 1, 0} * sin(pitch)
+			)
+			camera.eye = camera.center - (forward * distance)
 
 			mouseDelta = {0, 0, 0}
 		}
@@ -524,7 +542,6 @@ createNewScene :: proc() {
 		eye      = {0.0, 0.2, -0.4},
 		center   = {0.0, 0.0, 0.0},
 		up       = {0.0, 1.0, 0.0},
-		distance = 1.0,
 		fov      = 45.0,
 		mode     = .PERSPECTIVE,
 	}
