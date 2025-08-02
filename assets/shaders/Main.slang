@@ -79,7 +79,7 @@ FragOut frag(VertOut input)
 
     #define SAMPLES 20
     #define BIAS 0.002
-    #define DISK_RADIUS 0.001
+    #define DISK_RADIUS 0.0015
 
     // Sample offset directions for shadow sampling
     static const float3 sampleOffsetDirections[SAMPLES] = {
