@@ -2,7 +2,6 @@
 
 package Valhalla
 
-import "core:text/i18n"
 import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
