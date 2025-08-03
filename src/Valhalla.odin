@@ -48,10 +48,12 @@ PointLight :: struct {
 @(private = "package")
 Instance :: struct {
 	name:               cstring,
+	forward:            Vec3,
 	position:           Vec3,
 	rotation:           Vec3,
-	scaleUniform:       bool,
 	scale:              Vec3,
+	selectable:         bool,
+	tiled:             bool,
 
 	// Graphics Engine Data
 	using graphicsData: SceneInstanceData,
@@ -262,108 +264,6 @@ calcFrameRate :: proc(window: glfw.WindowHandle) {
 	}
 }
 
-screenToWorldRay :: proc(window: glfw.WindowHandle, pos: Vec2) -> (origin: Vec3, direction: Vec3) {
-	scene := &globals.scenes[globals.activeScene]
-	camera := &scene.cameras[scene.activeCamera]
-
-	width, height := glfw.GetWindowSize(window)
-
-	vpPos := pos / Vec2{f32(width), f32(height)}
-	vpPos = vpPos * 2 - 1
-
-	proj := perspective(radians(camera.fov), f32(width) / f32(height), 0.1, 100)
-	view := lookAt(camera.eye, camera.center, camera.up)
-	ivp := inverse(proj * view)
-
-	ndcNear := Vec4{vpPos.x, vpPos.y, 0, 1}
-	ndcFar := Vec4{vpPos.x, vpPos.y, 1, 1}
-
-	worldNear := ivp * ndcNear
-	worldFar := ivp * ndcFar
-
-	worldNear /= worldNear.w
-	worldFar /= worldFar.w
-
-	origin = worldNear.xyz
-	direction = normalize(worldFar.xyz - worldNear.xyz)
-
-	return
-}
-
-castRay :: proc(rayOrigin, rayDirection: Vec3, scene: ^Scene) -> (instance: ^Instance) {
-	rayIntersects :: proc(
-		rayOrigin, rayDirection: Vec3,
-		boundingBox: ^AABB,
-	) -> (
-		hit: bool,
-		distance: f32,
-	) {
-		t1 := (boundingBox.min - rayOrigin) / rayDirection
-		t2 := (boundingBox.max - rayOrigin) / rayDirection
-
-		tmin := minVec3(t1, t2)
-		tmax := maxVec3(t1, t2)
-
-		mint := max(tmin.x, max(tmin.y, tmin.z))
-		maxt := min(tmax.x, min(tmax.y, tmax.z))
-
-		return maxt >= mint, mint
-	}
-
-	instance = nil
-
-	distance := max(f32)
-	for &inst in scene.instances {
-		model := &scene.models[inst.modelIdx]
-
-		for &mesh in model.meshes {
-			transform :=
-				translate(inst.position) *
-				quatToRotation(
-					eulerToQuat(
-						radians(inst.rotation.x),
-						radians(inst.rotation.y),
-						radians(inst.rotation.z),
-						.XYZ,
-					),
-				) *
-				scale(inst.scale)
-			corners: [8]Vec3 = {
-				mesh.boundingBox.min,
-				{mesh.boundingBox.min.x, mesh.boundingBox.min.y, mesh.boundingBox.max.z},
-				{mesh.boundingBox.min.x, mesh.boundingBox.max.y, mesh.boundingBox.min.z},
-				{mesh.boundingBox.min.x, mesh.boundingBox.max.y, mesh.boundingBox.max.z},
-				{mesh.boundingBox.max.x, mesh.boundingBox.min.y, mesh.boundingBox.min.z},
-				{mesh.boundingBox.max.x, mesh.boundingBox.min.y, mesh.boundingBox.max.z},
-				{mesh.boundingBox.max.x, mesh.boundingBox.max.y, mesh.boundingBox.min.z},
-				mesh.boundingBox.max,
-			}
-			transformed: [8]Vec3
-			for i in 0 ..< 8 {
-				transformed[i] =
-					(transform * Vec4{corners[i].x, corners[i].y, corners[i].z, 1}).xyz
-			}
-			new_min := transformed[0]
-			new_max := transformed[0]
-			for i in 1 ..< 8 {
-				new_min = minVec3(new_min, transformed[i])
-				new_max = maxVec3(new_max, transformed[i])
-			}
-			boundingBox := AABB {
-				min = new_min,
-				max = new_max,
-			}
-			intersects, dist := rayIntersects(rayOrigin, rayDirection, &boundingBox)
-			if intersects && dist < distance {
-				distance = dist
-				instance = &inst
-			}
-		}
-	}
-
-	return
-}
-
 keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
 	context = runtimeContext
 	switch key {
@@ -436,6 +336,122 @@ keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods:
 	}
 }
 
+screenPositionToWorldRay :: proc(
+	window: glfw.WindowHandle,
+	pos: Vec2,
+) -> (
+	origin: Vec3,
+	direction: Vec3,
+) {
+	scene := &globals.scenes[globals.activeScene]
+	camera := &scene.cameras[scene.activeCamera]
+
+	width, height := glfw.GetWindowSize(window)
+
+	vpPos := pos / Vec2{f32(width), f32(height)}
+	vpPos = vpPos * 2 - 1
+
+	proj := perspective(radians(camera.fov), f32(width) / f32(height), 0.1, 100)
+	view := lookAt(camera.eye, camera.center, camera.up)
+	ivp := inverse(proj * view)
+
+	ndcNear := Vec4{vpPos.x, vpPos.y, 0, 1}
+	ndcFar := Vec4{vpPos.x, vpPos.y, 1, 1}
+
+	worldNear := ivp * ndcNear
+	worldFar := ivp * ndcFar
+
+	worldNear /= worldNear.w
+	worldFar /= worldFar.w
+
+	origin = worldNear.xyz
+	direction = normalize(worldFar.xyz - worldNear.xyz)
+
+	return
+}
+
+castRay :: proc(
+	rayOrigin, rayDirection: Vec3,
+	scene: ^Scene,
+) -> (
+	instance: ^Instance,
+	distance: f32,
+) {
+	rayIntersects :: proc(
+		rayOrigin, rayDirection: Vec3,
+		boundingBox: ^AABB,
+	) -> (
+		hit: bool,
+		distance: f32,
+	) {
+		t1 := (boundingBox.min - rayOrigin) / rayDirection
+		t2 := (boundingBox.max - rayOrigin) / rayDirection
+
+		tmin := minVec3(t1, t2)
+		tmax := maxVec3(t1, t2)
+
+		mint := max(tmin.x, max(tmin.y, tmin.z))
+		maxt := min(tmax.x, min(tmax.y, tmax.z))
+
+		return maxt >= mint, mint
+	}
+
+	instance = nil
+
+	distance = max(f32)
+	for &inst in scene.instances {
+		model := &scene.models[inst.modelIdx]
+
+		for &mesh in model.meshes {
+			transform :=
+				translate(inst.position + model.position) *
+				eulerToMat4(
+					radians(inst.rotation.x),
+					radians(inst.rotation.y),
+					radians(inst.rotation.z),
+				) *
+				eulerToMat4(
+					radians(model.rotation.x),
+					radians(model.rotation.y),
+					radians(model.rotation.z),
+				) *
+				scale(inst.scale * model.scale)
+			corners: [8]Vec3 = {
+				mesh.boundingBox.min,
+				{mesh.boundingBox.min.x, mesh.boundingBox.min.y, mesh.boundingBox.max.z},
+				{mesh.boundingBox.min.x, mesh.boundingBox.max.y, mesh.boundingBox.min.z},
+				{mesh.boundingBox.min.x, mesh.boundingBox.max.y, mesh.boundingBox.max.z},
+				{mesh.boundingBox.max.x, mesh.boundingBox.min.y, mesh.boundingBox.min.z},
+				{mesh.boundingBox.max.x, mesh.boundingBox.min.y, mesh.boundingBox.max.z},
+				{mesh.boundingBox.max.x, mesh.boundingBox.max.y, mesh.boundingBox.min.z},
+				mesh.boundingBox.max,
+			}
+			transformed: [8]Vec3
+			for i in 0 ..< 8 {
+				transformed[i] =
+					(transform * Vec4{corners[i].x, corners[i].y, corners[i].z, 1}).xyz
+			}
+			new_min := transformed[0]
+			new_max := transformed[0]
+			for i in 1 ..< 8 {
+				new_min = minVec3(new_min, transformed[i])
+				new_max = maxVec3(new_max, transformed[i])
+			}
+			boundingBox := AABB {
+				min = new_min,
+				max = new_max,
+			}
+			intersects, dist := rayIntersects(rayOrigin, rayDirection, &boundingBox)
+			if intersects && dist < distance {
+				distance = dist
+				instance = &inst
+			}
+		}
+	}
+
+	return
+}
+
 mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
 	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
 		if mouseMode {
@@ -470,27 +486,37 @@ scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
 	mouseDelta.z = f32(yoffset)
 }
 
-InstanceJSON :: struct {
-	name:         cstring `json:name`,
-	model:        i32 `json:model`,
-	textures:     []i32 `json:textures`,
-	normals:      []i32 `json:normals`,
-	position:     Vec3 `json:position`,
-	rotation:     Vec3 `json:rotation`,
-	scaleUniform: bool `json:scale_uniform`,
-	scale:        Vec3 `json:scale`,
-}
-
 SceneJSON :: struct {
 	name:          cstring `json:name`,
 	clear_colour:  [4]i32 `json:clear_colour`,
 	ambient_light: f32 `json:ambient_light`,
 	cameras:       []Camera `json:cameras`,
 	lights:        []PointLight `json:lights`,
-	models:        []cstring `json:models`,
 	textures:      []cstring `json:textures`,
 	normals:       []cstring `json:normals`,
-	instances:     []InstanceJSON `json:instances`,
+	models:        []ModelJSON,
+	instances:     []InstanceJSON,
+}
+
+ModelJSON :: struct {
+	name:      cstring `json:name`,
+	file_path: cstring `json:file_path`,
+	position:  Vec3 `json:position`,
+	rotation:  Vec3 `json:rotation`,
+	scale:     Vec3 `json:scale`,
+}
+
+InstanceJSON :: struct {
+	name:       cstring `json:name`,
+	model:      i32 `json:model`,
+	textures:   []i32 `json:textures`,
+	normals:    []i32 `json:normals`,
+	forward:    Vec3 `json:forward`,
+	position:   Vec3 `json:position`,
+	rotation:   Vec3 `json:rotation`,
+	scale:      Vec3 `json:scale`,
+	selectable: bool `json:selectable`,
+	tiled:      bool `json:tiled`,
 }
 
 // ATM we can't have a truly "empty" scene as we have to make buffers and images that must exist.
@@ -527,12 +553,12 @@ createNewScene :: proc() {
 
 	scene.cameras = make([dynamic]Camera, 1)
 	scene.cameras[0] = {
-		name     = strings.clone_to_cstring("main"),
-		eye      = {0.0, 0.2, -0.4},
-		center   = {0.0, 0.0, 0.0},
-		up       = {0.0, 1.0, 0.0},
-		fov      = 45.0,
-		mode     = .PERSPECTIVE,
+		name   = strings.clone_to_cstring("main"),
+		eye    = {0.0, 2.0, -4.0},
+		center = {0.0, 0.0, 0.0},
+		up     = {0.0, 1.0, 0.0},
+		fov    = 45.0,
+		mode   = .PERSPECTIVE,
 	}
 	scene.activeCamera = 0
 
@@ -550,6 +576,9 @@ createNewScene :: proc() {
 	scene.indices = make([dynamic]u32)
 
 	loadSceneAssets(&globals.graphicsContext, scene)
+
+	scene.models[0].name = strings.clone_to_cstring("Meter Cube")
+	scene.models[0].scale = {0.5, 0.5, 0.5}
 	switchScene(u32(len(globals.scenes) - 1))
 }
 
@@ -600,14 +629,16 @@ loadScene :: proc(sceneFile: string) -> (err: LoadSceneError = .None) {
 		}
 
 		scene.instances[instanceIndex] = {
-			name         = instance.name,
-			modelIdx     = u32(instance.model + 1),
-			textureIdxs  = textureIdxs[:],
-			normalIdxs   = normalIdxs[:],
-			position     = instance.position,
-			rotation     = instance.rotation,
-			scaleUniform = instance.scaleUniform,
-			scale        = instance.scale,
+			name        = instance.name,
+			modelIdx    = u32(instance.model + 1),
+			textureIdxs = textureIdxs[:],
+			normalIdxs  = normalIdxs[:],
+			forward     = instance.forward,
+			position    = instance.position,
+			rotation    = instance.rotation,
+			scale       = instance.scale,
+			selectable  = instance.selectable,
+			tiled       = instance.tiled,
 		}
 	}
 
@@ -615,15 +646,39 @@ loadScene :: proc(sceneFile: string) -> (err: LoadSceneError = .None) {
 	append(&scene.texturePaths, strings.clone_to_cstring("./assets/textures/missing_texture.jpg"))
 	append(&scene.normalPaths, strings.clone_to_cstring("./assets/textures/normal.jpg"))
 
+	for &model, index in sceneJson.models {
+		append(&scene.modelPaths, model.file_path)
+	}
+
 	append(&scene.pointLights, ..sceneJson.lights)
 	append(&scene.cameras, ..sceneJson.cameras)
-	append(&scene.modelPaths, ..sceneJson.models)
 	append(&scene.texturePaths, ..sceneJson.textures)
 	append(&scene.normalPaths, ..sceneJson.normals)
 
+	if lerr := loadSceneAssets(&globals.graphicsContext, scene); lerr != .None {
+		// TODO: This error should just be info not crashing. Should handle files not existing by using a replacement texture/model?
+		panic("Load error")
+	}
+
+	scene.models[0].name = strings.clone_to_cstring("Meter Cube")
+	scene.models[0].position = {0, 0, 0}
+	scene.models[0].rotation = {0, 0, 0}
+	scene.models[0].scale = {0.5, 0.5, 0.5}
+
+	for &modelJson, index in sceneJson.models {
+		model := &scene.models[index + 1]
+		if modelJson.name == nil {
+			model.name = strings.clone_to_cstring("New Model")
+		} else {
+			model.name = modelJson.name
+		}
+		model.position = modelJson.position
+		model.rotation = modelJson.rotation
+		model.scale = modelJson.scale
+	}
+
 	delete(sceneJson.lights)
 	delete(sceneJson.cameras)
-	delete(sceneJson.models)
 	delete(sceneJson.textures)
 	delete(sceneJson.normals)
 
@@ -632,11 +687,7 @@ loadScene :: proc(sceneFile: string) -> (err: LoadSceneError = .None) {
 		delete(instance.normals)
 	}
 	delete(sceneJson.instances)
-
-	if lerr := loadSceneAssets(&globals.graphicsContext, scene); lerr != .None {
-		// TODO: This error should just be info not crashing. Should handle files not existing by using a replacement texture/model?
-		panic("Load error")
-	}
+	delete(sceneJson.models)
 
 	return
 }
@@ -651,9 +702,9 @@ saveScene :: proc(sceneIndex: u32) {
 		ambient_light = scene.ambientLight,
 		cameras       = scene.cameras[:],
 		lights        = scene.pointLights[:],
-		models        = scene.modelPaths[1:],
 		textures      = scene.texturePaths[1:],
 		normals       = scene.normalPaths[1:],
+		models        = make([]ModelJSON, len(scene.models) - 1),
 		instances     = make([]InstanceJSON, len(scene.instances)),
 	}
 	defer delete(sceneInfo.instances)
@@ -668,20 +719,32 @@ saveScene :: proc(sceneIndex: u32) {
 		}
 
 		sceneInfo.instances[index] = {
-			name         = instance.name,
-			model        = i32(instance.modelIdx) - 1,
-			textures     = textureIdxs,
-			normals      = normalIdxs,
-			position     = instance.position,
-			rotation     = instance.rotation,
-			scaleUniform = instance.scaleUniform,
-			scale        = instance.scale,
+			name       = instance.name,
+			model      = i32(instance.modelIdx) - 1,
+			textures   = textureIdxs,
+			normals    = normalIdxs,
+			position   = instance.position,
+			rotation   = instance.rotation,
+			scale      = instance.scale,
+			selectable = instance.selectable,
+			tiled      = instance.tiled,
 		}
 	}
 	defer for &instance in sceneInfo.instances {
 		delete(instance.textures)
 		delete(instance.normals)
 	}
+
+	for &model, index in sceneInfo.models {
+		model = {
+			name      = scene.models[index + 1].name,
+			file_path = scene.modelPaths[index + 1],
+			position  = scene.models[index + 1].position,
+			rotation  = scene.models[index + 1].rotation,
+			scale     = scene.models[index + 1].scale,
+		}
+	}
+	defer delete(sceneInfo.models)
 
 	json_data, err := json.marshal(sceneInfo, {pretty = true})
 	if err != nil {

@@ -173,6 +173,9 @@ Mesh :: struct {
 Model :: struct {
 	name:       cstring,
 	meshes:     []Mesh,
+	position:   Vec3,
+	rotation:   Vec3,
+	scale:      Vec3,
 	skeleton:   Skeleton,
 	animations: []Animation,
 }
@@ -383,7 +386,10 @@ GraphicsContext :: struct {
 
 
 @(private = "package")
-initVkGraphics :: proc(using graphicsContext: ^GraphicsContext, glfwCallbacks: ^GLFWCallbacks) {
+initVkGraphics :: proc(
+	using graphicsContext: ^GraphicsContext,
+	glfwCallbacks: ^GLFWCallbacks = nil,
+) {
 	when ODIN_DEBUG {
 		glfw.SetErrorCallback(glfwErrorCallback)
 	}
@@ -2048,11 +2054,6 @@ loadModels :: proc(scene: ^Scene, modelPaths: []cstring) {
 
 			boneCount += sceneMesh.mNumBones
 		}
-
-		strLen := len(model.meshes[0].name)
-		memPtr, _ := mem.alloc(size_of(c.char) * strLen)
-		mem.copy(memPtr, rawptr(model.meshes[0].name), strLen)
-		model.name = cstring(memPtr)
 
 		model.skeleton = make(Skeleton, boneCount)
 		boneMap := make(map[cstring]u32, boneCount)
@@ -5265,14 +5266,24 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 	boneTransforms[0] = IMAT4
 	boneOffset: u32 = 1
 	for &instance, instanceIndex in scene.instances {
+		model := &scene.models[instance.modelIdx]
+		transform :=
+			translate(instance.position + model.position) *
+			eulerToMat4(
+				radians(instance.rotation.x),
+				radians(instance.rotation.y),
+				radians(instance.rotation.z),
+			) *
+			eulerToMat4(
+				radians(model.rotation.x),
+				radians(model.rotation.y),
+				radians(model.rotation.z),
+			) *
+			scale(instance.scale * model.scale)
 		instanceData[instanceIndex] = {
-			model      = translate(
-				instance.position,
-			) * quatToRotation(eulerToQuat(radians(instance.rotation.x), radians(instance.rotation.y), radians(instance.rotation.z), .XYZ)) * scale(instance.scale),
+			model      = transform,
 			boneOffset = boneOffset,
 		}
-
-		model := &scene.models[instance.modelIdx]
 
 		if len(model.skeleton) == 0 || len(model.animations) == 0 {
 			instanceData[instanceIndex].boneOffset = 0
@@ -6145,12 +6156,12 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 					}
 				}
 				newCamera: Camera = {
-					name     = fmt.caprintf("Camera{:3d}", count),
-					eye      = {0.0, 0.2, -0.4},
-					center   = {0.0, 0.0, 0.0},
-					up       = {0.0, 1.0, 0.0},
-					fov      = 45.0,
-					mode     = .PERSPECTIVE,
+					name   = fmt.caprintf("Camera{:3d}", count),
+					eye    = {0.0, 2.0, -4.0},
+					center = {0.0, 0.0, 0.0},
+					up     = {0.0, 1.0, 0.0},
+					fov    = 45.0,
+					mode   = .PERSPECTIVE,
 				}
 				append(&scene.cameras, newCamera)
 			}
@@ -6183,7 +6194,7 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 			}
 		}
 
-		if imgui.CollapsingHeader("Objects") {
+		if imgui.CollapsingHeader("Scene Objects") {
 			constructObjectsHeader(graphicsContext)
 			if imgui.Button("Add Object") {
 				count: u32 = 0
@@ -6217,6 +6228,10 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				updateSceneInstanceBuffer(graphicsContext)
 				updateCommandBuffers(graphicsContext)
 			}
+		}
+
+		if imgui.CollapsingHeader("Models") {
+			constructModelsHeader(graphicsContext)
 		}
 	}
 
@@ -6325,6 +6340,10 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 						if !alreadyLoaded {
 							f := strings.clone_to_cstring(file)
 							loadModels(scene, {f})
+							scene.models[len(scene.models) - 1].name = strings.clone_to_cstring(
+								"New Model",
+							)
+							scene.models[len(scene.models) - 1].scale = {1, 1, 1}
 							append(&scene.modelPaths, f)
 							if vk.DeviceWaitIdle(device) != .SUCCESS {
 								panic("Failed to wait for device idle?")
@@ -6505,17 +6524,16 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				continue
 			}
 
+			imgui.Checkbox("Selectable", &modelInstance.selectable)
+			imgui.Checkbox("Tiled", &modelInstance.tiled)
+
+			imgui.SeparatorText("Object Properties")
+
 			imgui.DragFloat3("Position", &modelInstance.position, 0.01)
 			imgui.DragFloat3("Rotation", &modelInstance.rotation, 5)
+			imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
 
-			imgui.Checkbox("Scale Uniformly", &modelInstance.scaleUniform)
-			if modelInstance.scaleUniform {
-				imgui.DragFloat("Scale", &modelInstance.scale.x, 0.001)
-				modelInstance.scale.y = modelInstance.scale.x
-				modelInstance.scale.z = modelInstance.scale.x
-			} else {
-				imgui.DragFloat3("Scale", &modelInstance.scale, 0.001)
-			}
+			imgui.SeparatorText("Model Properties")
 
 			if imgui.BeginCombo("Model", scene.models[modelInstance.modelIdx].name) {
 				for &model, i in scene.models {
@@ -6524,6 +6542,9 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 						for &mesh in scene.models[modelInstance.modelIdx].meshes {
 							scene.instanceVerticesCount -= len(mesh.vertices)
 						}
+						delete(modelInstance.textureIdxs)
+						delete(modelInstance.normalIdxs)
+
 						delete(modelInstance.positionKeys)
 						delete(modelInstance.rotationKeys)
 						delete(modelInstance.scaleKeys)
@@ -6635,6 +6656,20 @@ drawUI :: proc(using graphicsContext: ^GraphicsContext) {
 				updateCommandBuffers(graphicsContext)
 			}
 			imgui.EndDisabled()
+			imgui.TreePop()
+		}
+	}
+
+	constructModelsHeader :: proc(using graphicsContext: ^GraphicsContext) {
+		for &model in scene.models {
+			if !imgui.TreeNode(model.name) {
+				continue
+			}
+
+			imgui.DragFloat3("Position", &model.position, 0.01)
+			imgui.DragFloat3("Rotation", &model.rotation, 5)
+			imgui.DragFloat3("Scale", &model.scale, 0.001)
+
 			imgui.TreePop()
 		}
 	}
