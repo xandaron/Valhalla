@@ -228,24 +228,14 @@ main :: proc() {
 
 			distance := length(camera.center - camera.eye) * (1 - mouseDelta.z * 0.1)
 
-			minPitch: f32 : PI * -70.0 / 180.0
-			maxPitch: f32 : PI * 70.0 / 180.0
-			pitch := asin(forward.y)
-
-			if pitch > maxPitch {
-				pitch = maxPitch
-			} else if pitch < minPitch {
-				pitch = minPitch
+			// Clamp the pitch to prevent flipping
+			maxY :: 0.9396926208 // approximately sin(70 degrees)
+			signY := sign(forward.y)
+			absY := signY * forward.y
+			if absY > maxY {
+				forward.xz *= sqrt((1 - (maxY * maxY)) / (1 - (absY * absY)))
+				forward.y = signY * maxY
 			}
-
-			// Project forward onto xz-plane
-			xzDir := normalize(Vec3{forward.x, 0, forward.z})
-
-			// Reconstruct forward with capped angle
-			forward = normalize(
-				xzDir * cos(pitch) +
-				Vec3{0, 1, 0} * sin(pitch)
-			)
 			camera.eye = camera.center - (forward * distance)
 
 			mouseDelta = {0, 0, 0}
