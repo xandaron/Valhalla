@@ -33,7 +33,6 @@ cameraMove: Vec3 = {0, 0, 0}
 
 MoveAction :: struct {
 	destination: Vec3,
-	entity:      ^GameObject,
 }
 
 Action :: union {
@@ -45,7 +44,6 @@ Globals :: struct {
 
 	// Graphics Engine Data
 	graphicsContext: valhalla.GraphicsContext,
-	action:          Action,
 	selectedObject:  ^GameObject,
 
 	// Scene Data
@@ -183,49 +181,46 @@ main :: proc() {
 			delta = 0
 		}
 
-		switch &action in globals.action {
-		case MoveAction:
-			entity := action.entity
+		for &object in globals.scene.objects {
+			switch &action in object.action {
+			case MoveAction:
+				facingDirection := quatMulVec3(object.rotation, object.forward)
 
-			facingDirection := quatMulVec3(entity.rotation, entity.forward)
+				direction := action.destination - object.position
+				directionLength := length(direction)
 
-			yOffset := entity.position.y
-			entity.position.y = 0
-			direction := action.destination - entity.position
-			directionLength := length(direction)
+				targetDirection := direction / directionLength
+				log.log(.Info, distance(facingDirection, targetDirection))
+				if distance(facingDirection, targetDirection) > 0.02 {
+					ROTATION_SPEED :: PI // 180 degrees per second
+					timeToRotate := angle(facingDirection, targetDirection) / ROTATION_SPEED
 
-			targetDirection := direction / directionLength
-			if distance(facingDirection, targetDirection) > 0.01 {
-				ROTATION_SPEED :: PI // 180 degrees per second
-				timeToRotate := angle(facingDirection, targetDirection) / ROTATION_SPEED
+					angleBetween := angle(object.forward, targetDirection)
+					targetRotation := quatFromAxisAngle(
+						angleBetween,
+						Vec3{0, direction.x < 0 ? 1 : -1, 0},
+					)
 
-				angleBetween := angle(entity.forward, targetDirection)
-				targetRotation := quatFromAxisAngle(
-					angleBetween,
-					Vec3{0, direction.x < 0 ? 1 : -1, 0},
-				)
+					lerpTime := delta / timeToRotate
 
-				lerpTime := delta / timeToRotate
-
-				newQuat: Quat
-				if lerpTime >= 1 {
-					entity.rotation = targetRotation
+					newQuat: Quat
+					if lerpTime >= 1 {
+						object.rotation = targetRotation
+					} else {
+						object.rotation = slerp(object.rotation, targetRotation, lerpTime)
+					}
 				} else {
-					entity.rotation = slerp(entity.rotation, targetRotation, lerpTime)
-				}
-			} else {
-				MOVE_SPEED :: 5
-				timeToTravel := directionLength / MOVE_SPEED
-				lerpTime := delta / timeToTravel
-				if lerpTime >= 1 {
-					entity.position = action.destination
-					globals.inputLock = false
-					globals.action = nil
-				} else {
-					entity.position = lerp(entity.position, action.destination, lerpTime)
-					BOB_SPEED :: 4 * PI // 180 degrees per second
-					lastPos := acos(yOffset / 0.3)
-					entity.position.y = 0.3 * abs(cos(BOB_SPEED * delta + lastPos))
+					MOVE_SPEED :: 5
+					timeToTravel := directionLength / MOVE_SPEED
+					lerpTime := delta / timeToTravel
+					if lerpTime >= 1 {
+						object.position = action.destination
+						globals.inputLock = false
+						object.action = nil
+					} else {
+						object.position = lerp(object.position, action.destination, lerpTime)
+						BOB_SPEED :: 4 * PI // 180 degrees per second
+					}
 				}
 			}
 		}
@@ -246,7 +241,8 @@ main :: proc() {
 }
 
 viewProjection :: proc(camera: Camera) -> Mat4 {
-	if camera.mode == .PERSPECTIVE {
+	switch camera.mode {
+	case .PERSPECTIVE:
 		return(
 			valhalla.perspective(
 				radians(camera.fov),
@@ -256,7 +252,7 @@ viewProjection :: proc(camera: Camera) -> Mat4 {
 			) *
 			valhalla.lookAt(camera.eye, camera.center, camera.up) \
 		)
-	} else {
+	case .ORTHOGRAPHIC:
 		return(
 			valhalla.orthographic(
 				radians(camera.fov),
@@ -399,7 +395,6 @@ castRay :: proc(
 	distance = max(f32)
 	for &obj in scene.objects {
 		model := scene.models[obj.modelIdx]
-
 		for &mesh in model.graphicsData.meshes {
 			transform :=
 				translate(obj.position + model.position) *
@@ -475,9 +470,8 @@ mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods
 		object, distance := castRay(origin, direction, &globals.scene)
 		if object != nil && object.tiled {
 			pos := (origin + direction * distance)
-			globals.action = MoveAction {
-				entity      = globals.selectedObject,
-				destination = {round(pos.x), globals.selectedObject.position.y, round(pos.z)},
+			globals.selectedObject.action = MoveAction {
+				destination = {round(pos.x), object.position.y, round(pos.z)},
 			}
 			globals.inputLock = true
 		}
