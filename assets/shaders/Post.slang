@@ -61,7 +61,7 @@ void comp(uint3 dispatchThreadID : SV_DispatchThreadID) {
     colour = lerp(float3(grayscale, grayscale, grayscale), colour, pushConstants.saturation);
     colour *= pushConstants.exposure;
 
-    if (int(pushConstants.tonemapper) == 0) {
+    if (pushConstants.tonemapper == 1.0) {
         colour = narkowiczACES(colour);
     }
 

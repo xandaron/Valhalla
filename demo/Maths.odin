@@ -1,78 +1,30 @@
-package Valhalla
+package Demo
 
 import "core:math"
 import "core:math/linalg"
 
 PI :: math.PI
 
-floor :: math.floor
-ceil :: math.ceil
-round :: math.round
+sqrt :: math.sqrt
+abs :: math.abs
+min :: math.min
+max :: math.max
+clamp :: math.clamp
+sign :: math.sign
 
-sin :: math.sin
-cos :: math.cos
-tan :: math.tan
-
-asin :: math.asin
-acos :: math.acos
-atan :: math.atan
-
-log2 :: math.log2
+round :: linalg.round
 
 Vec2 :: linalg.Vector2f32
 Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 
-Vec2f64 :: linalg.Vector2f64
-Vec3f64 :: linalg.Vector3f64
-Vec4f64 :: linalg.Vector4f64
-
-Quat :: linalg.Quaternionf32
-IQUAT :: linalg.QUATERNIONF32_IDENTITY
-
-quatFromX :: linalg.quaternion_from_euler_angle_x
-quatFromY :: linalg.quaternion_from_euler_angle_y
-quatFromZ :: linalg.quaternion_from_euler_angle_z
-
-quatFromMat3 :: linalg.quaternion_from_matrix3
-
-Mat2 :: linalg.Matrix2f32
-Mat3 :: linalg.Matrix3f32
-Mat4 :: linalg.Matrix4f32
-
-IMAT2 :: linalg.MATRIX2F32_IDENTITY
-IMAT3 :: linalg.MATRIX3F32_IDENTITY
-IMAT4 :: linalg.MATRIX4F32_IDENTITY
-
-radians :: linalg.to_radians
-
-transpose :: linalg.transpose
-
+angle :: linalg.angle_between
 distance :: linalg.distance
-
 length :: linalg.length
 length2 :: linalg.length2
-
 normalize :: linalg.normalize
-
 cross :: linalg.cross
-
 dot :: linalg.dot
-
-translate :: linalg.matrix4_translate
-
-scale :: linalg.matrix4_scale
-
-rotation3 :: linalg.matrix3_rotate
-rotation4 :: linalg.matrix4_rotate
-quatToRotation :: linalg.matrix4_from_quaternion
-
-inverse :: linalg.matrix4_inverse
-
-quatLerp :: linalg.quaternion_nlerp
-eulerToQuat :: linalg.quaternion_from_euler_angles
-
-pow :: linalg.pow
 
 minVec3 :: proc(a, b: Vec3) -> Vec3 {
 	return {
@@ -90,25 +42,55 @@ maxVec3 :: proc(a, b: Vec3) -> Vec3 {
 	}
 }
 
-vector3Lerp :: proc(a, b: Vec3, t: f32) -> Vec3 {
+vec3Lerp :: proc(a, b: Vec3, t: f32) -> Vec3 {
 	return a + (b - a) * t
 }
 
-vector4Lerp :: proc(a, b: Vec4, t: f32) -> Vec4 {
+vec4Lerp :: proc(a, b: Vec4, t: f32) -> Vec4 {
 	return a + (b - a) * t
 }
 
 lerp :: proc {
 	linalg.lerp,
-	vector3Lerp,
-	vector4Lerp,
+	vec3Lerp,
+	vec4Lerp,
 }
 
-slerp :: proc {
-	linalg.quaternion_slerp_f16,
-	linalg.quaternion_slerp_f32,
-	linalg.quaternion_slerp_f64,
-}
+Quat :: linalg.Quaternionf32
+IQUAT :: linalg.QUATERNIONF32_IDENTITY
+
+slerp :: linalg.quaternion_slerp
+
+quatToMat4 :: linalg.matrix4_from_quaternion
+quatMulVec3 :: linalg.quaternion_mul_vector3
+quatFromAxisAngle :: linalg.quaternion_angle_axis
+quatToEuler :: linalg.euler_angles_xyz_from_quaternion
+quatFromEuler :: linalg.quaternion_from_euler_angles_f32
+
+Mat3 :: linalg.Matrix3f32
+Mat4 :: linalg.Matrix4f32
+
+IMAT3 :: linalg.MATRIX3F32_IDENTITY
+IMAT4 :: linalg.MATRIX4F32_IDENTITY
+
+inverse :: linalg.inverse
+transpose :: linalg.transpose
+
+translate :: linalg.matrix4_translate
+rotate3 :: linalg.matrix3_rotate
+rotate :: linalg.matrix4_rotate
+scale :: linalg.matrix4_scale
+
+sin :: math.sin
+cos :: math.cos
+tan :: math.tan
+
+asin :: math.asin
+acos :: math.acos
+atan :: math.atan
+
+degrees :: linalg.to_degrees
+radians :: linalg.to_radians
 
 lookAt :: proc(eye, center, up: Vec3) -> Mat4 {
 	f := normalize(center - eye)
