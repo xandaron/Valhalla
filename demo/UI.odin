@@ -120,12 +120,19 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 					}
 				}
 
+				pointLight := new(PointLight)
+				pointLight^ = {
+					name = fmt.aprintf("Light{:3d}", count),
+					graphicsData = new(valhalla.PointLight),
+				}
+				pointLight.graphicsData^ = {
+					position = {0, 2, 0},
+					colour = {1, 1, 1},
+					brightness = 1,
+				}
 				append(
 					&scene.pointLights,
-					&PointLight {
-						name = fmt.aprintf("Light{:3d}", count),
-						graphicsData = &{position = {0, 2, 0}, colour = {1, 1, 1}, brightness = 1},
-					},
+					pointLight,
 				)
 				valhalla.addLight(
 					&scene.graphicsData,

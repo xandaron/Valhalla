@@ -46,6 +46,7 @@ GameObject :: struct {
 	forward:      Vec3,
 	selectable:   bool,
 	tiled:        bool,
+	action:       Action,
 
 	// Graphics Engine Data
 	graphicsData: ^valhalla.ModelInstance,
@@ -120,7 +121,7 @@ createNewScene :: proc() {
 	scene.objects = make([dynamic]^GameObject, 2)
 	scene.objects[0] = new(GameObject)
 	scene.objects[0]^ = {
-		name         = strings.clone("cube"),
+		name         = strings.clone("Wizard"),
 		modelIdx     = 0,
 		position     = {0, 0, 0},
 		rotation     = IQUAT,
@@ -144,7 +145,7 @@ createNewScene :: proc() {
 
 	scene.objects[1] = new(GameObject)
 	scene.objects[1]^ = {
-		name         = strings.clone("Meter Cube"),
+		name         = strings.clone("Floor"),
 		modelIdx     = 1,
 		position     = {0, -0.05, 0},
 		rotation     = IQUAT,
@@ -168,7 +169,7 @@ createNewScene :: proc() {
 	scene.pointLights = make([dynamic]^PointLight, 1)
 	scene.pointLights[0] = new(PointLight)
 	scene.pointLights[0]^ = {
-		name         = strings.clone("white light"),
+		name         = strings.clone("light"),
 		graphicsData = new(valhalla.PointLight),
 	}
 	scene.pointLights[0].graphicsData^ = {
@@ -188,6 +189,8 @@ createNewScene :: proc() {
 		up     = {0.0, 1.0, 0.0},
 		fov    = 45.0,
 		mode   = .PERSPECTIVE,
+		near   = 0.1,
+		far    = 100.0,
 	}
 	scene.activeCamera = 0
 }

@@ -190,7 +190,6 @@ LightData :: struct #align (16) {
 	position: Vec3,
 	_:        u32,
 	colour:   Vec3,
-	_:        u32,
 	dropoff:  f32,
 	near:     f32,
 	far:      f32,
