@@ -17,7 +17,7 @@ import vk "vendor:vulkan"
 // ###################################################################
 
 
-VERSION: u32 : (0 << 22) | (0 << 12) | (1)
+VERSION: u32 : (0 << 22) | (1 << 12) | (0)
 
 UI_ENABLED: bool : true
 
@@ -239,22 +239,22 @@ PointLight :: struct {
 }
 
 @(private = "file")
-LightData :: struct #align (16) {
-	position: Vec4,
-	colour:   Vec4,
+LightData :: struct #min_field_align(16) {
+	position: Vec3,
+	colour:   Vec3,
 	dropoff:  f32,
 	near:     f32,
 	far:      f32,
 }
 
 @(private = "file")
-UniformBuffer :: struct #align (16) {
+UniformBuffer :: struct #min_field_align(16) {
 	viewProjection: Mat4,
 	lightCount:     u32,
 }
 
 @(private = "file")
-InstanceInfo :: struct #align (16) {
+InstanceInfo :: struct #min_field_align(16) {
 	modelTransform: Mat4,
 	boneOffset:     u32,
 }
@@ -2711,6 +2711,7 @@ cleanupModel :: proc(model: ^Model) {
 	for &instance in model.instances {
 		cleanupInstance(instance)
 	}
+	delete(model.instances)
 
 	delete(model.meshes)
 	delete(model.skeleton)
@@ -2724,8 +2725,6 @@ cleanupAnimation :: proc(animation: ^Animation) {
 	}
 	delete(animation.nodes)
 }
-
-
 
 addInstance :: proc(
 	scene: ^SceneData,
@@ -3049,10 +3048,11 @@ cleanupScene :: proc(graphicsContext: ^GraphicsContext, scene: ^SceneData) {
 	for &model in scene.models {
 		cleanupModel(model)
 	}
+	delete(scene.models)
+	delete(scene.lights)
 
 	delete(scene.vertices)
 	delete(scene.indices)
-	delete(scene.models)
 }
 
 
@@ -5312,15 +5312,15 @@ cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	lightData := make([]LightData, len(scene.lights), allocator = context.temp_allocator)
 	for &light, i in scene.lights {
-		colour := light.colour * light.brightness
 		lightData[i] = {
-			position = Vec4{light.position.x, light.position.y, light.position.z, 1},
-			colour   = Vec4{colour.x, colour.y, colour.z, 1},
+			position = light.position,
+			colour   = light.colour * light.brightness,
 			dropoff  = light.dropoff,
 			near     = 0.01,
 			far      = 1000.0,
 		}
 	}
+
 	mem.copy(
 		scene.lightBuffers[currentFrame].mapped,
 		raw_data(lightData),

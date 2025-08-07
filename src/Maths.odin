@@ -10,6 +10,12 @@ Vec2 :: linalg.Vector2f32
 Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 
+normalize :: linalg.normalize
+cross :: linalg.cross
+dot :: linalg.dot
+
+tan :: math.tan
+
 Quat :: linalg.Quaternionf32
 IQUAT :: linalg.QUATERNIONF32_IDENTITY
 
@@ -27,3 +33,55 @@ transform :: #force_inline proc(p: Vec3, r: Quat, s: Vec3) -> Mat4 {
 }
 
 lerp :: linalg.lerp
+
+
+lookAt :: proc(eye, center, up: Vec3) -> Mat4 {
+	f := normalize(center - eye)
+	s := normalize(cross(up, f))
+	u := cross(f, s)
+
+	return {
+		s.x,
+		s.y,
+		s.z,
+		-dot(s, eye),
+		u.x,
+		u.y,
+		u.z,
+		-dot(u, eye),
+		f.x,
+		f.y,
+		f.z,
+		-dot(f, eye),
+		0,
+		0,
+		0,
+		1,
+	}
+}
+
+perspective :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
+	assert(aspect != 0, "Aspect ratio can't be zero!")
+	tanHalfFov := tan(0.5 * fov)
+	m[0, 0] = 1 / (aspect * tanHalfFov)
+	m[1, 1] = -1 / (tanHalfFov)
+	m[2, 2] = far / (far - near)
+	m[2, 3] = -(far * near) / (far - near)
+	m[3, 2] = 1
+	return
+}
+
+// Is this really correct?
+orthographic :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
+	assert(aspect != 0, "Aspect ratio can't be zero!")
+	tanHalfFov := tan(0.5 * fov)
+	top := tanHalfFov * near
+	right := top * aspect
+
+	m[0, 0] = 1 / right
+	m[1, 1] = -1 / top
+	m[2, 2] = 1 / (far - near)
+	m[2, 3] = -near / (far - near)
+	m[3, 2] = 1
+	return
+}

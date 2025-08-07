@@ -65,6 +65,9 @@ globals: Globals = {}
 
 @(private = "package")
 main :: proc() {
+	context.logger = log.create_console_logger()
+	defer log.destroy_console_logger(context.logger)
+
 	// Sets the current dir to the folder above the dir of the exe file
 	// All filepaths should be relative to this dir
 	// This was mainly for NVIDIA Nsight to work properly
@@ -110,7 +113,7 @@ main :: proc() {
 			cursorPosCallback = cursorPosCallback,
 			scrollCallback = scrollCallback,
 		},
-		errorCallback = valhalla.errorCallback,
+		errorCallback = errorCallback,
 		modelLoader = loadModel,
 		imguiDraw = drawUI,
 
@@ -123,7 +126,7 @@ main :: proc() {
 	defer valhalla.cleanupVkGraphics(&globals.graphicsContext)
 
 	createNewScene()
-	defer cleanupScene(&globals.scene)
+	defer cleanupScene()
 
 	if valhalla.switchScene(&globals.graphicsContext, &globals.scene.graphicsData) != nil {
 		panic("Failed to update scene")
@@ -245,18 +248,25 @@ main :: proc() {
 viewProjection :: proc(camera: Camera) -> Mat4 {
 	if camera.mode == .PERSPECTIVE {
 		return(
-			perspective(
+			valhalla.perspective(
 				radians(camera.fov),
 				valhalla.RENDER_SIZE.x / valhalla.RENDER_SIZE.y,
-				0.1,
-				100.0,
+				camera.near,
+				camera.far,
 			) *
-			lookAt(camera.eye, camera.center, camera.up) \
+			valhalla.lookAt(camera.eye, camera.center, camera.up) \
 		)
-	} // else {
-	// 	return orthographic(radians(90.0), 8, -4.5, 4.5, camera.near, camera.far) *
-	// 		lookAt(camera.eye, camera.center, camera.up)
-	// }
+	} else {
+		return(
+			valhalla.orthographic(
+				radians(camera.fov),
+				valhalla.RENDER_SIZE.x / valhalla.RENDER_SIZE.y,
+				camera.near,
+				camera.far,
+			) *
+			valhalla.lookAt(camera.eye, camera.center, camera.up) \
+		)
+	}
 	panic("")
 }
 
@@ -339,8 +349,8 @@ screenPositionToWorldRay :: proc(
 	vpPos := pos / Vec2{f32(width), f32(height)}
 	vpPos = vpPos * 2 - 1
 
-	proj := perspective(radians(camera.fov), f32(width) / f32(height), 0.1, 100)
-	view := lookAt(camera.eye, camera.center, camera.up)
+	proj := valhalla.perspective(radians(camera.fov), f32(width) / f32(height), 0.1, 100)
+	view := valhalla.lookAt(camera.eye, camera.center, camera.up)
 	ivp := inverse(proj * view)
 
 	ndcNear := Vec4{vpPos.x, vpPos.y, 0, 1}
@@ -447,10 +457,7 @@ mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods
 		return
 	}
 	if button == glfw.MOUSE_BUTTON_LEFT && action == glfw.PRESS {
-		object, _ := castRay(
-			screenPositionToWorldRay(window, mousePos),
-			&globals.scene,
-		)
+		object, _ := castRay(screenPositionToWorldRay(window, mousePos), &globals.scene)
 		if object != nil && object.selectable {
 			log.logf(.Debug, "Selected instance: {}", object.name)
 			globals.selectedObject = object
@@ -745,7 +752,7 @@ loadModel: valhalla.ModelLoader : proc(
 				graphicsData = new(valhalla.Animation),
 			}
 			animation.graphicsData^ = {
-				nodes = make([]valhalla.AnimationNode, len(model.graphicsData.skeleton)),
+				nodes    = make([]valhalla.AnimationNode, len(model.graphicsData.skeleton)),
 				duration = sceneAnimation.mDuration * ticksToSecond,
 			}
 
