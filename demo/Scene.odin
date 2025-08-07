@@ -192,26 +192,32 @@ createNewScene :: proc() {
 	scene.activeCamera = 0
 }
 
-cleanupScene :: proc(scene: ^Scene) {
+cleanupScene :: proc() {
+	scene := &globals.scene
+	valhalla.cleanupScene(&globals.graphicsContext, &scene.graphicsData)
+
 	delete(scene.filePath)
 	delete(scene.name)
+
+	for &object in scene.objects {
+		delete(object.name)
+		free(object.graphicsData)
+		free(object)
+	}
+	delete(scene.objects)
 
 	for &model in scene.models {
 		delete(model.name)
 		delete(model.animations)
 		free(model.graphicsData)
+		free(model)
 	}
 	delete(scene.models)
-
-	for &object in scene.objects {
-		delete(object.name)
-		free(object.graphicsData)
-	}
-	delete(scene.objects)
 
 	for &light in scene.pointLights {
 		delete(light.name)
 		free(light.graphicsData)
+		free(light)
 	}
 	delete(scene.pointLights)
 
@@ -234,6 +240,4 @@ cleanupScene :: proc(scene: ^Scene) {
 		delete(path)
 	}
 	delete(scene.normalPaths)
-
-	valhalla.cleanupScene(&globals.graphicsContext, &scene.graphicsData)
 }
