@@ -170,14 +170,42 @@ Error :: union #shared_nil {
 
 vkDebugMessengerCreateInfo :: vk.DebugUtilsMessengerCreateInfoEXT
 
-Vertex :: struct #min_field_align(16) {
+Vertex :: struct #align (16) {
 	position:  Vec3,
+	_:         u32,
 	normal:    Vec3,
+	_:         u32,
 	tangent:   Vec3,
+	_:         u32,
 	bitangent: Vec3,
+	_:         u32,
 	uv:        Vec2,
+	_:         u64,
 	bones:     [4]u32,
 	weights:   Vec4,
+}
+
+@(private = "file")
+LightData :: struct #align (16) {
+	position: Vec3,
+	_:        u32,
+	colour:   Vec3,
+	_:        u32,
+	dropoff:  f32,
+	near:     f32,
+	far:      f32,
+}
+
+@(private = "file")
+UniformBuffer :: struct #align (16) {
+	viewProjection: Mat4,
+	lightCount:     u32,
+}
+
+@(private = "file")
+InstanceInfo :: struct #align (16) {
+	modelTransform: Mat4,
+	boneOffset:     u32,
 }
 
 Bone :: struct {
@@ -236,27 +264,6 @@ PointLight :: struct {
 	dropoff:    f32,
 	near:       f32,
 	far:        f32,
-}
-
-@(private = "file")
-LightData :: struct #min_field_align(16) {
-	position: Vec3,
-	colour:   Vec3,
-	dropoff:  f32,
-	near:     f32,
-	far:      f32,
-}
-
-@(private = "file")
-UniformBuffer :: struct #min_field_align(16) {
-	viewProjection: Mat4,
-	lightCount:     u32,
-}
-
-@(private = "file")
-InstanceInfo :: struct #min_field_align(16) {
-	modelTransform: Mat4,
-	boneOffset:     u32,
 }
 
 @(private = "file")
@@ -4340,7 +4347,7 @@ createShaderModules :: proc(
 		if size == 0 {
 			return ""
 		}
-		return transmute(string)((^[]u8)(data)^[:size])
+		return strings.clone_from_bytes(([^]u8)(data)[:size])
 	}
 
 	diagnosticsBlob: ^slang.Blob
@@ -5312,9 +5319,10 @@ cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	lightData := make([]LightData, len(scene.lights), allocator = context.temp_allocator)
 	for &light, i in scene.lights {
+		colour := light.colour * light.brightness
 		lightData[i] = {
-			position = light.position,
-			colour   = light.colour * light.brightness,
+			position = light.position, // Vec4{light.position.x, light.position.y, light.position.z, 1.0},
+			colour   = light.colour * light.brightness, // Vec4{colour.r, colour.g, colour.b, 1.0},
 			dropoff  = light.dropoff,
 			near     = 0.01,
 			far      = 1000.0,

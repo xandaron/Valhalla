@@ -37,7 +37,7 @@ void comp(uint3 dispatchThreadID : SV_DispatchThreadID) {
 
     if (pushConstants.drawLights) {
         for (uint i = 0; i < uniformBuffer.lightCount; i++) {
-            float4 lightPosition = mul(uniformBuffer.viewProjection, lightBuffer[i].position);
+            float4 lightPosition = mul(uniformBuffer.viewProjection, float4(lightBuffer[i].position, 1.0));
             lightPosition /= lightPosition.w;
 
             float depth = sceneDepth.Sample(screenPosition).r;
