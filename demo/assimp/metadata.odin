@@ -47,15 +47,20 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// METADATA_H_INC :: 
 
 // -------------------------------------------------------------------------------
 /**
@@ -63,17 +68,17 @@ else {
 */
 // -------------------------------------------------------------------------------
 Metadata_Type :: enum c.int {
-	BOOL       = 0,
-	INT32      = 1,
-	UINT64     = 2,
-	FLOAT      = 3,
-	DOUBLE     = 4,
-	AISTRING   = 5,
-	AIVECTOR3D = 6,
-	AIMETADATA = 7,
-	INT64      = 8,
-	UINT32     = 9,
-	META_MAX   = 10,
+	BOOL,
+	INT32,
+	UINT64,
+	FLOAT,
+	DOUBLE,
+	AISTRING,
+	AIVECTOR3D,
+	AIMETADATA,
+	INT64,
+	UINT32,
+	META_MAX,
 }
 
 // -------------------------------------------------------------------------------

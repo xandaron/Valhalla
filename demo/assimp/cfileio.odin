@@ -45,17 +45,20 @@ package assimp
 
 import "core:c"
 
-_ :: c
-
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// FILEIO_H_INC :: 
 
 // aiFile callbacks
 File_Write_Proc :: proc "c" (^File, cstring, c.size_t, c.size_t) -> c.size_t

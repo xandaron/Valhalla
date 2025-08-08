@@ -44,37 +44,68 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
-
-@(require)
-import zlib "vendor:zlib"
 
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
 
-// FORCE_INLINE :: Inline
-// WONT_RETURN :: _Declspec(Noreturn)
+// DEFINES_H_INC :: 
 
-ASSIMP_AI_REAL_TEXT_PRECISION :: 9
+// ASSIMP_BUILD_NEED_Z_INFLATE :: 
+
+// ASSIMP_BUILD_NEED_Z_INFLATE :: 
+
+// ASSIMP_BUILD_NEED_Z_INFLATE :: 
+// ASSIMP_BUILD_NEED_UNZIP :: 
+
+// ASSIMP_BUILD_NEED_Z_INFLATE :: 
+// ASSIMP_BUILD_NEED_UNZIP :: 
+
+// SIZE_MAX :: (~((c.size_t)0))
+
+// ASSIMP_API :: 
+// ASSIMP_API_WINONLY :: 
+
+// FORCE_INLINE :: 
+// WONT_RETURN :: (noreturn)
+
+// WONT_RETURN_SUFFIX :: ((noreturn))
+
+// C_STRUCT :: 
+// C_ENUM :: 
+
+// ASSIMP_BUILD_SINGLETHREADED :: 
+
+// ASSIMP_BUILD_DEBUG :: 
 
 Real :: f32
 
-Int :: c.int
+// Int :: c.int
 
-Uint :: c.uint
+// Uint :: c.uint
 
-/* This is PI. Hi PI. */
-MATH_PI :: 3.141592653589793238462643383279
-// MATH_TWO_PI :: Ai_Math_Pi * 2.0
-// MATH_HALF_PI :: Ai_Math_Pi * 0.5
+ASSIMP_AI_REAL_TEXT_PRECISION :: 9
 
-/* And this is to avoid endless casts to float */
-MATH_PI_F :: 3.1415926538
-// MATH_TWO_PI_F :: Ai_Math_Pi_F * 2.0
-// MATH_HALF_PI_F :: Ai_Math_Pi_F * 0.5
+MATH_PI :: (3.141592653589793238462643383279)
+MATH_TWO_PI :: (MATH_PI*2.0)
+MATH_HALF_PI :: (MATH_PI*0.5)
+
+MATH_PI_F :: (3.1415926538)
+MATH_TWO_PI_F :: (MATH_PI_F*2.0)
+MATH_HALF_PI_F :: (MATH_PI_F*0.5)
+
+// ai_epsilon :: ((ai_real)1e-6)
+
+// NO_EXCEPT :: noexcept
+
+// DEPRECATED :: ((deprecated))
