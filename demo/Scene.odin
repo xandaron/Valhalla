@@ -85,17 +85,15 @@ createNewScene :: proc() {
 	scene.name = strings.clone("New Scene")
 
 	scene.modelPaths = make([dynamic]cstring, 2)
-	scene.modelPaths[0] = strings.clone_to_cstring("./assets_game/models/party/wizard/model.glb")
-	scene.modelPaths[1] = strings.clone_to_cstring("./assets/models/cube/cube.fbx")
+	scene.modelPaths[0] = strings.clone_to_cstring("./assets/Wizard.glb")
+	scene.modelPaths[1] = strings.clone_to_cstring("./assets/cube.fbx")
 
 	scene.texturePaths = make([dynamic]cstring, 2)
-	scene.texturePaths[0] = strings.clone_to_cstring(
-		"./assets_game/models/party/wizard/albedo.png",
-	)
-	scene.texturePaths[1] = strings.clone_to_cstring("./assets/textures/white.jpg")
+	scene.texturePaths[0] = strings.clone_to_cstring("./assets/albedo.png")
+	scene.texturePaths[1] = strings.clone_to_cstring("./assets/white.jpg")
 
 	scene.normalPaths = make([dynamic]cstring, 1)
-	scene.normalPaths[0] = strings.clone_to_cstring("./assets/textures/normal.jpg")
+	scene.normalPaths[0] = strings.clone_to_cstring("./assets/normal.jpg")
 
 	if valhalla.loadSceneAssets(
 		   &globals.graphicsContext,
@@ -116,7 +114,7 @@ createNewScene :: proc() {
 	scene.models[1].scale = {0.5, 0.5, 0.5}
 
 	scene.graphicsData.clearColour = {0.5, 0.5, 0.5, 1.0}
-	scene.graphicsData.ambientLight = 0.01
+	scene.graphicsData.ambientLight = 0.25
 
 	scene.objects = make([dynamic]^GameObject, 2)
 	scene.objects[0] = new(GameObject)
@@ -150,7 +148,7 @@ createNewScene :: proc() {
 		position     = {0, -0.05, 0},
 		rotation     = IQUAT,
 		scale        = {10, 0.1, 10},
-		tiled       = true,
+		tiled        = true,
 		graphicsData = new(valhalla.ModelInstance),
 	}
 

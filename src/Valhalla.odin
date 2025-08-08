@@ -6,6 +6,7 @@ import imguiVulkan "../imgui/imgui_impl_vulkan"
 import "../slang"
 import "core:fmt"
 import "core:mem"
+import "core:path/filepath"
 import "core:strings"
 import "vendor:glfw"
 import img "vendor:stb/image"
@@ -367,6 +368,9 @@ GraphicsContext :: struct {
 	swapchainExtent:           vk.Extent2D,
 	swapchainImages:           []vk.Image,
 	swapchainImageViews:       []vk.ImageView,
+
+	// Pipelines
+	shaderFiles:               [dynamic]ShaderFile,
 	descriptorSets:            [len(DescriptorSetIndex)]DescriptorSet,
 	pipelines:                 [len(PipelineIndex)]Pipeline,
 
@@ -407,9 +411,20 @@ GraphicsContext :: struct {
 // ###################################################################
 
 
+Shaders :: struct {
+	shaderFiles:  []ShaderFile,
+	preShaders:   ShaderIndices,
+	lightShaders: ShaderIndices,
+	mainShaders:  ShaderIndices,
+	postShaders:  ShaderIndices,
+}
+
 InitInfo :: struct {
 	appVersion:                 u32,
 	windowTitle:                cstring,
+
+	// Shaders
+	shaders:                    Shaders,
 
 	// Callbacks
 	glfwCallbacks:              GLFWCallbacks,
@@ -555,13 +570,28 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (GraphicsContext, Error) {
 		return graphicsContext, err
 	}
 
-	if err := createGraphicsPipelines(&graphicsContext); err != nil {
+	append(&shaderFiles, ..initInfo.shaders.shaderFiles)
+
+	if err := createGraphicsPipelines(
+		&graphicsContext,
+		initInfo.shaders.lightShaders,
+		initInfo.shaders.mainShaders,
+	); err != nil {
 		return graphicsContext, err
 	}
 
-	if err := createComputePipelines(&graphicsContext); err != nil {
+	if err := createComputePipelines(
+		&graphicsContext,
+		initInfo.shaders.preShaders,
+		initInfo.shaders.postShaders,
+	); err != nil {
 		return graphicsContext, err
 	}
+
+	pipelines[PipelineIndex.PRECOMPUTE].indices = initInfo.shaders.preShaders
+	pipelines[PipelineIndex.LIGHT].indices = initInfo.shaders.lightShaders
+	pipelines[PipelineIndex.MAIN].indices = initInfo.shaders.mainShaders
+	pipelines[PipelineIndex.POSTPROCESS].indices = initInfo.shaders.postShaders
 
 	when UI_ENABLED {
 		if err := initImgui(&graphicsContext); err != nil {
@@ -645,6 +675,8 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 	delete(pipelines[PipelineIndex.MAIN].frameBuffers)
 	delete(pipelines[PipelineIndex.LIGHT].frameBuffers)
+
+	delete(shaderFiles)
 
 	cleanupSwapchain(graphicsContext)
 	cleanupPipelines(graphicsContext)
@@ -4330,11 +4362,11 @@ PipelineError :: enum {
 @(require_results)
 createShaderModules :: proc(
 	using graphicsContext: ^GraphicsContext,
-	filepath: cstring,
-	entryPoints: []cstring,
-	stages: []slang.Stage,
+	shaderIdx: u32,
+	entryPointIdx: u32,
+	stage: slang.Stage,
 ) -> (
-	[]vk.ShaderModule,
+	vk.ShaderModule,
 	PipelineError,
 ) {
 	blobToString :: proc(blob: ^slang.Blob) -> string {
@@ -4350,24 +4382,21 @@ createShaderModules :: proc(
 	}
 
 	diagnosticsBlob: ^slang.Blob
-
-	searchPaths := []cstring{"assets/shaders/"}
-
 	desc := slang.Global_Session_Desc {
-		searchPaths     = raw_data(searchPaths),
-		searchPathCount = i32(len(searchPaths)),
+		searchPaths     = nil,
+		searchPathCount = 0,
 	}
 	globalSession := slang.createGlobalSessionWithDesc(&desc)
 	if globalSession == nil {
-		return nil, .FailedToCreateShaderModule
+		return 0, .FailedToCreateShaderModule
 	}
 
 	compileTargets := []slang.Compile_Target{.SPIRV}
 	sessionDesc := slang.Session_Desc {
 		targets                = raw_data(compileTargets),
 		targetCount            = i32(len(compileTargets)),
-		searchPaths            = raw_data(searchPaths),
-		searchPathCount        = i32(len(searchPaths)),
+		searchPaths            = nil,
+		searchPathCount        = 0,
 		preprocessorMacros     = nil,
 		preprocessorMacroCount = 0,
 		matrixLayoutMode       = .COLUMN_MAJOR,
@@ -4378,34 +4407,43 @@ createShaderModules :: proc(
 		&sessionDesc,
 	)
 	if session == nil {
-		return nil, .FailedToCreateShaderModule
+		return 0, .FailedToCreateShaderModule
 	}
 
-	module := slang.loadModule(session, filepath, &diagnosticsBlob)
+	module := slang.loadModule(
+		session,
+		strings.clone_to_cstring(shaderFiles[shaderIdx].filepath, context.temp_allocator),
+		&diagnosticsBlob,
+	)
 	if module == nil {
 		errorCallback(.Error, blobToString(diagnosticsBlob))
 		slang.releaseBlob(diagnosticsBlob)
-		return nil, .FailedToCreateShaderModule
+		return 0, .FailedToCreateShaderModule
 	}
 
-	components := make([]slang.Component_Type, len(entryPoints) + 1)
-	defer delete(components)
+	components := make([]slang.Component_Type, 2, context.temp_allocator)
 	components[0] = {
 		kind   = .MODULE,
 		module = module,
 	}
 
-	for i in 0 ..< len(entryPoints) {
-		entryPoint := slang.findEntryPoint(module, entryPoints[i], stages[i], &diagnosticsBlob)
-		if entryPoint == nil {
-			errorCallback(.Error, blobToString(diagnosticsBlob))
-			slang.releaseBlob(diagnosticsBlob)
-			return nil, .FailedToCreateShaderModule
-		}
-		components[i + 1] = {
-			kind       = .ENTRY_POINT,
-			entryPoint = entryPoint,
-		}
+	entryPoint := slang.findEntryPoint(
+		module,
+		strings.clone_to_cstring(
+			shaderFiles[shaderIdx].entryPoints[entryPointIdx],
+			context.temp_allocator,
+		),
+		stage,
+		&diagnosticsBlob,
+	)
+	if entryPoint == nil {
+		errorCallback(.Error, blobToString(diagnosticsBlob))
+		slang.releaseBlob(diagnosticsBlob)
+		return 0, .FailedToCreateShaderModule
+	}
+	components[1] = {
+		kind       = .ENTRY_POINT,
+		entryPoint = entryPoint,
 	}
 
 	program := slang.createCompositeComponentType(
@@ -4417,42 +4455,37 @@ createShaderModules :: proc(
 	if program == nil {
 		errorCallback(.Error, blobToString(diagnosticsBlob))
 		slang.releaseBlob(diagnosticsBlob)
-		return nil, .FailedToCreateShaderModule
+		return 0, .FailedToCreateShaderModule
 	}
 
 	linkedProgram := slang.linkComponentType(program, &diagnosticsBlob)
 	if linkedProgram == nil {
 		errorCallback(.Error, blobToString(diagnosticsBlob))
 		slang.releaseBlob(diagnosticsBlob)
-		return nil, .FailedToCreateShaderModule
+		return 0, .FailedToCreateShaderModule
 	}
 
-	shaderModules := make([]vk.ShaderModule, len(entryPoints))
-	for &module, i in shaderModules {
-		codeBlob := slang.getEntryPointCode(linkedProgram, i32(i), 0, &diagnosticsBlob)
-		if codeBlob == nil {
-			errorCallback(.Error, blobToString(diagnosticsBlob))
-			slang.releaseBlob(diagnosticsBlob)
-			return nil, .FailedToCreateShaderModule
-		}
-
-		createInfo: vk.ShaderModuleCreateInfo = {
-			sType    = .SHADER_MODULE_CREATE_INFO,
-			pNext    = nil,
-			flags    = {},
-			codeSize = int(slang.getBlobSize(codeBlob)),
-			pCode    = (^u32)(slang.getBlobData(codeBlob)),
-		}
-		if res := vk.CreateShaderModule(device, &createInfo, nil, &module); res != .SUCCESS {
-			errorCallback(
-				.Error,
-				fmt.tprintln("Failed to create shader module! vkResult: %d", res),
-			)
-			return nil, .FailedToCreateShaderModule
-		}
-
-		slang.releaseBlob(codeBlob)
+	codeBlob := slang.getEntryPointCode(linkedProgram, 0, 0, &diagnosticsBlob)
+	if codeBlob == nil {
+		errorCallback(.Error, blobToString(diagnosticsBlob))
+		slang.releaseBlob(diagnosticsBlob)
+		return 0, .FailedToCreateShaderModule
 	}
+
+	createInfo: vk.ShaderModuleCreateInfo = {
+		sType    = .SHADER_MODULE_CREATE_INFO,
+		pNext    = nil,
+		flags    = {},
+		codeSize = int(slang.getBlobSize(codeBlob)),
+		pCode    = (^u32)(slang.getBlobData(codeBlob)),
+	}
+	shaderModule: vk.ShaderModule
+	if res := vk.CreateShaderModule(device, &createInfo, nil, &shaderModule); res != .SUCCESS {
+		errorCallback(.Error, fmt.tprintln("Failed to create shader module! vkResult: %d", res))
+		return 0, .FailedToCreateShaderModule
+	}
+
+	slang.releaseBlob(codeBlob)
 
 	slang.releaseComponentType(linkedProgram)
 	slang.releaseComponentType(program)
@@ -4465,20 +4498,33 @@ createShaderModules :: proc(
 	slang.releaseSession(session)
 	slang.releaseGlobalSession(globalSession)
 
-	return shaderModules, .None
+	return shaderModule, .None
+}
+
+ShaderFile :: struct {
+	filepath:    string,
+	entryPoints: []string,
+}
+
+ShaderIndices :: struct {
+	shaderIdx:      [2]u32,
+	entryPointIdxs: [2]u32,
 }
 
 @(private = "file")
 Pipeline :: struct {
 	using _:  RenderPass,
-	pipeline: vk.Pipeline,
 	layout:   vk.PipelineLayout,
+	pipeline: vk.Pipeline,
+	indices:  ShaderIndices,
 }
 
 @(private = "file")
 @(require_results)
 createGraphicsPipelines :: proc(
 	using graphicsContext: ^GraphicsContext,
+	lightShaderIndices: ShaderIndices,
+	mainShaderIndices: ShaderIndices,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> PipelineError {
 	PIPELINE_COUNT: u32 : 2
@@ -4518,35 +4564,31 @@ createGraphicsPipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shadowEntryPoints := [?]cstring{"vert", "frag"}
 	shadowShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
-	shadowShaderModules, err := createShaderModules(
-		graphicsContext,
-		"./assets/shaders/Shadow.slang",
-		shadowEntryPoints[:],
-		{.VERTEX, .FRAGMENT},
-	)
-	if err != .None {
-		return err
-	}
-
-	defer {
-		for module in shadowShaderModules {
-			vk.DestroyShaderModule(device, module, nil)
-		}
-		delete(shadowShaderModules)
-	}
-
-	shadowShaderStages := [?]vk.ShaderStageFlag{.VERTEX, .FRAGMENT}
 	for &info, index in shadowShaderStagesInfo {
+		module, err := createShaderModules(
+			graphicsContext,
+			lightShaderIndices.shaderIdx[index],
+			lightShaderIndices.entryPointIdxs[index],
+			index == 0 ? .VERTEX : .FRAGMENT,
+		)
+		if err != nil {
+			errorCallback(.Fatal, fmt.tprintf("Failed to create shader module! vkResult: %d", err))
+			return err
+		}
 		info = {
 			sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 			pNext               = nil,
 			flags               = {},
-			stage               = {shadowShaderStages[index]},
-			module              = shadowShaderModules[index],
+			stage               = {index == 0 ? .VERTEX : .FRAGMENT},
+			module              = module,
 			pName               = "main",
 			pSpecializationInfo = nil,
+		}
+	}
+	defer {
+		for info in shadowShaderStagesInfo {
+			vk.DestroyShaderModule(device, info.module, nil)
 		}
 	}
 
@@ -4694,36 +4736,31 @@ createGraphicsPipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	mainEntryPoints := [?]cstring{"vert", "frag"}
 	mainShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
-	mainShaderModules: []vk.ShaderModule
-	mainShaderModules, err = createShaderModules(
-		graphicsContext,
-		"./assets/shaders/Main.slang",
-		mainEntryPoints[:],
-		{.VERTEX, .FRAGMENT},
-	)
-	if err != .None {
-		return err
-	}
-
-	defer {
-		for module in mainShaderModules {
-			vk.DestroyShaderModule(device, module, nil)
-		}
-		delete(mainShaderModules)
-	}
-
-	mainShaderStages := [?]vk.ShaderStageFlag{.VERTEX, .FRAGMENT}
 	for &info, index in mainShaderStagesInfo {
+		module, err := createShaderModules(
+			graphicsContext,
+			mainShaderIndices.shaderIdx[index],
+			mainShaderIndices.entryPointIdxs[index],
+			index == 0 ? .VERTEX : .FRAGMENT,
+		)
+		if err != nil {
+			errorCallback(.Fatal, fmt.tprintf("Failed to create shader module! vkResult: %d", err))
+			return err
+		}
 		info = {
 			sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 			pNext               = nil,
 			flags               = {},
-			stage               = {mainShaderStages[index]},
-			module              = mainShaderModules[index],
+			stage               = {index == 0 ? .VERTEX : .FRAGMENT},
+			module              = module,
 			pName               = "main",
 			pSpecializationInfo = nil,
+		}
+	}
+	defer {
+		for &info in mainShaderStagesInfo {
+			vk.DestroyShaderModule(device, info.module, nil)
 		}
 	}
 
@@ -4859,6 +4896,7 @@ createGraphicsPipelines :: proc(
 @(require_results)
 createComputePipelines :: proc(
 	using graphicsContext: ^GraphicsContext,
+	preShaderIndices, postShaderIndices: ShaderIndices,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> PipelineError {
 	PIPELINE_COUNT: u32 : 2
@@ -4899,32 +4937,29 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	preEntryPoints := [?]cstring{"comp"}
-	preComputeShaderModules, err := createShaderModules(
+	shaderModule, err := createShaderModules(
 		graphicsContext,
-		"./assets/shaders/Pre.slang",
-		preEntryPoints[:],
-		{.COMPUTE},
+		preShaderIndices.shaderIdx[0],
+		preShaderIndices.entryPointIdxs[0],
+		.COMPUTE,
 	)
-	if err != .None {
+	if err != nil {
+		errorCallback(
+			.Fatal,
+			fmt.tprintf("Failed to create precompute shader module! Error: %d", err),
+		)
 		return err
-	}
-
-	defer {
-		for module in preComputeShaderModules {
-			vk.DestroyShaderModule(device, module, nil)
-		}
-		delete(preComputeShaderModules)
 	}
 	preComputeShaderStageInfo: vk.PipelineShaderStageCreateInfo = {
 		sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 		pNext               = nil,
 		flags               = {},
 		stage               = {.COMPUTE},
-		module              = preComputeShaderModules[0],
+		module              = shaderModule,
 		pName               = "main",
 		pSpecializationInfo = nil,
 	}
+	defer vk.DestroyShaderModule(device, preComputeShaderStageInfo.module, nil)
 
 	pipelineInfos[0] = {
 		sType              = .COMPUTE_PIPELINE_CREATE_INFO,
@@ -4966,23 +5001,18 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	postEntryPoints := [?]cstring{"comp"}
-	postShaderModules: []vk.ShaderModule
-	postShaderModules, err = createShaderModules(
+	shaderModule, err = createShaderModules(
 		graphicsContext,
-		"./assets/shaders/Post.slang",
-		postEntryPoints[:],
-		{.COMPUTE},
+		postShaderIndices.shaderIdx[0],
+		postShaderIndices.entryPointIdxs[0],
+		.COMPUTE,
 	)
-	if err != .None {
+	if err != nil {
+		errorCallback(
+			.Fatal,
+			fmt.tprintf("Failed to create precompute shader module! Error: %d", err),
+		)
 		return err
-	}
-
-	defer {
-		for module in postShaderModules {
-			vk.DestroyShaderModule(device, module, nil)
-		}
-		delete(postShaderModules)
 	}
 
 	postShaderStageInfo: vk.PipelineShaderStageCreateInfo = {
@@ -4990,10 +5020,11 @@ createComputePipelines :: proc(
 		pNext               = nil,
 		flags               = {},
 		stage               = {.COMPUTE},
-		module              = postShaderModules[0],
+		module              = shaderModule,
 		pName               = "main",
 		pSpecializationInfo = nil,
 	}
+	defer vk.DestroyShaderModule(device, postShaderStageInfo.module, nil)
 
 	pipelineInfos[1] = {
 		sType              = .COMPUTE_PIPELINE_CREATE_INFO,
@@ -5042,12 +5073,20 @@ cleanupPipelines :: proc(using graphicsContext: ^GraphicsContext) {
 @(require_results)
 reloadShaders :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 	cleanupPipelines(graphicsContext)
-	err = createGraphicsPipelines(graphicsContext)
+	err = createGraphicsPipelines(
+		graphicsContext,
+		graphicsContext.pipelines[PipelineIndex.LIGHT].indices,
+		graphicsContext.pipelines[PipelineIndex.MAIN].indices,
+	)
 	if err != nil {
 		return err
 	}
 
-	err = createComputePipelines(graphicsContext)
+	err = createComputePipelines(
+		graphicsContext,
+		graphicsContext.pipelines[PipelineIndex.PRECOMPUTE].indices,
+		graphicsContext.pipelines[PipelineIndex.POSTPROCESS].indices,
+	)
 	if err != nil {
 		return err
 	}
@@ -5057,6 +5096,14 @@ reloadShaders :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 		return err
 	}
 	return nil
+}
+
+changeShader :: proc(
+	using graphicsContext: ^GraphicsContext,
+	pipeline: PipelineIndex,
+	indices: ShaderIndices,
+) {
+	pipelines[pipeline].indices = indices
 }
 
 
