@@ -3,10 +3,12 @@ package Demo
 import "../imgui"
 import valhalla "../src"
 import "core:fmt"
+import "core:log"
 import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 import tinyfd "tinyfiledialogs"
+import "vendor:glfw"
 
 drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 	constructSceneEditor :: proc(graphicsContext: ^valhalla.GraphicsContext) {
@@ -122,18 +124,15 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 
 				pointLight := new(PointLight)
 				pointLight^ = {
-					name = fmt.aprintf("Light{:3d}", count),
+					name         = fmt.aprintf("Light{:3d}", count),
 					graphicsData = new(valhalla.PointLight),
 				}
 				pointLight.graphicsData^ = {
-					position = {0, 2, 0},
-					colour = {1, 1, 1},
+					position   = {0, 2, 0},
+					colour     = {1, 1, 1},
 					brightness = 1,
 				}
-				append(
-					&scene.pointLights,
-					pointLight,
-				)
+				append(&scene.pointLights, pointLight)
 				valhalla.addLight(
 					&scene.graphicsData,
 					scene.pointLights[len(scene.pointLights) - 1].graphicsData,
@@ -218,11 +217,10 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 						}
 
 						if !alreadyLoaded {
-							f := strings.clone_to_cstring(file)
-							valhalla.addModels(graphicsContext, &scene.graphicsData, {f})
+							valhalla.addModels(graphicsContext, &scene.graphicsData, {file})
 							scene.models[len(scene.models) - 1].name = strings.clone("New Model")
 							scene.models[len(scene.models) - 1].scale = {1, 1, 1}
-							append(&scene.modelPaths, f)
+							append(&scene.modelPaths, strings.clone(file))
 							if valhalla.updateScene(graphicsContext) != nil {
 								panic(fmt.tprintf("Failed to update scene!"))
 							}
@@ -260,18 +258,17 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 						}
 
 						if !alreadyLoaded {
-							f := strings.clone_to_cstring(file)
 							if valhalla.addImages(
 								   graphicsContext,
 								   &scene.graphicsData.textures,
 								   scene.graphicsData.textureCount,
-								   {f},
+								   {file},
 							   ) !=
 							   nil {
-								panic(fmt.tprintf("Failed to add texture: %v", f))
+								panic(fmt.tprintf("Failed to add texture: %v", file))
 							}
 
-							append(&scene.texturePaths, f)
+							append(&scene.texturePaths, strings.clone(file))
 							scene.graphicsData.textureCount += 1
 
 							if valhalla.updateScene(graphicsContext) != nil {
@@ -312,18 +309,17 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 						}
 
 						if !alreadyLoaded {
-							f := strings.clone_to_cstring(file)
 							if valhalla.addImages(
 								   graphicsContext,
 								   &scene.graphicsData.normals,
 								   scene.graphicsData.normalCount,
-								   {f},
+								   {file},
 							   ) !=
 							   nil {
-								panic(fmt.tprintf("Failed to add normal map: %v", f))
+								panic(fmt.tprintf("Failed to add normal map: %v", file))
 							}
 
-							append(&scene.normalPaths, f)
+							append(&scene.normalPaths, strings.clone(file))
 							scene.graphicsData.normalCount += 1
 
 							if valhalla.updateScene(graphicsContext) != nil {
@@ -486,11 +482,19 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 
 				if imgui.BeginCombo(
 					"Texture",
-					scene.texturePaths[object.graphicsData.textureIdxs[meshIndex]],
+					strings.clone_to_cstring(
+						scene.texturePaths[object.graphicsData.textureIdxs[meshIndex]],
+						allocator = context.temp_allocator,
+					),
 				) {
 					for &texture, i in scene.texturePaths {
 						if u32(i) != object.graphicsData.textureIdxs[meshIndex] &&
-						   imgui.Selectable(texture) {
+						   imgui.Selectable(
+							   strings.clone_to_cstring(
+								   texture,
+								   allocator = context.temp_allocator,
+							   ),
+						   ) {
 							object.graphicsData.textureIdxs[meshIndex] = u32(i)
 							if valhalla.updateCommandBuffers(graphicsContext) != nil {
 								panic(fmt.tprintf("Failed to update command buffers!"))
@@ -502,11 +506,19 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 
 				if imgui.BeginCombo(
 					"Normal Map",
-					scene.normalPaths[object.graphicsData.normalIdxs[meshIndex]],
+					strings.clone_to_cstring(
+						scene.normalPaths[object.graphicsData.normalIdxs[meshIndex]],
+						allocator = context.temp_allocator,
+					),
 				) {
 					for &normal, i in scene.normalPaths {
 						if u32(i) != object.graphicsData.normalIdxs[meshIndex] &&
-						   imgui.Selectable(normal) {
+						   imgui.Selectable(
+							   strings.clone_to_cstring(
+								   normal,
+								   allocator = context.temp_allocator,
+							   ),
+						   ) {
 							object.graphicsData.normalIdxs[meshIndex] = u32(i)
 							if valhalla.updateCommandBuffers(graphicsContext) != nil {
 								panic(fmt.tprintf("Failed to update command buffers!"))
@@ -605,5 +617,115 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 	imgui.SetNextWindowBgAlpha(1.0)
 	if imgui.Begin("Scene Editor", nil, {.MenuBar}) {
 		constructSceneEditor(graphicsContext)
+	}
+}
+
+mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
+	context = globals.runtimeContext
+
+	if globals.inputLock {
+		return
+	}
+
+	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
+		if mouseMode {
+			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+			mouseMode = false
+		} else {
+			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+			mouseMode = true
+		}
+		return
+	}
+	if button == glfw.MOUSE_BUTTON_LEFT && action == glfw.PRESS {
+		object, _ := castRay(screenPositionToWorldRay(mousePos), &globals.scene)
+		if object != nil && object.selectable {
+			log.logf(.Debug, "Selected instance: {}", object.name)
+			globals.selectedObject = object
+		} else {
+			globals.selectedObject = nil
+		}
+		return
+	}
+	if button == glfw.MOUSE_BUTTON_RIGHT && action == glfw.RELEASE {
+		if globals.selectedObject == nil {
+			return
+		}
+
+		origin, direction := screenPositionToWorldRay(mousePos)
+		object, distance := castRay(origin, direction, &globals.scene)
+		if object != nil && object.tiled {
+			pos := (origin + direction * distance)
+			globals.selectedObject.action = MoveAction {
+				destination = {round(pos.x), object.position.y, round(pos.z)},
+			}
+			globals.inputLock = true
+		}
+		return
+	}
+}
+
+cursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
+	newPos: Vec2 = {f32(xpos), f32(ypos)}
+	mouseDelta.xy = newPos - mousePos
+	mousePos = newPos
+}
+
+scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
+	mouseDelta.z = f32(yoffset)
+}
+
+keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
+	context = globals.runtimeContext
+
+	switch key {
+	case glfw.KEY_ESCAPE:
+		glfw.SetWindowShouldClose(window, glfw.TRUE)
+	case glfw.KEY_P:
+		if action == glfw.PRESS do globals.paused = !globals.paused
+	case glfw.KEY_D:
+		if action == glfw.PRESS {
+			cameraMove.x += 1
+		} else if action == glfw.RELEASE {
+			cameraMove.x -= 1
+		}
+	case glfw.KEY_A:
+		if action == glfw.PRESS {
+			cameraMove.x -= 1
+		} else if action == glfw.RELEASE {
+			cameraMove.x += 1
+		}
+	case glfw.KEY_SPACE:
+		if action == glfw.PRESS {
+			cameraMove.y += 1
+		} else if action == glfw.RELEASE {
+			cameraMove.y -= 1
+		}
+	case glfw.KEY_LEFT_SHIFT:
+		if action == glfw.PRESS {
+			cameraMove.y -= 1
+		} else if action == glfw.RELEASE {
+			cameraMove.y += 1
+		}
+	case glfw.KEY_W:
+		if action == glfw.PRESS {
+			cameraMove.z += 1
+		} else if action == glfw.RELEASE {
+			cameraMove.z -= 1
+		}
+	case glfw.KEY_S:
+		if action == glfw.PRESS {
+			cameraMove.z -= 1
+		} else if action == glfw.RELEASE {
+			cameraMove.z += 1
+		}
+	case glfw.KEY_H:
+		if action == glfw.PRESS {
+			globals.showDemo = !globals.showDemo
+		}
+	case glfw.KEY_M:
+		if action == glfw.PRESS {
+			globals.showMetrics = !globals.showMetrics
+		}
 	}
 }

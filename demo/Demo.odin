@@ -10,7 +10,6 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
-import "vendor:glfw"
 
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 
@@ -134,11 +133,9 @@ main :: proc() {
 	}
 
 	free_all(context.temp_allocator)
-	for !glfw.WindowShouldClose(globals.graphicsContext.window) {
+	for valhalla.updateWindow(&globals.graphicsContext) {
 		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
 		lastFrameTime = time.now()
-
-		glfw.PollEvents()
 
 		scene := &globals.scene
 		camera := &scene.cameras[scene.activeCamera]
@@ -169,12 +166,12 @@ main :: proc() {
 			distance := length(camera.center - camera.eye) * (1 - mouseDelta.z * 0.1)
 
 			// Clamp the pitch to prevent flipping
-			maxY :: 0.9396926208 // approximately sin(70 degrees)
+			MAX_Y :: 0.9396926208 // approximately sin(70 degrees)
 			signY := sign(forward.y)
 			absY := signY * forward.y
-			if absY > maxY {
-				forward.xz *= sqrt((1 - (maxY * maxY)) / (1 - (absY * absY)))
-				forward.y = signY * maxY
+			if absY > MAX_Y {
+				forward.xz *= sqrt((1 - (MAX_Y * MAX_Y)) / (1 - (absY * absY)))
+				forward.y = signY * MAX_Y
 			}
 			camera.eye = camera.center - (forward * distance)
 
@@ -231,7 +228,7 @@ main :: proc() {
 			log.logf(.Error, "Failed to draw frame: {}", err)
 			break
 		}
-		calcFrameRate(globals.graphicsContext.window)
+		calcFrameRate()
 
 		free_all(context.temp_allocator)
 	}
@@ -263,7 +260,7 @@ viewProjection :: proc(camera: Camera) -> Mat4 {
 	panic("")
 }
 
-calcFrameRate :: proc(window: glfw.WindowHandle) {
+calcFrameRate :: proc() {
 	frameCount += 1
 	if timeDelta := time.duration_seconds(time.since(fpsTimer)); timeDelta >= 1 {
 		globals.fps = f64(frameCount) / timeDelta
@@ -272,63 +269,7 @@ calcFrameRate :: proc(window: glfw.WindowHandle) {
 	}
 }
 
-keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
-	context = globals.runtimeContext
-
-	switch key {
-	case glfw.KEY_ESCAPE:
-		glfw.SetWindowShouldClose(window, glfw.TRUE)
-	case glfw.KEY_P:
-		if action == glfw.PRESS do globals.paused = !globals.paused
-	case glfw.KEY_D:
-		if action == glfw.PRESS {
-			cameraMove.x += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.x -= 1
-		}
-	case glfw.KEY_A:
-		if action == glfw.PRESS {
-			cameraMove.x -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.x += 1
-		}
-	case glfw.KEY_SPACE:
-		if action == glfw.PRESS {
-			cameraMove.y += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.y -= 1
-		}
-	case glfw.KEY_LEFT_SHIFT:
-		if action == glfw.PRESS {
-			cameraMove.y -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.y += 1
-		}
-	case glfw.KEY_W:
-		if action == glfw.PRESS {
-			cameraMove.z += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.z -= 1
-		}
-	case glfw.KEY_S:
-		if action == glfw.PRESS {
-			cameraMove.z -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.z += 1
-		}
-	case glfw.KEY_H:
-		if action == glfw.PRESS {
-			globals.showDemo = !globals.showDemo
-		}
-	case glfw.KEY_M:
-		if action == glfw.PRESS {
-			globals.showMetrics = !globals.showMetrics
-		}
-	}
-}
-
 screenPositionToWorldRay :: proc(
-	window: glfw.WindowHandle,
 	pos: Vec2,
 ) -> (
 	origin: Vec3,
@@ -337,7 +278,7 @@ screenPositionToWorldRay :: proc(
 	scene := &globals.scene
 	camera := &scene.cameras[scene.activeCamera]
 
-	width, height := glfw.GetWindowSize(window)
+	width, height := valhalla.windowSize(&globals.graphicsContext)
 
 	vpPos := pos / Vec2{f32(width), f32(height)}
 	vpPos = vpPos * 2 - 1
@@ -431,64 +372,8 @@ castRay :: proc(
 	return
 }
 
-mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
-	context = globals.runtimeContext
-
-	if globals.inputLock {
-		return
-	}
-
-	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
-		if mouseMode {
-			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
-			mouseMode = false
-		} else {
-			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-			mouseMode = true
-		}
-		return
-	}
-	if button == glfw.MOUSE_BUTTON_LEFT && action == glfw.PRESS {
-		object, _ := castRay(screenPositionToWorldRay(window, mousePos), &globals.scene)
-		if object != nil && object.selectable {
-			log.logf(.Debug, "Selected instance: {}", object.name)
-			globals.selectedObject = object
-		} else {
-			globals.selectedObject = nil
-		}
-		return
-	}
-	if button == glfw.MOUSE_BUTTON_RIGHT && action == glfw.RELEASE {
-		if globals.selectedObject == nil {
-			return
-		}
-
-		origin, direction := screenPositionToWorldRay(window, mousePos)
-		object, distance := castRay(origin, direction, &globals.scene)
-		if object != nil && object.tiled {
-			pos := (origin + direction * distance)
-			globals.selectedObject.action = MoveAction {
-				destination = {round(pos.x), object.position.y, round(pos.z)},
-			}
-			globals.inputLock = true
-		}
-		return
-	}
-}
-
-cursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
-	newPos: Vec2 = {f32(xpos), f32(ypos)}
-	mouseDelta.xy = newPos - mousePos
-	mousePos = newPos
-}
-
-scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
-	mouseDelta.z = f32(yoffset)
-}
-
-
 loadModel: valhalla.ModelLoader : proc(
-	filename: cstring,
+	filename: string,
 	vertexOffset, indiceOffset: u32,
 ) -> (
 	^valhalla.Model,
@@ -573,7 +458,7 @@ loadModel: valhalla.ModelLoader : proc(
 		// This seems like a good idea.
 		.SplitLargeMeshes,
 		.LimitBoneWeights,
-		// Maybe we should use this and add logging.
+		// Maybe I should use this and add logging.
 		// .ValidateDataStructure,
 		// I don't think I need this right now. Maybe in the future.
 		// .ImproveCacheLocality,
@@ -590,7 +475,12 @@ loadModel: valhalla.ModelLoader : proc(
 		.GenBoundingBoxes,
 	}
 
-	aiScene := ai.ImportFileExWithProperties(filename, IMPORT_FLAGS, nil, propertyStore)
+	aiScene := ai.ImportFileExWithProperties(
+		strings.clone_to_cstring(filename),
+		IMPORT_FLAGS,
+		nil,
+		propertyStore,
+	)
 	if aiScene == nil {
 		log.logf(.Error, "Failed to load file: %s", ai.GetErrorString())
 		return model.graphicsData, .FailedToLoadFile

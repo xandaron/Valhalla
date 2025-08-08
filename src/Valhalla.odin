@@ -134,7 +134,7 @@ GLFWScrollCallback :: glfw.ScrollProc
 GLFWErrorCallback :: glfw.ErrorProc
 
 ModelLoader :: #type proc(
-	filename: cstring,
+	filename: string,
 	vertexOffset, indiceOffset: u32,
 ) -> (
 	^Model,
@@ -405,11 +405,6 @@ GraphicsContext :: struct {
 	currentFrame:              u32,
 	drawLights:                bool,
 }
-
-// ###################################################################
-// #                               Init                              #
-// ###################################################################
-
 
 Shaders :: struct {
 	shaderFiles:  []ShaderFile,
@@ -864,12 +859,6 @@ initWindow :: proc(
 	return .None
 }
 
-
-// ###################################################################
-// #                              Device                             #
-// ###################################################################
-
-
 QueueFamilyIndices :: struct {
 	graphicsFamily: u32,
 	presentFamily:  u32,
@@ -1267,12 +1256,6 @@ createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) -> DeviceEr
 	return .None
 }
 
-
-// ###################################################################
-// #                            Swapchain                            #
-// ###################################################################
-
-
 SwapchainError :: enum {
 	None = 0,
 	FailedToCreateSwapchain,
@@ -1458,12 +1441,6 @@ cleanupSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 	cleanupImage(graphicsContext, &renderedImage)
 	cleanupImage(graphicsContext, &processedImage)
 }
-
-
-// ###################################################################
-// #                             Commands                            #
-// ###################################################################
-
 
 CommandBufferError :: enum {
 	None = 0,
@@ -1680,12 +1657,6 @@ endSingleTimeCommands :: proc(
 	return .None
 }
 
-
-// ###################################################################
-// #                             Buffers                             #
-// ###################################################################
-
-
 BufferError :: enum {
 	None = 0,
 	FailedToCreateBuffer,
@@ -1825,12 +1796,6 @@ cleanupBuffer :: proc(using graphicsContext: ^GraphicsContext, buffer: ^Buffer) 
 	vk.DestroyBuffer(device, buffer.buffer, nil)
 	vk.FreeMemory(device, buffer.memory, nil)
 }
-
-
-// ###################################################################
-// #                              Images                             #
-// ###################################################################
-
 
 @(private = "file")
 findMemoryType :: proc(
@@ -2241,7 +2206,7 @@ cleanupSamplers :: proc(using graphicsContext: ^GraphicsContext) {
 loadImages :: proc(
 	using graphicsContext: ^GraphicsContext,
 	image: ^Image,
-	imagePaths: []cstring,
+	imagePaths: []string,
 ) -> (
 	err: Error,
 ) {
@@ -2292,7 +2257,13 @@ loadImages :: proc(
 
 	for path, index in imagePaths {
 		width, height: i32
-		pixels := img.load(path, &width, &height, nil, 4)
+		pixels := img.load(
+			strings.clone_to_cstring(path, allocator = context.temp_allocator),
+			&width,
+			&height,
+			nil,
+			4,
+		)
 		defer img.image_free(pixels)
 		if pixels == nil {
 			errorCallback(.Error, "Failed to load texture!")
@@ -2452,7 +2423,7 @@ addImages :: proc(
 	using graphicsContext: ^GraphicsContext,
 	image: ^Image,
 	imageLayers: u32,
-	imagePaths: []cstring,
+	imagePaths: []string,
 ) -> (
 	err: Error,
 ) {
@@ -2549,7 +2520,13 @@ addImages :: proc(
 	imageLayers := imageLayers
 	for path in imagePaths {
 		width, height: i32
-		pixels := img.load(path, &width, &height, nil, 4)
+		pixels := img.load(
+			strings.clone_to_cstring(path, allocator = context.temp_allocator),
+			&width,
+			&height,
+			nil,
+			4,
+		)
 		defer img.image_free(pixels)
 		if pixels == nil {
 			errorCallback(.Error, "Failed to load texture!")
@@ -2718,7 +2695,7 @@ LoaderError :: enum {
 }
 
 @(private = "file")
-loadModels :: proc(graphicsContext: ^GraphicsContext, scene: ^SceneData, modelPaths: []cstring) {
+loadModels :: proc(graphicsContext: ^GraphicsContext, scene: ^SceneData, modelPaths: []string) {
 	reserve(&scene.models, u32(len(scene.models)) + u32(len(modelPaths)))
 
 	for path, index in modelPaths {
@@ -2831,7 +2808,7 @@ addLight :: proc(scene: ^SceneData, light: ^PointLight) {
 addModels :: proc(
 	graphicsContext: ^GraphicsContext,
 	scene: ^SceneData,
-	modelPaths: []cstring,
+	modelPaths: []string,
 ) -> Error {
 	loadModels(graphicsContext, scene, modelPaths)
 
@@ -2876,9 +2853,9 @@ addModels :: proc(
 loadSceneAssets :: proc(
 	graphicsContext: ^GraphicsContext,
 	scene: ^SceneData,
-	modelPaths: []cstring,
-	texturePaths: []cstring,
-	normalPaths: []cstring,
+	modelPaths: []string,
+	texturePaths: []string,
+	normalPaths: []string,
 ) -> Error {
 	scene^ = {
 		models   = make([dynamic]^Model),
@@ -3092,12 +3069,6 @@ cleanupScene :: proc(graphicsContext: ^GraphicsContext, scene: ^SceneData) {
 	delete(scene.vertices)
 	delete(scene.indices)
 }
-
-
-// ###################################################################
-// #                        Shader Descriptors                       #
-// ###################################################################
-
 
 DescriptorSetError :: enum {
 	None = 0,
@@ -3832,12 +3803,6 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> 
 	return .None
 }
 
-
-// ###################################################################
-// #                         Frame Resources                         #
-// ###################################################################
-
-
 SyncError :: enum {
 	None = 0,
 	FailedToCreateFence,
@@ -3899,12 +3864,6 @@ createSyncObjects :: proc(using graphicsContext: ^GraphicsContext) -> SyncError 
 
 	return .None
 }
-
-
-// ###################################################################
-// #                             Pipeline                            #
-// ###################################################################
-
 
 @(private = "file")
 findSupportedDepthFormat :: proc(
@@ -5106,12 +5065,6 @@ changeShader :: proc(
 	pipelines[pipeline].indices = indices
 }
 
-
-// ###################################################################
-// #                              Imgui                              #
-// ###################################################################
-
-
 @(private = "file")
 @(require_results)
 initImgui :: proc(using graphicsContext: ^GraphicsContext) -> DescriptorSetError {
@@ -5354,12 +5307,6 @@ cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 
 	vk.DestroyRenderPass(device, imguiData.renderPass, nil)
 }
-
-
-// ###################################################################
-// #                           Render Loop                           #
-// ###################################################################
-
 
 @(private = "file")
 updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
@@ -6387,6 +6334,16 @@ DrawError :: enum {
 	FailedToSubmitPostCommandBuffer,
 	FailedToSubmitUICommandBuffer,
 	FailedToPresentSwapchainImage,
+}
+
+windowSize :: proc(using graphicsContext: ^GraphicsContext) -> (width: i32, height: i32) {
+	return glfw.GetWindowSize(window)
+}
+
+updateWindow :: proc(using graphicsContext: ^GraphicsContext) -> (ret: bool) {
+	ret = !glfw.WindowShouldClose(window)
+	glfw.PollEvents()
+	return
 }
 
 @(require_results)
