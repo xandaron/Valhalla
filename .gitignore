@@ -1,4 +1,4 @@
-bin/*
+*.exe
 logs/
 NSight/
 imgui.ini
