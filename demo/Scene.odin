@@ -19,9 +19,9 @@ Scene :: struct {
 	activeCamera: u32,
 
 	// Assets
-	modelPaths:   [dynamic]cstring,
-	texturePaths: [dynamic]cstring,
-	normalPaths:  [dynamic]cstring,
+	modelPaths:   [dynamic]string,
+	texturePaths: [dynamic]string,
+	normalPaths:  [dynamic]string,
 
 	// Graphics Engine Data
 	graphicsData: valhalla.SceneData,
@@ -84,16 +84,16 @@ createNewScene :: proc() {
 	scene.filePath = ""
 	scene.name = strings.clone("New Scene")
 
-	scene.modelPaths = make([dynamic]cstring, 2)
-	scene.modelPaths[0] = strings.clone_to_cstring("./assets/Wizard.glb")
-	scene.modelPaths[1] = strings.clone_to_cstring("./assets/cube.fbx")
+	scene.modelPaths = make([dynamic]string, 2)
+	scene.modelPaths[0] = strings.clone("./assets/Wizard.glb")
+	scene.modelPaths[1] = strings.clone("./assets/cube.fbx")
 
-	scene.texturePaths = make([dynamic]cstring, 2)
-	scene.texturePaths[0] = strings.clone_to_cstring("./assets/albedo.png")
-	scene.texturePaths[1] = strings.clone_to_cstring("./assets/white.jpg")
+	scene.texturePaths = make([dynamic]string, 2)
+	scene.texturePaths[0] = strings.clone("./assets/albedo.png")
+	scene.texturePaths[1] = strings.clone("./assets/white.jpg")
 
-	scene.normalPaths = make([dynamic]cstring, 1)
-	scene.normalPaths[0] = strings.clone_to_cstring("./assets/normal.jpg")
+	scene.normalPaths = make([dynamic]string, 1)
+	scene.normalPaths[0] = strings.clone("./assets/normal.jpg")
 
 	if valhalla.loadSceneAssets(
 		   &globals.graphicsContext,
