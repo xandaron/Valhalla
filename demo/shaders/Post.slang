@@ -1,6 +1,6 @@
-import "Light.slang";
-import "Buffers.slang";
-import "Textures.slang";
+import "../../src/shaders/Light.slang";
+import "../../src/shaders/Buffers.slang";
+import "../../src/shaders/Textures.slang";
 
 struct PushConstants {
     float contrast;

@@ -66,15 +66,6 @@ main :: proc() {
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
 
-	// Sets the current dir to the folder above the dir of the exe file
-	// All filepaths should be relative to this dir
-	// This was mainly for NVIDIA Nsight to work properly
-	absExePath, _ := filepath.abs(os.args[0], context.temp_allocator)
-	globals.baseDir = filepath.dir(filepath.dir(absExePath, context.temp_allocator))
-	if err := os.set_current_directory(globals.baseDir); err != os.ERROR_NONE {
-		fmt.printfln("Failed to set directory to '%s': %s", globals.baseDir, err)
-		panic("Failed to set directory!")
-	}
 
 	when ODIN_DEBUG {
 		tracker: mem.Tracking_Allocator
@@ -103,6 +94,18 @@ main :: proc() {
 	valhallaInitInfo := valhalla.InitInfo {
 		appVersion = 0,
 		windowTitle = "Valhalla Demo",
+		shaders = {
+			shaderFiles = {
+				{filepath = "./shaders/Pre.slang", entryPoints = {"comp"}},
+				{filepath = "./shaders/Shadow.slang", entryPoints = {"vert", "frag"}},
+				{filepath = "./shaders/Main.slang", entryPoints = {"vert", "frag"}},
+				{filepath = "./shaders/Post.slang", entryPoints = {"comp"}},
+			},
+			preShaders = {shaderIdx = {0, 0}, entryPointIdxs = {0, 0}},
+			lightShaders = {shaderIdx = {1, 1}, entryPointIdxs = {0, 1}},
+			mainShaders = {shaderIdx = {2, 2}, entryPointIdxs = {0, 1}},
+			postShaders = {shaderIdx = {3, 0}, entryPointIdxs = {0, 0}},
+		},
 
 		// Callbacks
 		glfwCallbacks = {
@@ -130,6 +133,7 @@ main :: proc() {
 		panic("Failed to update scene")
 	}
 
+	free_all(context.temp_allocator)
 	for !glfw.WindowShouldClose(globals.graphicsContext.window) {
 		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
 		lastFrameTime = time.now()
@@ -187,23 +191,18 @@ main :: proc() {
 				facingDirection := quatMulVec3(object.rotation, object.forward)
 
 				direction := action.destination - object.position
-				directionLength := length(direction)
+				dist := length(direction)
 
-				targetDirection := direction / directionLength
-				log.log(.Info, distance(facingDirection, targetDirection))
+				targetDirection := direction / dist
 				if distance(facingDirection, targetDirection) > 0.02 {
-					ROTATION_SPEED :: PI // 180 degrees per second
-					timeToRotate := angle(facingDirection, targetDirection) / ROTATION_SPEED
-
 					angleBetween := angle(object.forward, targetDirection)
 					targetRotation := quatFromAxisAngle(
 						angleBetween,
 						Vec3{0, direction.x < 0 ? 1 : -1, 0},
 					)
 
-					lerpTime := delta / timeToRotate
-
-					newQuat: Quat
+					ROTATION_SPEED :: PI // 180 degrees per second
+					lerpTime := delta * ROTATION_SPEED / angle(facingDirection, targetDirection)
 					if lerpTime >= 1 {
 						object.rotation = targetRotation
 					} else {
@@ -211,15 +210,13 @@ main :: proc() {
 					}
 				} else {
 					MOVE_SPEED :: 5
-					timeToTravel := directionLength / MOVE_SPEED
-					lerpTime := delta / timeToTravel
+					lerpTime := delta * MOVE_SPEED / dist
 					if lerpTime >= 1 {
 						object.position = action.destination
 						globals.inputLock = false
 						object.action = nil
 					} else {
 						object.position = lerp(object.position, action.destination, lerpTime)
-						BOB_SPEED :: 4 * PI // 180 degrees per second
 					}
 				}
 			}

@@ -1,7 +1,7 @@
-import "Vertex.slang";
-import "Light.slang";
-import "Buffers.slang";
-import "Textures.slang";
+import "../../src/shaders/Vertex.slang";
+import "../../src/shaders/Light.slang";
+import "../../src/shaders/Buffers.slang";
+import "../../src/shaders/Textures.slang";
 
 struct PushConstants
 {
@@ -78,8 +78,8 @@ FragOut frag(VertOut input)
     FragOut output;
 
     #define SAMPLES 20
-    #define BIAS 0.002
-    #define DISK_RADIUS 0.0015
+    #define BIAS 0.005
+    #define DISK_RADIUS 0.01
 
     // Sample offset directions for shadow sampling
     static const float3 sampleOffsetDirections[SAMPLES] = {

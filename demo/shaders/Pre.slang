@@ -1,5 +1,5 @@
-import "Vertex.slang";
-import "Buffers.slang";
+import "../../src/shaders/Vertex.slang";
+import "../../src/shaders/Buffers.slang";
 
 struct PushConstants {
     uint instance;
