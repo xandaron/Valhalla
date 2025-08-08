@@ -1,10 +1,9 @@
 # Valhalla Graphics Engine
 
-Valhalla is a graphics engine designed for rendering 3D scenes with a focus on non-photorealistic rendering techniques. This project aims to serve as the renderer for a future game engine.
+Valhalla is a graphics engine designed for rendering 3D scenes. The engine is now structured as a reusable Odin package that can be imported into other projects. A demo program is included to showcase how to use the package.
 
 ## Features
 
-- Support for many model file formats via assimp
 - Support for rigged 3D models and animations
 - Support for multiple light sources
 - Custom shaders
@@ -12,6 +11,11 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 - Real-time rendering
 - Cross-platform support (Windows, Linux)
 - Hot-reloadable shaders
+
+## Project Structure
+
+- `valhalla/` &mdash; The core graphics engine package (importable in Odin projects)
+- `demo/` &mdash; Example program demonstrating usage of the Valhalla package
 
 ## Getting Started
 
@@ -27,16 +31,26 @@ Valhalla is a graphics engine designed for rendering 3D scenes with a focus on n
 
 ### Setup
 
-Run the following script to clone the repository, build the project, and run the executable:
+Clone the repository and build the demo program:
 
 ```sh
 git clone https://github.com/xandaron/valhalla.git
-cd valhalla
-odin build . -out:bin/Valhalla.exe
-./bin/Valhalla.exe
+cd valhalla/demo
+odin build . -out:demo.exe
+./demo.exe
 ```
 
 > **Note:** On Linux, you will need to install the GLFW 3.4+ library separately. Anything earlier will cause crashes.
+
+### Using the Valhalla Package in Your Project
+
+You can import the graphics engine into your own Odin projects:
+
+```odin
+import valhalla "path/to/valhalla"
+```
+
+Refer to the `demo/` directory for an example of how to initialize and use the engine.
 
 ## Demo
 
