@@ -47,49 +47,54 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// LIGHT_H_INC :: 
 
 // ---------------------------------------------------------------------------
 /** Enumerates all supported types of light sources.
 */
 Light_Source_Type :: enum c.int {
-	UNDEFINED   = 0,
+	UNDEFINED,
 
 	//! A directional light source has a well-defined direction
 	//! but is infinitely far away. That's quite a good
 	//! approximation for sun light.
-	DIRECTIONAL = 1,
+	DIRECTIONAL,
 
 	//! A point light source has a well-defined position
 	//! in space but no direction - it emits light in all
 	//! directions. A normal bulb is a point light.
-	POINT = 2,
+	POINT,
 
 	//! A spot light source emits light in a specific
 	//! angle. It has a position and a direction it is pointing to.
 	//! A good example for a spot light is a light spot in
 	//! sport arenas.
-	SPOT = 3,
+	SPOT,
 
 	//! The generic light level of the world, including the bounces
 	//! of all other light sources.
 	//! Typically, there's at most one ambient light in a scene.
 	//! This light type doesn't have a valid position, direction, or
 	//! other properties, just a color.
-	AMBIENT = 4,
+	AMBIENT,
 
 	//! An area light is a rectangle with predefined size that uniformly
 	//! emits light from one of its sides. The position is center of the
 	//! rectangle and direction is its normal vector.
-	AREA = 5,
+	AREA,
 }
 
 // ---------------------------------------------------------------------------

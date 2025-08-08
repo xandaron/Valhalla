@@ -49,15 +49,20 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// ANIM_H_INC :: 
 
 // ---------------------------------------------------------------------------
 /**
@@ -139,20 +144,20 @@ Mesh_Morph_Key :: struct {
 *  aiNodeAnim::mPostState.*/
 Anim_Behaviour :: enum c.int {
 	/** The value from the default node transformation is taken*/
-	DEFAULT = 0,
+	DEFAULT,
 
 	/** The nearest key value is used without interpolation */
-	CONSTANT = 1,
+	CONSTANT,
 
 	/** The value of the nearest two keys is linearly
 	*  extrapolated for the current time value.*/
-	LINEAR = 2,
+	LINEAR,
 
 	/** The animation is repeated.
 	*
 	*  If the animation key go from n to m and the current
 	*  time is t, use the value at (t-n) % (|m-n|).*/
-	REPEAT = 3,
+	REPEAT,
 }
 
 // ---------------------------------------------------------------------------

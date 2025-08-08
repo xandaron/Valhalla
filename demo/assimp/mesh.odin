@@ -48,15 +48,20 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// MESH_H_INC :: 
 
 MAX_FACE_INDICES :: 0x7fff
 
@@ -181,7 +186,7 @@ Primitive_Type_Flag :: enum c.int {
 	* This is just a single vertex in the virtual world,
 	* #aiFace contains just one index for such a primitive.
 	*/
-	POINT = 0,
+	POINT,
 
 	/**
 	* @brief A line primitive.
@@ -189,14 +194,14 @@ Primitive_Type_Flag :: enum c.int {
 	* This is a line defined through a start and an end position.
 	* #aiFace contains exactly two indices for such a primitive.
 	*/
-	LINE = 1,
+	LINE,
 
 	/**
 	* @brief A triangular primitive.
 	*
 	* A triangle consists of three indices.
 	*/
-	TRIANGLE = 2,
+	TRIANGLE,
 
 	/**
 	* @brief A higher-level polygon with more than 3 edges.
@@ -206,7 +211,7 @@ Primitive_Type_Flag :: enum c.int {
 	* is provided for your convenience, it splits all polygons in
 	* triangles (which are much easier to handle).
 	*/
-	POLYGON = 3,
+	POLYGON,
 
 	/**
 	* @brief A flag to determine whether this triangles only mesh is NGON encoded.
@@ -224,7 +229,7 @@ Primitive_Type_Flag :: enum c.int {
 	* @see aiProcess_Triangulate
 	* @link https://github.com/KhronosGroup/glTF/pull/1620
 	*/
-	NGONEncodingFlag = 4,
+	NGONEncodingFlag,
 }
 
 Primitive_Type_Flags :: distinct bit_set[Primitive_Type_Flag; c.int]
@@ -262,10 +267,10 @@ Anim_Mesh :: struct {
 	mBitangents: [^]Vector3D,
 
 	/** Replacement for aiMesh::mColors */
-	mColors: ^[8]Color4D,
+	mColors: [8][^]Color4D,
 
 	/** Replacement for aiMesh::mTextureCoords */
-	mTextureCoords: ^[8]Vector3D,
+	mTextureCoords: [8][^]Vector3D,
 
 	/** The number of vertices in the aiAnimMesh, and thus the length of all
 	* the member arrays.
@@ -288,16 +293,16 @@ Anim_Mesh :: struct {
 */
 Morphing_Method :: enum c.int {
 	/** Morphing method to be determined */
-	UNKNOWN = 0,
+	UNKNOWN,
 
 	/** Interpolation between morph targets */
-	VERTEX_BLEND = 1,
+	VERTEX_BLEND,
 
 	/** Normalized morphing between morph targets  */
-	MORPH_NORMALIZED = 2,
+	MORPH_NORMALIZED,
 
 	/** Relative morphing between morph targets  */
-	MORPH_RELATIVE = 3,
+	MORPH_RELATIVE,
 }
 
 // ---------------------------------------------------------------------------

@@ -47,15 +47,20 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// COLOR4D_H_INC :: 
 
 Color4D :: struct {
 	r, g, b, a: f32,

@@ -47,15 +47,20 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// TYPES_H_INC :: 
 
 Int32 :: i32
 
@@ -141,10 +146,9 @@ Return :: enum c.int {
 	_AI_ENFORCE_ENUM_SIZE = 2147483647,
 }
 
-// just for backwards compatibility, don't use these constants anymore
-// SUCCESS :: Return_Success
-// FAILURE :: Return_Failure
-// OUTOFMEMORY :: Return_Outofmemory
+// SUCCESS :: aiReturn_SUCCESS
+// FAILURE :: aiReturn_FAILURE
+// OUTOFMEMORY :: aiReturn_OUTOFMEMORY
 
 // ----------------------------------------------------------------------------------
 /** Seek origins (for the virtual file system API).
@@ -173,29 +177,28 @@ Origin :: enum c.int {
 */
 Default_Log_Stream_Flag :: enum c.int {
 	/** Stream the log to a file */
-	FILE = 0,
+	FILE,
 
 	/** Stream the log to std::cout */
-	STDOUT = 1,
+	STDOUT,
 
 	/** Stream the log to std::cerr */
-	STDERR = 2,
+	STDERR,
 
 	/** MSVC only: Stream the log the the debugger
 	* (this relies on OutputDebugString from the Win32 SDK)
 	*/
-	DEBUGGER = 3,
+	DEBUGGER,
 }
 
 Default_Log_Stream_Flags :: distinct bit_set[Default_Log_Stream_Flag; c.int]
 
 AI_DLS_ENFORCE_ENUM_SIZE :: Default_Log_Stream_Flags { .FILE, .STDOUT, .STDERR, .DEBUGGER }
 
-// just for backwards compatibility, don't use these constants anymore
-// DLS_FILE :: Default_Log_Stream_File
-// DLS_STDOUT :: Default_Log_Stream_Stdout
-// DLS_STDERR :: Default_Log_Stream_Stderr
-// DLS_DEBUGGER :: Default_Log_Stream_Debugger
+// DLS_FILE :: aiDefaultLogStream_FILE
+// DLS_STDOUT :: aiDefaultLogStream_STDOUT
+// DLS_STDERR :: aiDefaultLogStream_STDERR
+// DLS_DEBUGGER :: aiDefaultLogStream_DEBUGGER
 
 // ----------------------------------------------------------------------------------
 /** Stores the memory requirements for different components (e.g. meshes, materials,

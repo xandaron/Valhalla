@@ -47,42 +47,47 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// IMPORTER_DESC_H_INC :: 
 
 /** Mixed set of flags for #aiImporterDesc, indicating some features
 *  common to many importers*/
 Importer_Flag :: enum c.int {
 	/** Indicates that there is a textual encoding of the
 	*  file format; and that it is supported.*/
-	SupportTextFlavour = 0,
+	SupportTextFlavour,
 
 	/** Indicates that there is a binary encoding of the
 	*  file format; and that it is supported.*/
-	SupportBinaryFlavour = 1,
+	SupportBinaryFlavour,
 
 	/** Indicates that there is a compressed encoding of the
 	*  file format; and that it is supported.*/
-	SupportCompressedFlavour = 2,
+	SupportCompressedFlavour,
 
 	/** Indicates that the importer reads only a very particular
 	* subset of the file format. This happens commonly for
 	* declarative or procedural formats which cannot easily
 	* be mapped to #aiScene */
-	LimitedSupport = 3,
+	LimitedSupport,
 
 	/** Indicates that the importer is highly experimental and
 	* should be used with care. This only happens for trunk
 	* (i.e. SVN) versions, experimental code is not included
 	* in releases. */
-	Experimental = 4,
+	Experimental,
 }
 
 Importer_Flags :: distinct bit_set[Importer_Flag; c.int]

@@ -47,15 +47,20 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
+
+// POSTPROCESS_H_INC :: 
 
 // -----------------------------------------------------------------------------------
 /** @enum  aiPostProcessSteps
@@ -80,7 +85,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* a maximum smoothing angle for the algorithm. However, usually you'll
 	* want to leave it at the default value.
 	*/
-	CalcTangentSpace = 0,
+	CalcTangentSpace,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Identifies and joins identical vertex data sets within all
@@ -94,7 +99,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* more than one face and <b>no index buffer is required</b> for rendering.
 	* Unless the importer (like ply) had to split vertices. Then you need one regardless.
 	*/
-	JoinIdenticalVertices = 1,
+	JoinIdenticalVertices,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Converts all the imported data to a left-handed coordinate space.
@@ -110,7 +115,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* setting and bundles all conversions typically required for D3D-based
 	* applications.
 	*/
-	MakeLeftHanded = 2,
+	MakeLeftHanded,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Triangulates all faces of all meshes.
@@ -126,7 +131,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* <li>Ignore all point and line meshes when you process assimp's output</li>
 	* </ul>
 	*/
-	Triangulate = 3,
+	Triangulate,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Removes some parts of the data structure (animations, materials,
@@ -152,7 +157,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* this step, unneeded components are excluded as early as possible
 	* thus opening more room for internal optimizations.
 	*/
-	RemoveComponent = 4,
+	RemoveComponent,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Generates normals for all faces of all meshes.
@@ -166,7 +171,7 @@ Post_Process_Step_Flag :: enum c.int {
 	*
 	* This flag may not be specified together with #aiProcess_GenSmoothNormals.
 	*/
-	GenNormals = 5,
+	GenNormals,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Generates smooth normals for all vertices in the mesh.
@@ -183,7 +188,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* Using a decent angle here (e.g. 80 degrees) results in very good visual
 	* appearance.
 	*/
-	GenSmoothNormals = 6,
+	GenSmoothNormals,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Splits large meshes into smaller sub-meshes.
@@ -202,7 +207,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* Note that splitting is generally a time-consuming task, but only if there's
 	* something to split. The use of this step is recommended for most users.
 	*/
-	SplitLargeMeshes = 7,
+	SplitLargeMeshes,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Removes the node graph and pre-transforms all vertices with
@@ -228,7 +233,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* can be set to normalize the scene's spatial dimension to the -1...1
 	* range.
 	*/
-	PreTransformVertices = 8,
+	PreTransformVertices,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Limits the number of bones simultaneously affecting a single vertex
@@ -244,7 +249,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* If you intend to perform the skinning in hardware, this post processing
 	* step might be of interest to you.
 	*/
-	LimitBoneWeights = 9,
+	LimitBoneWeights,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Validates the imported scene data structure.
@@ -272,7 +277,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* This post-processing step is not time-consuming. Its use is not
 	* compulsory, but recommended.
 	*/
-	ValidateDataStructure = 10,
+	ValidateDataStructure,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Reorders triangles for better vertex cache locality.
@@ -287,7 +292,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* be of interest to you. The <tt>#AI_CONFIG_PP_ICL_PTCACHE_SIZE</tt>
 	* importer property can be used to fine-tune the cache optimization.
 	*/
-	ImproveCacheLocality = 11,
+	ImproveCacheLocality,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Searches for redundant/unreferenced materials and removes them.
@@ -308,7 +313,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* specify this flag. Alternatively take a look at the
 	* <tt>#AI_CONFIG_PP_RRM_EXCLUDE_LIST</tt> importer property.
 	*/
-	RemoveRedundantMaterials = 12,
+	RemoveRedundantMaterials,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step tries to determine which meshes have normal vectors
@@ -322,7 +327,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* The step inverts all in-facing normals. Generally it is recommended
 	* to enable this step, although the result is not always correct.
 	*/
-	FixInfacingNormals = 13,
+	FixInfacingNormals,
 
 	// -------------------------------------------------------------------------
 	/**
@@ -333,7 +338,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* Instead of writing your own multi-root, multi-armature lookups we have done the
 	* hard work for you :)
 	*/
-	PopulateArmatureData = 14,
+	PopulateArmatureData,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step splits meshes with more than one primitive type in
@@ -347,7 +352,7 @@ Post_Process_Step_Flag :: enum c.int {
 	*  specify which primitive types you need. This can be used to easily
 	*  exclude lines and points, which are rarely used, from the import.
 	*/
-	SortByPType = 15,
+	SortByPType,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step searches all meshes for degenerate primitives and
@@ -390,7 +395,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* don't support lines or points, and some exporters bypass the
 	* format specification and write them as degenerate triangles instead.
 	*/
-	FindDegenerates = 16,
+	FindDegenerates,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step searches all meshes for invalid data, such as zeroed
@@ -405,7 +410,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* key. The <tt>AI_CONFIG_PP_FID_ANIM_ACCURACY</tt> config property decides
 	* the accuracy of the check for duplicate animation tracks.
 	*/
-	FindInvalidData = 17,
+	FindInvalidData,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step converts non-UV mappings (such as spherical or
@@ -422,7 +427,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* <tt>#AI_MATKEY_MAPPING</tt> material property in order to display all assets
 	* properly.
 	*/
-	GenUVCoords = 18,
+	GenUVCoords,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step applies per-texture UV transformations and bakes
@@ -439,7 +444,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* transforming texture coordinates at vertex shader stage with a 3x3
 	* (homogeneous) transformation matrix.
 	*/
-	TransformUVCoords = 19,
+	TransformUVCoords,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step searches for duplicate meshes and replaces them
@@ -454,7 +459,7 @@ Post_Process_Step_Flag :: enum c.int {
 	*  different materials are currently *not* joined, although this is
 	*  planned for future versions.
 	*/
-	FindInstances = 20,
+	FindInstances,
 
 	// -------------------------------------------------------------------------
 	/** <hr>A post-processing step to reduce the number of meshes.
@@ -465,7 +470,7 @@ Post_Process_Step_Flag :: enum c.int {
 	*  together with #aiProcess_OptimizeGraph, if possible. The flag is fully
 	*  compatible with both #aiProcess_SplitLargeMeshes and #aiProcess_SortByPType.
 	*/
-	OptimizeMeshes = 21,
+	OptimizeMeshes,
 
 	// -------------------------------------------------------------------------
 	/** <hr>A post-processing step to optimize the scene hierarchy.
@@ -493,7 +498,7 @@ Post_Process_Step_Flag :: enum c.int {
 	*  #aiProcess_OptimizeMeshes in combination with #aiProcess_OptimizeGraph
 	*  usually fixes them all and makes them renderable.
 	*/
-	OptimizeGraph = 22,
+	OptimizeGraph,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step flips all UV coordinates along the y-axis and adjusts
@@ -513,7 +518,7 @@ Post_Process_Step_Flag :: enum c.int {
 	* setting and bundles all conversions typically required for D3D-based
 	* applications.
 	*/
-	FlipUVs = 23,
+	FlipUVs,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step adjusts the output face winding order to be CW.
@@ -528,13 +533,13 @@ Post_Process_Step_Flag :: enum c.int {
 	*  x1
 	* @endcode
 	*/
-	FlipWindingOrder = 24,
+	FlipWindingOrder,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step splits meshes with many bones into sub-meshes so that each
 	* sub-mesh has fewer or as many bones as a given limit.
 	*/
-	SplitByBoneCount = 25,
+	SplitByBoneCount,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step removes bones losslessly or according to some threshold.
@@ -549,7 +554,7 @@ Post_Process_Step_Flag :: enum c.int {
 	*  Use <tt>#AI_CONFIG_PP_DB_ALL_OR_NONE</tt> if you want bones removed if and
 	*  only if all bones within the scene qualify for removal.
 	*/
-	Debone = 26,
+	Debone,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step will perform a global scale of the model.
@@ -561,7 +566,7 @@ Post_Process_Step_Flag :: enum c.int {
 	*
 	*  Use <tt>#AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY</tt> to setup the global scaling factor.
 	*/
-	GlobalScale = 27,
+	GlobalScale,
 
 	// -------------------------------------------------------------------------
 	/** <hr>A postprocessing step to embed of textures.
@@ -572,12 +577,12 @@ Post_Process_Step_Flag :: enum c.int {
 	*  it will check if a file with the same name exists at the root folder
 	*  of the imported model. And if so, it uses that.
 	*/
-	EmbedTextures = 28,
+	EmbedTextures,
 
 	// aiProcess_GenEntityMeshes = 0x100000,
 	// aiProcess_OptimizeAnimations = 0x200000
 	// aiProcess_FixTexturePaths = 0x200000
-	ForceGenNormals = 29,
+	ForceGenNormals,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Drops normals for all faces of all meshes.
@@ -589,20 +594,19 @@ Post_Process_Step_Flag :: enum c.int {
 	* #aiProcess_JoinIdenticalVertices is *senseless* then.
 	* This process gives sense back to aiProcess_JoinIdenticalVertices
 	*/
-	DropNormals = 30,
+	DropNormals,
 
-	// -------------------------------------------------------------------------
-	/**
-	*/
 	GenBoundingBoxes,
 }
 
 Post_Process_Step_Flags :: distinct bit_set[Post_Process_Step_Flag; c.int]
 
-// aiProcess_ConvertToLeftHanded :: Process_Make_Left_Handed | Process_Flip_Uvs | Process_Flip_Winding_Order | 0
+// PROCESS_GENBOUNDINGBOXES :: Post_Process_Step_Flags {  }
 
-// aiProcessPreset_TargetRealtime_Fast :: Process_Calc_Tangent_Space | Process_Gen_Normals | Process_Join_Identical_Vertices | Process_Triangulate | Process_Gen_Uvcoords | Process_Sort_By_Ptype | 0
+// aiProcess_ConvertToLeftHanded :: (aiProcess_MakeLeftHanded|aiProcess_FlipUVs|aiProcess_FlipWindingOrder|0)
 
-// aiProcessPreset_TargetRealtime_Quality :: Process_Calc_Tangent_Space | Process_Gen_Smooth_Normals | Process_Join_Identical_Vertices | Process_Improve_Cache_Locality | Process_Limit_Bone_Weights | Process_Remove_Redundant_Materials | Process_Split_Large_Meshes | Process_Triangulate | Process_Gen_Uvcoords | Process_Sort_By_Ptype | Process_Find_Degenerates | Process_Find_Invalid_Data | 0
+// aiProcessPreset_TargetRealtime_Fast :: (aiProcess_CalcTangentSpace|aiProcess_GenNormals|aiProcess_JoinIdenticalVertices|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_SortByPType|0)
 
-// aiProcessPreset_TargetRealtime_MaxQuality :: Process_Preset_Target_Realtime_Quality | Process_Find_Instances | Process_Validate_Data_Structure | Process_Optimize_Meshes | 0
+// aiProcessPreset_TargetRealtime_Quality :: (aiProcess_CalcTangentSpace|aiProcess_GenSmoothNormals|aiProcess_JoinIdenticalVertices|aiProcess_ImproveCacheLocality|aiProcess_LimitBoneWeights|aiProcess_RemoveRedundantMaterials|aiProcess_SplitLargeMeshes|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_SortByPType|aiProcess_FindDegenerates|aiProcess_FindInvalidData|0)
+
+// aiProcessPreset_TargetRealtime_MaxQuality :: (aiProcessPreset_TargetRealtime_Quality|aiProcess_FindInstances|aiProcess_ValidateDataStructure|aiProcess_OptimizeMeshes|0)

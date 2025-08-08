@@ -48,32 +48,31 @@ import "core:c"
 
 _ :: c
 
-@(require)
-import zlib "vendor:zlib"
-
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
+    foreign import lib {
+        "vendor:zlib/libz.lib",
+        "libassimp.lib",
+    }
 }
 else {
-    foreign import lib "system:assimp"
+    foreign import lib {
+        "system:z",
+        "system:assimp",
+    }
 }
 
-//! Assimp was compiled as a shared object (Windows: DLL)
-ASSIMP_CFLAGS_SHARED  :: 0x1
+// VERSION_H_INC :: 
 
-//! Assimp was compiled against STLport
+ASSIMP_CFLAGS_SHARED :: 0x1
+
 ASSIMP_CFLAGS_STLPORT :: 0x2
 
-//! Assimp was compiled as a debug build
-ASSIMP_CFLAGS_DEBUG   :: 0x4
+ASSIMP_CFLAGS_DEBUG :: 0x4
 
-//! Assimp was compiled with ASSIMP_BUILD_BOOST_WORKAROUND defined
-ASSIMP_CFLAGS_NOBOOST           :: 0x8
+ASSIMP_CFLAGS_NOBOOST :: 0x8
 
-//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
-ASSIMP_CFLAGS_SINGLETHREADED    :: 0x10
+ASSIMP_CFLAGS_SINGLETHREADED :: 0x10
 
-//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
 ASSIMP_CFLAGS_DOUBLE_SUPPORT :: 0x20
 
 @(default_calling_convention="c", link_prefix="ai")
