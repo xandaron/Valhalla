@@ -1,7 +1,7 @@
 package Demo
 
 import "../imgui"
-import valhalla "../src"
+import valhalla "../valhalla"
 import "core:fmt"
 import "core:log"
 import "core:path/filepath"
@@ -311,8 +311,8 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 						if !alreadyLoaded {
 							if valhalla.addImages(
 								   graphicsContext,
-								   &scene.graphicsData.normals,
-								   scene.graphicsData.normalCount,
+								   &scene.graphicsData.textures,
+								   scene.graphicsData.textureCount,
 								   {file},
 							   ) !=
 							   nil {
@@ -320,7 +320,7 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 							}
 
 							append(&scene.normalPaths, strings.clone(file))
-							scene.graphicsData.normalCount += 1
+							scene.graphicsData.textureCount += 1
 
 							if valhalla.updateScene(graphicsContext) != nil {
 								panic(fmt.tprintf("Failed to update scene!"))
@@ -483,7 +483,7 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 				if imgui.BeginCombo(
 					"Texture",
 					strings.clone_to_cstring(
-						scene.texturePaths[object.graphicsData.textureIdxs[meshIndex]],
+						scene.texturePaths[object.graphicsData.textureIdxs[meshIndex][0]],
 						allocator = context.temp_allocator,
 					),
 				) {
@@ -507,19 +507,19 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 				if imgui.BeginCombo(
 					"Normal Map",
 					strings.clone_to_cstring(
-						scene.normalPaths[object.graphicsData.normalIdxs[meshIndex]],
+						scene.normalPaths[object.graphicsData.textureIdxs[meshIndex][1]],
 						allocator = context.temp_allocator,
 					),
 				) {
 					for &normal, i in scene.normalPaths {
-						if u32(i) != object.graphicsData.normalIdxs[meshIndex] &&
+						if u32(i) != object.graphicsData.textureIdxs[meshIndex][1] &&
 						   imgui.Selectable(
 							   strings.clone_to_cstring(
 								   normal,
 								   allocator = context.temp_allocator,
 							   ),
 						   ) {
-							object.graphicsData.normalIdxs[meshIndex] = u32(i)
+							object.graphicsData.textureIdxs[meshIndex][1] = u32(i)
 							if valhalla.updateCommandBuffers(graphicsContext) != nil {
 								panic(fmt.tprintf("Failed to update command buffers!"))
 							}

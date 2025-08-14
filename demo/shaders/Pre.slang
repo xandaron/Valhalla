@@ -1,29 +1,39 @@
-import "../../src/shaders/Vertex.slang";
-import "../../src/shaders/Buffers.slang";
+import "../../valhalla/shaders/Vertex.slang";
+import "../../valhalla/shaders/Buffers.slang";
 
-struct PushConstants {
+struct PushConstants
+{
     uint instance;
+    uint instanceCount;
     uint vertexCount;
     uint vertexOffset;
     uint transformOffset;
 };
 
-[[vk::push_constant]] PushConstants pushConstants;
+[[vk::push_constant]]
+PushConstants pushConstants;
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
-void comp(uint3 dispatchThreadID : SV_DispatchThreadID)
+void comp(uint3 dispatchThreadID: SV_DispatchThreadID)
 {
-    if (dispatchThreadID.x >= pushConstants.vertexCount) {
+    if (dispatchThreadID.x >= pushConstants.vertexCount)
+    {
         return;
     }
 
     const Vertex vertex = vertexBuffer[pushConstants.vertexOffset + dispatchThreadID.x];
-    const uint boneOffset = instanceBuffer[pushConstants.instance].boneOffset;
+    for (int i = 0; i < pushConstants.instanceCount; i++)
+    {
+        const uint instanceIndex = pushConstants.instance + i;
+        const uint boneOffset = instanceBuffer[instanceIndex].boneOffset;
 
-    float4x4 boneTransform = float4x4(0.0);
-    for (uint index = 0; index < 4; index++) {
-        boneTransform += vertex.weights[index] * boneBuffer[boneOffset + vertex.bones[index]];
+        float4x4 boneTransform = float4x4(0.0);
+        for (uint j = 0; j < 4; j++)
+        {
+            boneTransform += vertex.weights[j] * boneBuffer[boneOffset + vertex.bones[i]];
+        }
+
+        transformBufferRW[pushConstants.transformOffset + dispatchThreadID.x + i * pushConstants.vertexCount] = mul(instanceBuffer[instanceIndex].model, boneTransform);
     }
-    transformBufferRW[pushConstants.transformOffset + dispatchThreadID.x] = mul(instanceBuffer[pushConstants.instance].model, boneTransform);
 }

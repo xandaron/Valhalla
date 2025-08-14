@@ -1,6 +1,6 @@
 package Demo
 
-import valhalla "../src"
+import valhalla "../valhalla"
 import ai "assimp"
 import "base:runtime"
 import "core:fmt"
@@ -191,7 +191,7 @@ main :: proc() {
 				dist := length(direction)
 
 				targetDirection := direction / dist
-				if distance(facingDirection, targetDirection) > 0.02 {
+				if distance(facingDirection, targetDirection) > 0.05 {
 					angleBetween := angle(object.forward, targetDirection)
 					targetRotation := quatFromAxisAngle(
 						angleBetween,

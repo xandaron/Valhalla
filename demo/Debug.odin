@@ -2,7 +2,7 @@ package Demo
 
 import "base:runtime"
 import "core:log"
-import valhalla "../src"
+import valhalla "../valhalla"
 import vk "vendor:vulkan"
 
 
