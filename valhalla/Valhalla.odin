@@ -282,14 +282,19 @@ PipelineIndex :: enum {
 	POSTPROCESS,
 }
 
+TextureIndex :: enum {
+	ALBEDO,
+	NORMAL_MAP,
+	// MATERIAL,
+}
+
 ModelInstance :: struct {
 	model:        ^Model,
 	idx:          u32,
 	position:     ^Vec3,
 	rotation:     ^Quat,
 	scale:        ^Vec3,
-	textureIdxs:  []u32,
-	normalIdxs:   []u32,
+	textureIdxs:  [][len(TextureIndex)]u32,
 	positionKeys: []u32,
 	rotationKeys: []u32,
 	scaleKeys:    []u32,
@@ -305,8 +310,6 @@ SceneData :: struct {
 	lights:           [dynamic]^PointLight,
 	textures:         Image,
 	textureCount:     u32,
-	normals:          Image,
-	normalCount:      u32,
 	vertices:         [dynamic]Vertex,
 	indices:          [dynamic]u32,
 	instanceCount:    int,
@@ -2755,8 +2758,7 @@ addInstance :: proc(
 		position     = position,
 		rotation     = rotation,
 		scale        = scale,
-		textureIdxs  = make([]u32, len(model.meshes)),
-		normalIdxs   = make([]u32, len(model.meshes)),
+		textureIdxs  = make([][len(TextureIndex)]u32, len(model.meshes)),
 		positionKeys = make([]u32, len(model.skeleton)),
 		rotationKeys = make([]u32, len(model.skeleton)),
 		scaleKeys    = make([]u32, len(model.skeleton)),
@@ -2790,7 +2792,6 @@ removeInstance :: proc(scene: ^SceneData, instance: ^ModelInstance) {
 
 cleanupInstance :: proc(instance: ^ModelInstance) {
 	delete(instance.textureIdxs)
-	delete(instance.normalIdxs)
 	delete(instance.positionKeys)
 	delete(instance.rotationKeys)
 	delete(instance.scaleKeys)
@@ -2855,7 +2856,6 @@ loadSceneAssets :: proc(
 	scene: ^SceneData,
 	modelPaths: []string,
 	texturePaths: []string,
-	normalPaths: []string,
 ) -> Error {
 	scene^ = {
 		models   = make([dynamic]^Model),
@@ -2901,16 +2901,7 @@ loadSceneAssets :: proc(
 		return err
 	}
 
-	if err := loadImages(graphicsContext, &scene.normals, normalPaths[:]); err != nil {
-		graphicsContext.errorCallback(
-			.Error,
-			fmt.tprintf("Failed to load normals! Error: %v", err),
-		)
-		return err
-	}
-
 	scene.textureCount = u32(len(texturePaths))
-	scene.normalCount = u32(len(normalPaths))
 	scene.boneCount = 1
 	return nil
 }
@@ -3058,7 +3049,6 @@ cleanupScene :: proc(graphicsContext: ^GraphicsContext, scene: ^SceneData) {
 	}
 
 	cleanupImage(graphicsContext, &scene.textures)
-	cleanupImage(graphicsContext, &scene.normals)
 
 	for &model in scene.models {
 		cleanupModel(model)
@@ -3375,12 +3365,6 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> (err: I
 		imageLayout = .SHADER_READ_ONLY_OPTIMAL,
 	}
 
-	normalImageInfo: vk.DescriptorImageInfo = {
-		sampler     = samplers[scene.normals.sampler],
-		imageView   = scene.normals.view,
-		imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-	}
-
 	shadowImageInfo: vk.DescriptorImageInfo = {
 		sampler     = samplers[pipelines[PipelineIndex.LIGHT].colour.sampler],
 		imageView   = pipelines[PipelineIndex.LIGHT].colour.view,
@@ -3596,7 +3580,7 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> (err: I
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .COMBINED_IMAGE_SAMPLER,
-				pImageInfo = &normalImageInfo,
+				pImageInfo = &shadowImageInfo,
 				pBufferInfo = nil,
 				pTexelBufferView = nil,
 			},
@@ -3608,18 +3592,6 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> (err: I
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .COMBINED_IMAGE_SAMPLER,
-				pImageInfo = &shadowImageInfo,
-				pBufferInfo = nil,
-				pTexelBufferView = nil,
-			},
-			{
-				sType = .WRITE_DESCRIPTOR_SET,
-				pNext = nil,
-				dstSet = descriptorSets[DescriptorSetIndex.TEXTURES].sets[index],
-				dstBinding = 3,
-				dstArrayElement = 0,
-				descriptorCount = 1,
-				descriptorType = .COMBINED_IMAGE_SAMPLER,
 				pImageInfo = &sceneDepthInfo,
 				pBufferInfo = nil,
 				pTexelBufferView = nil,
@@ -3628,7 +3600,7 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> (err: I
 				sType = .WRITE_DESCRIPTOR_SET,
 				pNext = nil,
 				dstSet = descriptorSets[DescriptorSetIndex.TEXTURES].sets[index],
-				dstBinding = 4,
+				dstBinding = 3,
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .STORAGE_IMAGE,
@@ -3640,7 +3612,7 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> (err: I
 				sType = .WRITE_DESCRIPTOR_SET,
 				pNext = nil,
 				dstSet = descriptorSets[DescriptorSetIndex.TEXTURES].sets[index],
-				dstBinding = 5,
+				dstBinding = 4,
 				dstArrayElement = 0,
 				descriptorCount = 1,
 				descriptorType = .STORAGE_IMAGE,
@@ -4500,7 +4472,7 @@ createGraphicsPipelines :: proc(
 	shadowPushConstants: vk.PushConstantRange = {
 		stageFlags = {.VERTEX},
 		offset     = 0,
-		size       = 2 * size_of(u32),
+		size       = 3 * size_of(u32),
 	}
 
 	shadowPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -4870,7 +4842,7 @@ createComputePipelines :: proc(
 	preComputePushConstants: vk.PushConstantRange = {
 		stageFlags = {.COMPUTE},
 		offset     = 0,
-		size       = 4 * size_of(u32),
+		size       = 5 * size_of(u32),
 	}
 
 	preComputePipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -4934,7 +4906,7 @@ createComputePipelines :: proc(
 	postPushConstants: vk.PushConstantRange = {
 		stageFlags = {.COMPUTE},
 		offset     = 0,
-		size       = 6 * size_of(f32) + size_of(b32),
+		size       = 7 * size_of(f32),
 	}
 
 	postPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -5569,66 +5541,35 @@ recordPreComputeBuffer :: proc(
 		pipelines[PipelineIndex.PRECOMPUTE].pipeline,
 	)
 
-	// offset: u32 = 0
-	// for instanceIndex: u32 = 0; instanceIndex < u32(len(scene.instances)); instanceIndex += 1 {
-	// 	vk.CmdPushConstants(
-	// 		preComputeCommandBuffers[index],
-	// 		pipelines[PipelineIndex.PRECOMPUTE].layout,
-	// 		{.COMPUTE},
-	// 		0,
-	// 		1 * size_of(u32),
-	// 		&instanceIndex,
-	// 	)
-	// 	for &mesh in scene.models[scene.instances[instanceIndex].modelIdx].meshes {
-	// 		vk.CmdPushConstants(
-	// 			preComputeCommandBuffers[index],
-	// 			pipelines[PipelineIndex.PRECOMPUTE].layout,
-	// 			{.COMPUTE},
-	// 			1 * size_of(u32),
-	// 			3 * size_of(u32),
-	// 			raw_data([]u32{u32(len(mesh.vertices)), mesh.vertexOffset, offset}),
-	// 		)
-	// 		vk.CmdDispatch(
-	// 			preComputeCommandBuffers[index],
-	// 			u32(ceil(f32(len(mesh.vertices)) / 64.0)),
-	// 			1,
-	// 			1,
-	// 		)
-	// 		offset += u32(len(mesh.vertices))
-	// 	}
-	// }
-
 	offset: u32 = 0
 	instanceIndex := 0
 	for &model in scene.models {
-		for &inst in model.instances {
+		vk.CmdPushConstants(
+			preComputeCommandBuffers[index],
+			pipelines[PipelineIndex.PRECOMPUTE].layout,
+			{.COMPUTE},
+			0,
+			1 * size_of(u32),
+			&instanceIndex,
+		)
+		for &mesh in model.meshes {
 			vk.CmdPushConstants(
 				preComputeCommandBuffers[index],
 				pipelines[PipelineIndex.PRECOMPUTE].layout,
 				{.COMPUTE},
-				0,
 				1 * size_of(u32),
-				&instanceIndex,
+				4 * size_of(u32),
+				raw_data([]u32{u32(len(model.instances)), u32(len(mesh.vertices)), mesh.vertexOffset, offset}),
 			)
-			for &mesh in model.meshes {
-				vk.CmdPushConstants(
-					preComputeCommandBuffers[index],
-					pipelines[PipelineIndex.PRECOMPUTE].layout,
-					{.COMPUTE},
-					1 * size_of(u32),
-					3 * size_of(u32),
-					raw_data([]u32{u32(len(mesh.vertices)), mesh.vertexOffset, offset}),
-				)
-				vk.CmdDispatch(
-					preComputeCommandBuffers[index],
-					u32(ceil(f32(len(mesh.vertices)) / 64.0)),
-					1,
-					1,
-				)
-				offset += u32(len(mesh.vertices))
-			}
-			instanceIndex += 1
+			vk.CmdDispatch(
+				preComputeCommandBuffers[index],
+				u32(ceil(f32(len(mesh.vertices)) / 64.0)),
+				1,
+				1,
+			)
+			offset += u32(len(mesh.vertices) * len(model.instances))
 		}
+		instanceIndex += len(model.instances)
 	}
 
 	if res := vk.EndCommandBuffer(preComputeCommandBuffers[index]); res != .SUCCESS {
@@ -5808,7 +5749,7 @@ recordShadowMapBuffer :: proc(
 			shadowMapCommandBuffers[index],
 			pipelines[PipelineIndex.LIGHT].layout,
 			{.VERTEX},
-			size_of(u32),
+			0,
 			size_of(u32),
 			&layerIndex,
 		)
@@ -5816,54 +5757,30 @@ recordShadowMapBuffer :: proc(
 		instanceIndex := 0
 		offset: u32 = 0
 		for &model in scene.models {
-			for &inst in model.instances {
-				for &mesh in model.meshes {
-					vk.CmdPushConstants(
-						shadowMapCommandBuffers[index],
-						pipelines[PipelineIndex.LIGHT].layout,
-						{.VERTEX},
-						0,
-						size_of(u32),
-						raw_data([]u32{offset - mesh.vertexOffset}),
-					)
+			for &mesh in model.meshes {
+				vk.CmdPushConstants(
+					shadowMapCommandBuffers[index],
+					pipelines[PipelineIndex.LIGHT].layout,
+					{.VERTEX},
+					size_of(u32),
+					2 * size_of(u32),
+					raw_data([]u32{
+						offset - mesh.vertexOffset,
+						u32(len(mesh.vertices)),
+					}),
+				)
 
-					vk.CmdDrawIndexed(
-						shadowMapCommandBuffers[index],
-						u32(len(mesh.indices)),
-						1,
-						mesh.indiceOffset,
-						i32(mesh.vertexOffset),
-						u32(instanceIndex),
-					)
-
-					offset += u32(len(mesh.vertices))
-				}
-				instanceIndex += 1
+				vk.CmdDrawIndexed(
+					shadowMapCommandBuffers[index],
+					u32(len(mesh.indices)),
+					u32(len(model.instances)),
+					mesh.indiceOffset,
+					i32(mesh.vertexOffset),
+					0,
+				)
+				offset += u32(len(mesh.vertices) * len(model.instances))
 			}
 		}
-		// for &inst, instanceIndex in scene.instances {
-		// 	for &mesh in scene.models[inst.modelIdx].meshes {
-		// 		vk.CmdPushConstants(
-		// 			shadowMapCommandBuffers[index],
-		// 			pipelines[PipelineIndex.LIGHT].layout,
-		// 			{.VERTEX},
-		// 			0,
-		// 			size_of(u32),
-		// 			raw_data([]u32{offset - mesh.vertexOffset}),
-		// 		)
-
-		// 		vk.CmdDrawIndexed(
-		// 			shadowMapCommandBuffers[index],
-		// 			u32(len(mesh.indices)),
-		// 			1,
-		// 			mesh.indiceOffset,
-		// 			i32(mesh.vertexOffset),
-		// 			u32(instanceIndex),
-		// 		)
-
-		// 		offset += u32(len(mesh.vertices))
-		// 	}
-		// }
 	}
 
 	if res := vk.EndCommandBuffer(shadowMapCommandBuffers[index]); res != .SUCCESS {
@@ -5944,8 +5861,8 @@ recordSceneBuffers :: proc(
 	offset: u32 = 0
 	instanceIndex := 0
 	for &model in scene.models {
-		for &inst in model.instances {
-			for &mesh, meshIndex in model.meshes {
+		for &mesh, meshIndex in model.meshes {
+			for &inst in model.instances {
 				vk.CmdPushConstants(
 					sceneCommandBuffers[index],
 					pipelines[PipelineIndex.MAIN].layout,
@@ -5955,8 +5872,8 @@ recordSceneBuffers :: proc(
 					raw_data(
 						[]u32 {
 							offset - mesh.vertexOffset,
-							inst.textureIdxs[meshIndex],
-							inst.normalIdxs[meshIndex],
+							inst.textureIdxs[meshIndex][TextureIndex.ALBEDO],
+							inst.textureIdxs[meshIndex][TextureIndex.NORMAL_MAP],
 						},
 					),
 				)
@@ -5969,41 +5886,10 @@ recordSceneBuffers :: proc(
 					i32(mesh.vertexOffset),
 					u32(instanceIndex),
 				)
-
 				offset += u32(len(mesh.vertices))
 			}
-			instanceIndex += 1
 		}
 	}
-	// for &sceneInstance, instanceIndex in scene.instances {
-	// 	for &mesh, meshIndex in scene.models[sceneInstance.modelIdx].meshes {
-	// 		vk.CmdPushConstants(
-	// 			sceneCommandBuffers[index],
-	// 			pipelines[PipelineIndex.MAIN].layout,
-	// 			{.VERTEX, .FRAGMENT},
-	// 			size_of(f32),
-	// 			3 * size_of(u32),
-	// 			raw_data(
-	// 				[]u32 {
-	// 					offset - mesh.vertexOffset,
-	// 					sceneInstance.textureIdxs[meshIndex],
-	// 					sceneInstance.normalIdxs[meshIndex],
-	// 				},
-	// 			),
-	// 		)
-
-	// 		vk.CmdDrawIndexed(
-	// 			sceneCommandBuffers[index],
-	// 			u32(len(mesh.indices)),
-	// 			1,
-	// 			mesh.indiceOffset,
-	// 			i32(mesh.vertexOffset),
-	// 			u32(instanceIndex),
-	// 		)
-
-	// 		offset += u32(len(mesh.vertices))
-	// 	}
-	// }
 
 	if res := vk.EndCommandBuffer(sceneCommandBuffers[index]); res != .SUCCESS {
 		errorCallback(.Error, fmt.tprintf("Failed to record command buffer! vkResult: %v", res))

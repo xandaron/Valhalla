@@ -1,6 +1,6 @@
 package Demo
 
-import valhalla "../src"
+import valhalla "../valhalla"
 import "core:encoding/json"
 import "core:os"
 import "core:path/filepath"
@@ -88,19 +88,16 @@ createNewScene :: proc() {
 	scene.modelPaths[0] = strings.clone("./assets/Wizard.glb")
 	scene.modelPaths[1] = strings.clone("./assets/cube.fbx")
 
-	scene.texturePaths = make([dynamic]string, 2)
+	scene.texturePaths = make([dynamic]string, 3)
 	scene.texturePaths[0] = strings.clone("./assets/albedo.png")
 	scene.texturePaths[1] = strings.clone("./assets/white.jpg")
-
-	scene.normalPaths = make([dynamic]string, 1)
-	scene.normalPaths[0] = strings.clone("./assets/normal.jpg")
+	scene.texturePaths[2] = strings.clone("./assets/normal.jpg")
 
 	if valhalla.loadSceneAssets(
 		   &globals.graphicsContext,
 		   &scene.graphicsData,
 		   scene.modelPaths[:],
 		   scene.texturePaths[:],
-		   scene.normalPaths[:],
 	   ) !=
 	   nil {
 		panic("Failed to load scene assets")
@@ -138,8 +135,8 @@ createNewScene :: proc() {
 		&scene.objects[0].scale,
 	)
 
-	scene.objects[0].graphicsData.textureIdxs[0] = 0
-	scene.objects[0].graphicsData.normalIdxs[0] = 0
+	scene.objects[0].graphicsData.textureIdxs[0][valhalla.TextureIndex.ALBEDO] = 0
+	scene.objects[0].graphicsData.textureIdxs[0][valhalla.TextureIndex.NORMAL_MAP] = 2
 
 	scene.objects[1] = new(GameObject)
 	scene.objects[1]^ = {
@@ -161,8 +158,8 @@ createNewScene :: proc() {
 		&scene.objects[1].scale,
 	)
 
-	scene.objects[1].graphicsData.textureIdxs[0] = 1
-	scene.objects[1].graphicsData.normalIdxs[0] = 0
+	scene.objects[1].graphicsData.textureIdxs[0][valhalla.TextureIndex.ALBEDO] = 1
+	scene.objects[1].graphicsData.textureIdxs[0][valhalla.TextureIndex.NORMAL_MAP] = 2
 
 	scene.pointLights = make([dynamic]^PointLight, 1)
 	scene.pointLights[0] = new(PointLight)

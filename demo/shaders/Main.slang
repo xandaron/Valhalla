@@ -1,12 +1,13 @@
-import "../../src/shaders/Vertex.slang";
-import "../../src/shaders/Light.slang";
-import "../../src/shaders/Buffers.slang";
-import "../../src/shaders/Textures.slang";
+import "../../valhalla/shaders/Vertex.slang";
+import "../../valhalla/shaders/Light.slang";
+import "../../valhalla/shaders/Buffers.slang";
+import "../../valhalla/shaders/Textures.slang";
 
 struct PushConstants
 {
     float ambientLight;
     uint vertexOffset;
+    // uint vertexCount;
     uint albedoTextureIndex;
     uint normalTextureIndex;
 };
@@ -45,22 +46,23 @@ float3x3 inverse3x3(float3x3 m)
 }
 
 [shader("vertex")]
-VertOut vert(Vertex vertex, uint vertexID: SV_VertexID)
+VertOut vert(Vertex vertex, uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID)
 {
     VertOut output;
 
-    const float4x4 vertexTransform = transformBufferRO[vertexID + pushConstants.vertexOffset];
+    const uint idx = vertexID + pushConstants.vertexOffset;// + instanceID * pushConstants.vertexCount;
+    const float4x4 vertexTransform = transformBufferRO[idx];
     const float4 worldPosition = mul(vertexTransform, float4(vertex.position, 1.0));
     output.position = mul(uniformBuffer.viewProjection, worldPosition);
     output.worldPosition = worldPosition.xyz / worldPosition.w;
 
     // I need to figue this out. I think the tangent and bitangent are not being set correctly.
-    float3x3 t = (float3x3)vertexTransform;
-    float3x3 tt = transpose(inverse3x3((float3x3)vertexTransform));
+    const float3x3 transform = (float3x3)vertexTransform;
+    const float3x3 transposedInverse = transpose(inverse3x3(transform));
     output.TBN = transpose(float3x3(
-        float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.tangent)),
-        float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.bitangent)),
-        normalize(mul(tt, vertex.normal)),
+        float3(0.0, 0.0, 0.0),// normalize(mul(t, vertex.tangent)),
+        float3(0.0, 0.0, 0.0),// normalize(mul(t, vertex.bitangent)),
+        normalize(mul(transposedInverse, vertex.normal)),
     ));
     output.uv = vertex.uv;
 
@@ -97,10 +99,10 @@ FragOut frag(VertOut input)
 
     float3 cumulativeColour = { 0.0, 0.0, 0.0 };
 
-    const float3 albedo = pow(albedoArray.Sample(float3(input.uv, pushConstants.albedoTextureIndex)).xyz, 1.0 / 2.2);
+    const float3 albedo = pow(textures.Sample(float3(input.uv, pushConstants.albedoTextureIndex)).xyz, 1.0 / 2.2);
 
-    const float3 normalSample = 2.0 * normalArray.Sample(float3(input.uv, pushConstants.normalTextureIndex)).xyz - 1.0;
-    const float3 normal = normalize(mul(input.TBN, normalSample));
+    const float3 normalSample = textures.Sample(float3(input.uv, pushConstants.normalTextureIndex)).xyz;
+    const float3 normal = normalize(mul(input.TBN, 2.0 * normalSample - 1.0));
 
     for (uint index = 0; index < uniformBuffer.lightCount; index++)
     {

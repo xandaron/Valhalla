@@ -1,11 +1,12 @@
-import "../../src/shaders/Vertex.slang";
-import "../../src/shaders/Light.slang";
-import "../../src/shaders/Buffers.slang";
+import "../../valhalla/shaders/Vertex.slang";
+import "../../valhalla/shaders/Light.slang";
+import "../../valhalla/shaders/Buffers.slang";
 
 struct PushConstants
 {
-    uint vertexOffset;
     uint layerIndex;
+    uint vertexOffset;
+    uint vertexCount;
 };
 
 [[vk::push_constant]]
@@ -81,21 +82,22 @@ struct VertOut
 };
 
 [shader("vertex")]
-VertOut vert(Vertex input, uint vertexID: SV_VertexID)
+VertOut vert(Vertex input, uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID)
 {
     VertOut output;
 
-    Light light = lightBuffer[pushConstants.layerIndex / 6];
-    float4x4 vertexTransform = transformBufferRO[vertexID + pushConstants.vertexOffset];
-    float4 vertexPosition = mul(vertexTransform, float4(input.position, 1.0));
+    const Light light = lightBuffer[pushConstants.layerIndex / 6];
+    const uint idx = vertexID + pushConstants.vertexOffset + instanceID * pushConstants.vertexCount;
+    const float4x4 vertexTransform = transformBufferRO[idx];
+    const float4 vertexPosition = mul(vertexTransform, float4(input.position, 1.0));
 
-    uint face = pushConstants.layerIndex % 6;
-    float4x4 viewProj = mul(projection(light), view(light, face));
+    const uint face = pushConstants.layerIndex % 6;
+    const float4x4 viewProj = mul(projection(light), view(light, face));
 
     output.position = mul(viewProj, vertexPosition);
     output.layer = pushConstants.layerIndex;
 
-    float3 relativePosition = (vertexPosition.xyz / vertexPosition.w) - light.position.xyz;
+    const float3 relativePosition = (vertexPosition.xyz / vertexPosition.w) - light.position.xyz;
     output.depth = dot(relativePosition, relativePosition);
 
     return output;
