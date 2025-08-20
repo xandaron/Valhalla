@@ -21,7 +21,6 @@ Scene :: struct {
 	// Assets
 	modelPaths:   [dynamic]string,
 	texturePaths: [dynamic]string,
-	normalPaths:  [dynamic]string,
 
 	// Graphics Engine Data
 	graphicsData: valhalla.SceneData,
@@ -233,9 +232,4 @@ cleanupScene :: proc() {
 		delete(path)
 	}
 	delete(scene.texturePaths)
-
-	for &path in scene.normalPaths {
-		delete(path)
-	}
-	delete(scene.normalPaths)
 }

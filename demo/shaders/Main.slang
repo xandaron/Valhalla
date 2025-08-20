@@ -7,27 +7,14 @@ struct PushConstants
 {
     float ambientLight;
     uint vertexOffset;
-    // uint vertexCount;
-    uint albedoTextureIndex;
-    uint normalTextureIndex;
 };
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pushConstants;
 
-struct VertOut
-{
-    float4 position : SV_Position;
-    float3 worldPosition : POSITION;
-    float3x3 TBN;
-    float2 uv : TEXCOORD0;
-};
-
 float3x3 inverse3x3(float3x3 m)
 {
-    float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
-              - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
-              + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
 
     float invDet = 1.0 / det;
 
@@ -45,12 +32,21 @@ float3x3 inverse3x3(float3x3 m)
     return inv;
 }
 
+struct VertOut
+{
+    float4 position : SV_Position;
+    float3 worldPosition : POSITION;
+    float3x3 TBN;
+    float2 uv : TEXCOORD0;
+    uint instanceID;
+};
+
 [shader("vertex")]
 VertOut vert(Vertex vertex, uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID)
 {
     VertOut output;
 
-    const uint idx = vertexID + pushConstants.vertexOffset;// + instanceID * pushConstants.vertexCount;
+    const uint idx = vertexID + pushConstants.vertexOffset; // + instanceID * pushConstants.vertexCount;
     const float4x4 vertexTransform = transformBufferRO[idx];
     const float4 worldPosition = mul(vertexTransform, float4(vertex.position, 1.0));
     output.position = mul(uniformBuffer.viewProjection, worldPosition);
@@ -60,12 +56,12 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID, uint instanceID: SV_Inst
     const float3x3 transform = (float3x3)vertexTransform;
     const float3x3 transposedInverse = transpose(inverse3x3(transform));
     output.TBN = transpose(float3x3(
-        float3(0.0, 0.0, 0.0),// normalize(mul(t, vertex.tangent)),
-        float3(0.0, 0.0, 0.0),// normalize(mul(t, vertex.bitangent)),
-        normalize(mul(transposedInverse, vertex.normal)),
-    ));
+        float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.tangent)),
+        float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.bitangent)),
+        normalize(mul(transposedInverse, vertex.normal)), ));
     output.uv = vertex.uv;
 
+    output.instanceID = instanceID;
     return output;
 }
 
@@ -79,10 +75,7 @@ FragOut frag(VertOut input)
 {
     FragOut output;
 
-    #define SAMPLES 20
-    #define BIAS 0.005
-    #define DISK_RADIUS 0.01
-
+    static const int SAMPLES = 20;
     // Sample offset directions for shadow sampling
     static const float3 sampleOffsetDirections[SAMPLES] = {
         float3(1, 0, 0), float3(-1, 0, 0),
@@ -99,10 +92,11 @@ FragOut frag(VertOut input)
 
     float3 cumulativeColour = { 0.0, 0.0, 0.0 };
 
-    const float3 albedo = pow(textures.Sample(float3(input.uv, pushConstants.albedoTextureIndex)).xyz, 1.0 / 2.2);
-
-    const float3 normalSample = textures.Sample(float3(input.uv, pushConstants.normalTextureIndex)).xyz;
-    const float3 normal = normalize(mul(input.TBN, 2.0 * normalSample - 1.0));
+    // const uint textureIndex = 4;
+    // const uint textureIndex = input.instanceID == 0 ? 0 : 1;
+    const uint textureIndex = input.instanceID * TextureIndex.COUNT;
+    const float3 albedo = pow(textures.Sample(float3(input.uv, textureIndexBuffer[textureIndex + TextureIndex.ALBEDO])).xyz, 1.0 / 2.2);
+    const float3 normal = normalize(mul(input.TBN, 2.0 * textures.Sample(float3(input.uv, textureIndexBuffer[textureIndex + TextureIndex.NORMAL])).xyz - 1.0));
 
     for (uint index = 0; index < uniformBuffer.lightCount; index++)
     {
@@ -117,9 +111,11 @@ FragOut frag(VertOut input)
 
         for (int i = 0; i < SAMPLES; i++)
         {
+            static const float DISK_RADIUS = 0.01;
             const float3 offsetDir = DISK_RADIUS * sampleOffsetDirections[i] - relativePosition;
             const float sampleDepth = shadowMap.Sample(float4(offsetDir, float(index))).r;
 
+            static const float BIAS = 0.005;
             if (lightSquaredDistance < sampleDepth + BIAS)
             {
                 shadow += 1.0;

@@ -33,3 +33,15 @@ RWStructuredBuffer<float4x4> transformBufferRW;
 
 [[vk::binding(6, 0)]]
 StructuredBuffer<Light> lightBuffer;
+
+enum TextureIndex
+{
+    ALBEDO,
+    NORMAL,
+    // METALLIC,
+    // ROUGHNESS,
+    COUNT,
+};
+
+[[vk::binding(7, 0)]]
+StructuredBuffer<uint> textureIndexBuffer;

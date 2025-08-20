@@ -319,7 +319,7 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 								panic(fmt.tprintf("Failed to add normal map: %v", file))
 							}
 
-							append(&scene.normalPaths, strings.clone(file))
+							append(&scene.texturePaths, strings.clone(file))
 							scene.graphicsData.textureCount += 1
 
 							if valhalla.updateScene(graphicsContext) != nil {
@@ -495,6 +495,7 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 								   allocator = context.temp_allocator,
 							   ),
 						   ) {
+							valhalla.updateInstanceTexture(graphicsContext, object.graphicsData, u32(meshIndex), .ALBEDO, u32(i))
 							object.graphicsData.textureIdxs[meshIndex] = u32(i)
 							if valhalla.updateCommandBuffers(graphicsContext) != nil {
 								panic(fmt.tprintf("Failed to update command buffers!"))
@@ -507,11 +508,11 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 				if imgui.BeginCombo(
 					"Normal Map",
 					strings.clone_to_cstring(
-						scene.normalPaths[object.graphicsData.textureIdxs[meshIndex][1]],
+						scene.texturePaths[object.graphicsData.textureIdxs[meshIndex][1]],
 						allocator = context.temp_allocator,
 					),
 				) {
-					for &normal, i in scene.normalPaths {
+					for &normal, i in scene.texturePaths {
 						if u32(i) != object.graphicsData.textureIdxs[meshIndex][1] &&
 						   imgui.Selectable(
 							   strings.clone_to_cstring(
@@ -519,7 +520,7 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 								   allocator = context.temp_allocator,
 							   ),
 						   ) {
-							object.graphicsData.textureIdxs[meshIndex][1] = u32(i)
+							valhalla.updateInstanceTexture(graphicsContext, object.graphicsData, u32(meshIndex), .NORMAL_MAP, u32(i))
 							if valhalla.updateCommandBuffers(graphicsContext) != nil {
 								panic(fmt.tprintf("Failed to update command buffers!"))
 							}
