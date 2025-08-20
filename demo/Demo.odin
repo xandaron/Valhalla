@@ -90,6 +90,8 @@ main :: proc() {
 	free_all(context.temp_allocator)
 	globals.runtimeContext = context
 
+	os.set_current_directory(filepath.dir(os.args[0], context.temp_allocator))
+
 	valhallaInitInfo := valhalla.InitInfo {
 		appVersion = 0,
 		windowTitle = "Valhalla Demo",
@@ -476,7 +478,7 @@ loadModel: valhalla.ModelLoader : proc(
 	}
 
 	aiScene := ai.ImportFileExWithProperties(
-		strings.clone_to_cstring(filename),
+		strings.clone_to_cstring(filename, context.temp_allocator),
 		IMPORT_FLAGS,
 		nil,
 		propertyStore,

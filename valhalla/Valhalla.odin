@@ -286,6 +286,7 @@ TextureIndex :: enum {
 	ALBEDO,
 	NORMAL_MAP,
 	// MATERIAL,
+	// ROUGHNESS,
 }
 
 ModelInstance :: struct {
@@ -303,25 +304,26 @@ ModelInstance :: struct {
 }
 
 SceneData :: struct {
-	ambientLight:     f32,
-	clearColour:      Vec4,
-	verticesCount:    int,
-	models:           [dynamic]^Model,
-	lights:           [dynamic]^PointLight,
-	textures:         Image,
-	textureCount:     u32,
-	vertices:         [dynamic]Vertex,
-	indices:          [dynamic]u32,
-	instanceCount:    int,
-	boneCount:        int,
+	ambientLight:       f32,
+	clearColour:        Vec4,
+	verticesCount:      int,
+	models:             [dynamic]^Model,
+	lights:             [dynamic]^PointLight,
+	textures:           Image,
+	textureCount:       u32,
+	vertices:           [dynamic]Vertex,
+	indices:            [dynamic]u32,
+	instanceCount:      int,
+	boneCount:          int,
 
 	// Buffers TODO: All buffers should be one buffer using offsets
-	vertexBuffer:     Buffer,
-	indexBuffer:      Buffer,
-	instanceBuffers:  [MAX_FRAMES_IN_FLIGHT]Buffer,
-	boneBuffers:      [MAX_FRAMES_IN_FLIGHT]Buffer,
-	lightBuffers:     [MAX_FRAMES_IN_FLIGHT]Buffer,
-	transformBuffers: [MAX_FRAMES_IN_FLIGHT]Buffer,
+	vertexBuffer:       Buffer,
+	indexBuffer:        Buffer,
+	instanceBuffers:    [MAX_FRAMES_IN_FLIGHT]Buffer,
+	boneBuffers:        [MAX_FRAMES_IN_FLIGHT]Buffer,
+	lightBuffers:       [MAX_FRAMES_IN_FLIGHT]Buffer,
+	transformBuffers:   [MAX_FRAMES_IN_FLIGHT]Buffer,
+	textureIndexBuffer: Buffer,
 }
 
 GLFWCallbacks :: struct {
@@ -444,8 +446,8 @@ InitError :: enum {
 }
 
 @(require_results)
-initVkGraphics :: proc(initInfo: ^InitInfo) -> (GraphicsContext, Error) {
-	using graphicsContext: GraphicsContext
+initVkGraphics :: proc(initInfo: ^InitInfo) -> (graphicsContext: GraphicsContext, err: Error) {
+	using graphicsContext
 	if initInfo.errorCallback != nil {
 		errorCallback = initInfo.errorCallback
 	} else {
@@ -469,9 +471,7 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (GraphicsContext, Error) {
 
 	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
 
-	if err := createInstance(&graphicsContext, initInfo.appVersion); err != nil {
-		return graphicsContext, err
-	}
+	createInstance(&graphicsContext, initInfo.appVersion) or_return
 
 	if initInfo.vkDebugMessengerCreateInfo != {} {
 		if res := vk.CreateDebugUtilsMessengerEXT(
@@ -487,26 +487,11 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (GraphicsContext, Error) {
 		}
 	}
 
-	if err := initWindow(&graphicsContext, initInfo.windowTitle, initInfo.glfwCallbacks);
-	   err != nil {
-		return graphicsContext, err
-	}
-
-	if err := pickPhysicalDevice(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createLogicalDevice(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createSwapchain(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createCommandBuffers(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
+	initWindow(&graphicsContext, initInfo.windowTitle, initInfo.glfwCallbacks) or_return
+	pickPhysicalDevice(&graphicsContext) or_return
+	createLogicalDevice(&graphicsContext) or_return
+	createSwapchain(&graphicsContext) or_return
+	createCommandBuffers(&graphicsContext) or_return
 
 	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
 
@@ -544,29 +529,12 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (GraphicsContext, Error) {
 		return graphicsContext, .DepthFormatError
 	}
 
-	if err := createSyncObjects(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createSamplers(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createRenderPass(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createMainFrameBuffers(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createBuffersDescriptorSets(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
-
-	if err := createTexturesDescriptorSets(&graphicsContext); err != nil {
-		return graphicsContext, err
-	}
+	createSyncObjects(&graphicsContext) or_return
+	createSamplers(&graphicsContext) or_return
+	createRenderPass(&graphicsContext) or_return
+	createMainFrameBuffers(&graphicsContext) or_return
+	createBuffersDescriptorSets(&graphicsContext) or_return
+	createTexturesDescriptorSets(&graphicsContext) or_return
 
 	append(&shaderFiles, ..initInfo.shaders.shaderFiles)
 
@@ -592,14 +560,8 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (GraphicsContext, Error) {
 	pipelines[PipelineIndex.POSTPROCESS].indices = initInfo.shaders.postShaders
 
 	when UI_ENABLED {
-		if err := initImgui(&graphicsContext); err != nil {
-			return graphicsContext, err
-		}
-
-		if err := updateImgui(&graphicsContext); err != nil {
-			errorCallback(.Fatal, "Failed to update Imgui!")
-			return graphicsContext, err
-		}
+		initImgui(&graphicsContext) or_return
+		updateImgui(&graphicsContext) or_return
 	}
 
 	currentFrame = 0
@@ -2929,6 +2891,11 @@ updateScene :: proc(using graphicsContext: ^GraphicsContext) -> Error {
 	boneBufferSize := size_of(Mat4) * scene.boneCount
 	lightBufferSize := size_of(LightData) * len(scene.lights)
 	transformBufferSize := size_of(Mat4) * scene.verticesCount
+	textureIndexSize := 0
+	for &model in scene.models {
+		textureIndexSize += len(model.instances) * len(model.meshes)
+	}
+	textureIndexSize *= len(TextureIndex) * size_of(u32)
 
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		cleanupBuffer(graphicsContext, &scene.instanceBuffers[i])
@@ -3018,7 +2985,32 @@ updateScene :: proc(using graphicsContext: ^GraphicsContext) -> Error {
 			)
 			return err
 		}
+
 	}
+	cleanupBuffer(graphicsContext, &scene.textureIndexBuffer)
+	if err := createBuffer(
+		graphicsContext,
+		textureIndexSize,
+		{.STORAGE_BUFFER},
+		{.HOST_VISIBLE, .HOST_COHERENT},
+		&scene.textureIndexBuffer.buffer,
+		&scene.textureIndexBuffer.memory,
+	); err != nil {
+		graphicsContext.errorCallback(
+			.Error,
+			fmt.tprintf("Failed to create transform buffer! Error: %v", err),
+		)
+		return err
+	}
+	vk.MapMemory(
+		graphicsContext.device,
+		scene.textureIndexBuffer.memory,
+		0,
+		vk.DeviceSize(textureIndexSize),
+		{},
+		&scene.textureIndexBuffer.mapped,
+	)
+	updateTextureIndexBuffer(graphicsContext)
 
 	if err := updateDescriptorSets(graphicsContext); err != nil {
 		errorCallback(.Error, fmt.tprintf("Failed to update descriptor sets! Error: %v", err))
@@ -3047,6 +3039,7 @@ cleanupScene :: proc(graphicsContext: ^GraphicsContext, scene: ^SceneData) {
 		cleanupBuffer(graphicsContext, &scene.lightBuffers[index])
 		cleanupBuffer(graphicsContext, &scene.transformBuffers[index])
 	}
+	cleanupBuffer(graphicsContext, &scene.textureIndexBuffer)
 
 	cleanupImage(graphicsContext, &scene.textures)
 
@@ -3136,6 +3129,13 @@ createBuffersDescriptorSets :: proc(
 			stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE},
 			pImmutableSamplers = nil,
 		},
+		{
+			binding = 7,
+			descriptorType = .STORAGE_BUFFER,
+			descriptorCount = 1,
+			stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE},
+			pImmutableSamplers = nil,
+		},
 	}
 
 	layoutInfo: vk.DescriptorSetLayoutCreateInfo = {
@@ -3161,7 +3161,7 @@ createBuffersDescriptorSets :: proc(
 
 	poolSizes: []vk.DescriptorPoolSize = {
 		{type = .UNIFORM_BUFFER, descriptorCount = 1},
-		{type = .STORAGE_BUFFER, descriptorCount = 5},
+		{type = .STORAGE_BUFFER, descriptorCount = 6},
 	}
 
 	poolInfo: vk.DescriptorPoolCreateInfo = {
@@ -3232,25 +3232,18 @@ createTexturesDescriptorSets :: proc(
 			binding = 2,
 			descriptorType = .COMBINED_IMAGE_SAMPLER,
 			descriptorCount = 1,
-			stageFlags = {.FRAGMENT},
-			pImmutableSamplers = nil,
-		},
-		{
-			binding = 3,
-			descriptorType = .COMBINED_IMAGE_SAMPLER,
-			descriptorCount = 1,
 			stageFlags = {.COMPUTE},
 			pImmutableSamplers = nil,
 		},
 		{
-			binding = 4,
+			binding = 3,
 			descriptorType = .STORAGE_IMAGE,
 			descriptorCount = 1,
 			stageFlags = {.COMPUTE},
 			pImmutableSamplers = nil,
 		},
 		{
-			binding = 5,
+			binding = 4,
 			descriptorType = .STORAGE_IMAGE,
 			descriptorCount = 1,
 			stageFlags = {.COMPUTE},
@@ -3357,6 +3350,16 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> (err: I
 	transformBufferInfo: vk.DescriptorBufferInfo = {
 		offset = 0,
 		range  = vk.DeviceSize(size_of(Mat4) * scene.verticesCount),
+	}
+
+	textureBufferLen := 0
+	for &model in scene.models {
+		textureBufferLen += len(model.instances) * len(model.meshes)
+	}
+	textureIndexBufferInfo: vk.DescriptorBufferInfo = {
+		offset = 0,
+		range  = vk.DeviceSize(size_of(u32) * textureBufferLen * len(TextureIndex)),
+		buffer = scene.textureIndexBuffer.buffer,
 	}
 
 	textureImageInfo: vk.DescriptorImageInfo = {
@@ -3558,6 +3561,18 @@ updateDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> (err: I
 				descriptorType = .STORAGE_BUFFER,
 				pImageInfo = nil,
 				pBufferInfo = &lightsBufferInfo,
+				pTexelBufferView = nil,
+			},
+			{
+				sType = .WRITE_DESCRIPTOR_SET,
+				pNext = nil,
+				dstSet = descriptorSets[DescriptorSetIndex.BUFFERS].sets[index],
+				dstBinding = 7,
+				dstArrayElement = 0,
+				descriptorCount = 1,
+				descriptorType = .STORAGE_BUFFER,
+				pImageInfo = nil,
+				pBufferInfo = &textureIndexBufferInfo,
 				pTexelBufferView = nil,
 			},
 			{
@@ -4644,7 +4659,7 @@ createGraphicsPipelines :: proc(
 	mainPushConstant: vk.PushConstantRange = {
 		stageFlags = {.VERTEX, .FRAGMENT},
 		offset     = 0,
-		size       = size_of(f32) + 3 * size_of(u32),
+		size       = size_of(f32) + size_of(u32),
 	}
 
 	mainPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -5457,6 +5472,42 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 	)
 }
 
+updateInstanceTexture :: proc(graphicsContext: ^GraphicsContext, instance: ^ModelInstance, meshIdx: u32, texture: TextureIndex, index: u32) {
+	instance.textureIdxs[meshIdx][texture] = index
+	updateTextureIndexBuffer(graphicsContext)
+}
+
+@(private = "file")
+updateTextureIndexBuffer :: proc(using graphicsContext: ^GraphicsContext) {
+	textureIndicesLength := 0
+	for &model in scene.models {
+		textureIndicesLength += len(model.instances) * len(model.meshes)
+	}
+	textureIndicesLength *= len(TextureIndex)
+	textureIndices := make([]u32, textureIndicesLength, allocator = context.temp_allocator)
+
+	idx := 0
+	for &model in scene.models {
+		for &mesh, meshIdx in model.meshes {
+			for &inst in model.instances {
+				textureIndices[idx + int(TextureIndex.ALBEDO)] =
+					inst.textureIdxs[meshIdx][TextureIndex.ALBEDO]
+				textureIndices[idx + int(TextureIndex.NORMAL_MAP)] =
+					inst.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP]
+				// textureIndices[idx + int(TextureIndex.MATERIAL)] = inst.textureIdxs[meshIdx][TextureIndex.MATERIAL]
+				// textureIndices[idx + int(TextureIndex.ROUGHNESS)] = inst.textureIdxs[meshIdx][TextureIndex.ROUGHNESS]
+				idx += len(TextureIndex)
+			}
+		}
+	}
+
+	mem.copy(
+		scene.textureIndexBuffer.mapped,
+		raw_data(textureIndices),
+		textureIndicesLength * size_of(u32),
+	)
+}
+
 @(require_results)
 updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
@@ -5559,7 +5610,14 @@ recordPreComputeBuffer :: proc(
 				{.COMPUTE},
 				1 * size_of(u32),
 				4 * size_of(u32),
-				raw_data([]u32{u32(len(model.instances)), u32(len(mesh.vertices)), mesh.vertexOffset, offset}),
+				raw_data(
+					[]u32 {
+						u32(len(model.instances)),
+						u32(len(mesh.vertices)),
+						mesh.vertexOffset,
+						offset,
+					},
+				),
 			)
 			vk.CmdDispatch(
 				preComputeCommandBuffers[index],
@@ -5754,7 +5812,6 @@ recordShadowMapBuffer :: proc(
 			&layerIndex,
 		)
 
-		instanceIndex := 0
 		offset: u32 = 0
 		for &model in scene.models {
 			for &mesh in model.meshes {
@@ -5764,10 +5821,7 @@ recordShadowMapBuffer :: proc(
 					{.VERTEX},
 					size_of(u32),
 					2 * size_of(u32),
-					raw_data([]u32{
-						offset - mesh.vertexOffset,
-						u32(len(mesh.vertices)),
-					}),
+					raw_data([]u32{offset - mesh.vertexOffset, u32(len(mesh.vertices))}),
 				)
 
 				vk.CmdDrawIndexed(
@@ -5862,32 +5916,26 @@ recordSceneBuffers :: proc(
 	instanceIndex := 0
 	for &model in scene.models {
 		for &mesh, meshIndex in model.meshes {
-			for &inst in model.instances {
-				vk.CmdPushConstants(
-					sceneCommandBuffers[index],
-					pipelines[PipelineIndex.MAIN].layout,
-					{.VERTEX, .FRAGMENT},
-					size_of(f32),
-					3 * size_of(u32),
-					raw_data(
-						[]u32 {
-							offset - mesh.vertexOffset,
-							inst.textureIdxs[meshIndex][TextureIndex.ALBEDO],
-							inst.textureIdxs[meshIndex][TextureIndex.NORMAL_MAP],
-						},
-					),
-				)
+			vk.CmdPushConstants(
+				sceneCommandBuffers[index],
+				pipelines[PipelineIndex.MAIN].layout,
+				{.VERTEX, .FRAGMENT},
+				size_of(f32),
+				size_of(u32),
+				raw_data([]u32{offset - mesh.vertexOffset}),
+			)
 
-				vk.CmdDrawIndexed(
-					sceneCommandBuffers[index],
-					u32(len(mesh.indices)),
-					1,
-					mesh.indiceOffset,
-					i32(mesh.vertexOffset),
-					u32(instanceIndex),
-				)
-				offset += u32(len(mesh.vertices))
-			}
+			vk.CmdDrawIndexed(
+				sceneCommandBuffers[index],
+				u32(len(mesh.indices)),
+				u32(len(model.instances)),
+				mesh.indiceOffset,
+				i32(mesh.vertexOffset),
+				u32(instanceIndex),
+			)
+
+			offset += u32(len(mesh.vertices) * len(model.instances))
+			instanceIndex += len(model.instances)
 		}
 	}
 
