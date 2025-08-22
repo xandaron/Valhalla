@@ -1,6 +1,6 @@
 package Demo
 
-import valhalla "../valhalla"
+import valhalla "../src"
 import "core:encoding/json"
 import "core:os"
 import "core:path/filepath"

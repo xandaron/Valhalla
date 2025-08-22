@@ -1,7 +1,7 @@
 package Demo
 
 import "../imgui"
-import valhalla "../valhalla"
+import valhalla "../src"
 import "core:fmt"
 import "core:log"
 import "core:path/filepath"

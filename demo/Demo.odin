@@ -1,6 +1,6 @@
 package Demo
 
-import valhalla "../valhalla"
+import valhalla "../src"
 import ai "assimp"
 import "base:runtime"
 import "core:fmt"
