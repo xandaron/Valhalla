@@ -462,13 +462,11 @@ loadModel: valhalla.ModelLoader : proc(
 		.LimitBoneWeights,
 		// Maybe I should use this and add logging.
 		// .ValidateDataStructure,
-		// I don't think I need this right now. Maybe in the future.
-		// .ImproveCacheLocality,
+		.ImproveCacheLocality,
 		.SortByPType,
 		.FindDegenerates,
 		.FindInvalidData,
 		.GenUVCoords,
-		// Not sure how necessary this is.
 		.OptimizeMeshes,
 		.OptimizeGraph,
 		// Correct the UVs and winding order for Vulkan.
