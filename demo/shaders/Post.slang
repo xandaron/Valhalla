@@ -1,6 +1,6 @@
-import "../../valhalla/shaders/Light.slang";
-import "../../valhalla/shaders/Buffers.slang";
-import "../../valhalla/shaders/Textures.slang";
+import "../../src/shaders/Light.slang";
+import "../../src/shaders/Buffers.slang";
+import "../../src/shaders/Textures.slang";
 
 struct PushConstants {
     float contrast;
