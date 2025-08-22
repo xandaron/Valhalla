@@ -57,20 +57,6 @@ import valhalla "path/to/valhalla"
 
 See the `demo/` directory for a complete example of initialization, rendering loop, and resource management.
 
-## Demo
-
-![Rigged Zombie](demo/Zombie.gif)
-
-*A demo of a rigged 3D model and animation.*
-
-![Shader Demo](demo/shader_demo.gif)
-
-*A demo of reloading shaders at runtime.*
-
-![GUI Demo](demo/GUI_Demo.gif)
-
-*A demo of imgui in action.*
-
 ## Roadmap
 
 Planned features and improvements:
