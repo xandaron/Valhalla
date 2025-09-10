@@ -375,7 +375,7 @@ GraphicsContext :: struct {
 	swapchainImageViews:       []vk.ImageView,
 
 	// Pipelines
-	shaderFiles:               [dynamic]ShaderFile,
+	shaderFiles:               [dynamic]Shader,
 	descriptorSets:            [len(DescriptorSetIndex)]DescriptorSet,
 	pipelines:                 [len(PipelineIndex)]Pipeline,
 
@@ -411,12 +411,9 @@ GraphicsContext :: struct {
 	drawLights:                bool,
 }
 
-Shaders :: struct {
-	shaderFiles:  []ShaderFile,
-	preShaders:   ShaderIndices,
-	lightShaders: ShaderIndices,
-	mainShaders:  ShaderIndices,
-	postShaders:  ShaderIndices,
+Shader :: struct {
+	file:       string,
+	entryPoint: string,
 }
 
 InitInfo :: struct {
@@ -424,7 +421,13 @@ InitInfo :: struct {
 	windowTitle:                cstring,
 
 	// Shaders
-	shaders:                    Shaders,
+	shaderFiles:                []Shader,
+	preComp:                    u32,
+	lightVert:                  u32,
+	lightFrag:                  u32,
+	mainVert:                   u32,
+	mainFrag:                   u32,
+	postComp:                   u32,
 
 	// Callbacks
 	glfwCallbacks:              GLFWCallbacks,
@@ -536,28 +539,15 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (graphicsContext: GraphicsContext
 	createBuffersDescriptorSets(&graphicsContext) or_return
 	createTexturesDescriptorSets(&graphicsContext) or_return
 
-	append(&shaderFiles, ..initInfo.shaders.shaderFiles)
+	append(&shaderFiles, ..initInfo.shaderFiles)
 
-	if err := createGraphicsPipelines(
+	createGraphicsPipelines(
 		&graphicsContext,
-		initInfo.shaders.lightShaders,
-		initInfo.shaders.mainShaders,
-	); err != nil {
-		return graphicsContext, err
-	}
+		{initInfo.lightVert, initInfo.lightFrag},
+		{initInfo.mainVert, initInfo.mainFrag},
+	) or_return
 
-	if err := createComputePipelines(
-		&graphicsContext,
-		initInfo.shaders.preShaders,
-		initInfo.shaders.postShaders,
-	); err != nil {
-		return graphicsContext, err
-	}
-
-	pipelines[PipelineIndex.PRECOMPUTE].indices = initInfo.shaders.preShaders
-	pipelines[PipelineIndex.LIGHT].indices = initInfo.shaders.lightShaders
-	pipelines[PipelineIndex.MAIN].indices = initInfo.shaders.mainShaders
-	pipelines[PipelineIndex.POSTPROCESS].indices = initInfo.shaders.postShaders
+	createComputePipelines(&graphicsContext, initInfo.preComp, initInfo.postComp) or_return
 
 	when UI_ENABLED {
 		initImgui(&graphicsContext) or_return
@@ -4309,7 +4299,6 @@ PipelineError :: enum {
 createShaderModules :: proc(
 	using graphicsContext: ^GraphicsContext,
 	shaderIdx: u32,
-	entryPointIdx: u32,
 	stage: slang.Stage,
 ) -> (
 	vk.ShaderModule,
@@ -4319,12 +4308,11 @@ createShaderModules :: proc(
 		if blob == nil {
 			return ""
 		}
-		data := slang.getBlobData(blob)
 		size := slang.getBlobSize(blob)
 		if size == 0 {
 			return ""
 		}
-		return strings.clone_from_bytes(([^]u8)(data)[:size])
+		return strings.clone_from_bytes(([^]u8)(slang.getBlobData(blob))[:size])
 	}
 
 	diagnosticsBlob: ^slang.Blob
@@ -4358,7 +4346,7 @@ createShaderModules :: proc(
 
 	module := slang.loadModule(
 		session,
-		strings.clone_to_cstring(shaderFiles[shaderIdx].filepath, context.temp_allocator),
+		strings.clone_to_cstring(shaderFiles[shaderIdx].file, context.temp_allocator),
 		&diagnosticsBlob,
 	)
 	if module == nil {
@@ -4367,7 +4355,7 @@ createShaderModules :: proc(
 		return 0, .FailedToCreateShaderModule
 	}
 
-	components := make([]slang.Component_Type, 2, context.temp_allocator)
+	components: [2]slang.Component_Type
 	components[0] = {
 		kind   = .MODULE,
 		module = module,
@@ -4375,10 +4363,7 @@ createShaderModules :: proc(
 
 	entryPoint := slang.findEntryPoint(
 		module,
-		strings.clone_to_cstring(
-			shaderFiles[shaderIdx].entryPoints[entryPointIdx],
-			context.temp_allocator,
-		),
+		strings.clone_to_cstring(shaderFiles[shaderIdx].entryPoint, context.temp_allocator),
 		stage,
 		&diagnosticsBlob,
 	)
@@ -4394,7 +4379,7 @@ createShaderModules :: proc(
 
 	program := slang.createCompositeComponentType(
 		session,
-		raw_data(components),
+		&components[0],
 		i32(len(components)),
 		&diagnosticsBlob,
 	)
@@ -4435,10 +4420,7 @@ createShaderModules :: proc(
 
 	slang.releaseComponentType(linkedProgram)
 	slang.releaseComponentType(program)
-
-	for component in components[1:] {
-		slang.releaseEntryPoint(component.entryPoint)
-	}
+	slang.releaseEntryPoint(components[1].entryPoint)
 	slang.releaseModule(module)
 
 	slang.releaseSession(session)
@@ -4447,30 +4429,19 @@ createShaderModules :: proc(
 	return shaderModule, .None
 }
 
-ShaderFile :: struct {
-	filepath:    string,
-	entryPoints: []string,
-}
-
-ShaderIndices :: struct {
-	shaderIdx:      [2]u32,
-	entryPointIdxs: [2]u32,
-}
-
 @(private = "file")
 Pipeline :: struct {
-	using _:  RenderPass,
-	layout:   vk.PipelineLayout,
-	pipeline: vk.Pipeline,
-	indices:  ShaderIndices,
+	using _:    RenderPass,
+	layout:     vk.PipelineLayout,
+	pipeline:   vk.Pipeline,
+	shaderIdxs: [2]u32,
 }
 
 @(private = "file")
 @(require_results)
 createGraphicsPipelines :: proc(
 	using graphicsContext: ^GraphicsContext,
-	lightShaderIndices: ShaderIndices,
-	mainShaderIndices: ShaderIndices,
+	shadowShaderIndices, mainShaderIndices: [2]u32,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> PipelineError {
 	PIPELINE_COUNT: u32 : 2
@@ -4514,8 +4485,7 @@ createGraphicsPipelines :: proc(
 	for &info, index in shadowShaderStagesInfo {
 		module, err := createShaderModules(
 			graphicsContext,
-			lightShaderIndices.shaderIdx[index],
-			lightShaderIndices.entryPointIdxs[index],
+			shadowShaderIndices[index],
 			index == 0 ? .VERTEX : .FRAGMENT,
 		)
 		if err != nil {
@@ -4686,8 +4656,7 @@ createGraphicsPipelines :: proc(
 	for &info, index in mainShaderStagesInfo {
 		module, err := createShaderModules(
 			graphicsContext,
-			mainShaderIndices.shaderIdx[index],
-			mainShaderIndices.entryPointIdxs[index],
+			mainShaderIndices[index],
 			index == 0 ? .VERTEX : .FRAGMENT,
 		)
 		if err != nil {
@@ -4833,7 +4802,10 @@ createGraphicsPipelines :: proc(
 	}
 
 	pipelines[PipelineIndex.LIGHT].pipeline = vkPipelines[0]
+	pipelines[PipelineIndex.LIGHT].shaderIdxs = shadowShaderIndices
+
 	pipelines[PipelineIndex.MAIN].pipeline = vkPipelines[1]
+	pipelines[PipelineIndex.MAIN].shaderIdxs = mainShaderIndices
 
 	return .None
 }
@@ -4842,7 +4814,7 @@ createGraphicsPipelines :: proc(
 @(require_results)
 createComputePipelines :: proc(
 	using graphicsContext: ^GraphicsContext,
-	preShaderIndices, postShaderIndices: ShaderIndices,
+	preShaderIndices, postShaderIndices: u32,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> PipelineError {
 	PIPELINE_COUNT: u32 : 2
@@ -4883,12 +4855,7 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shaderModule, err := createShaderModules(
-		graphicsContext,
-		preShaderIndices.shaderIdx[0],
-		preShaderIndices.entryPointIdxs[0],
-		.COMPUTE,
-	)
+	shaderModule, err := createShaderModules(graphicsContext, preShaderIndices, .COMPUTE)
 	if err != nil {
 		errorCallback(
 			.Fatal,
@@ -4947,12 +4914,7 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shaderModule, err = createShaderModules(
-		graphicsContext,
-		postShaderIndices.shaderIdx[0],
-		postShaderIndices.entryPointIdxs[0],
-		.COMPUTE,
-	)
+	shaderModule, err = createShaderModules(graphicsContext, postShaderIndices, .COMPUTE)
 	if err != nil {
 		errorCallback(
 			.Fatal,
@@ -4996,7 +4958,10 @@ createComputePipelines :: proc(
 	}
 
 	pipelines[PipelineIndex.PRECOMPUTE].pipeline = vkPipelines[0]
+	pipelines[PipelineIndex.PRECOMPUTE].shaderIdxs[0] = preShaderIndices
+
 	pipelines[PipelineIndex.POSTPROCESS].pipeline = vkPipelines[1]
+	pipelines[PipelineIndex.POSTPROCESS].shaderIdxs[0] = postShaderIndices
 
 	return .None
 }
@@ -5019,37 +4984,29 @@ cleanupPipelines :: proc(using graphicsContext: ^GraphicsContext) {
 @(require_results)
 reloadShaders :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 	cleanupPipelines(graphicsContext)
-	err = createGraphicsPipelines(
+	createGraphicsPipelines(
 		graphicsContext,
-		graphicsContext.pipelines[PipelineIndex.LIGHT].indices,
-		graphicsContext.pipelines[PipelineIndex.MAIN].indices,
-	)
-	if err != nil {
-		return err
-	}
+		pipelines[PipelineIndex.LIGHT].shaderIdxs,
+		pipelines[PipelineIndex.MAIN].shaderIdxs,
+	) or_return
 
-	err = createComputePipelines(
+	createComputePipelines(
 		graphicsContext,
-		graphicsContext.pipelines[PipelineIndex.PRECOMPUTE].indices,
-		graphicsContext.pipelines[PipelineIndex.POSTPROCESS].indices,
-	)
-	if err != nil {
-		return err
-	}
+		pipelines[PipelineIndex.PRECOMPUTE].shaderIdxs[0],
+		pipelines[PipelineIndex.POSTPROCESS].shaderIdxs[0],
+	) or_return
 
-	err = updateDescriptorSets(graphicsContext)
-	if err != nil {
-		return err
-	}
+	updateDescriptorSets(graphicsContext) or_return
 	return nil
 }
 
-changeShader :: proc(
+changePipelineShader :: proc(
 	using graphicsContext: ^GraphicsContext,
 	pipeline: PipelineIndex,
-	indices: ShaderIndices,
+	indices: u32,
 ) {
-	pipelines[pipeline].indices = indices
+	// TODO: Implement shader reloading for individual pipelines
+	// pipelines[pipeline].indices = indices
 }
 
 @(private = "file")
@@ -5472,7 +5429,13 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 	)
 }
 
-updateInstanceTexture :: proc(graphicsContext: ^GraphicsContext, instance: ^ModelInstance, meshIdx: u32, texture: TextureIndex, index: u32) {
+updateInstanceTexture :: proc(
+	graphicsContext: ^GraphicsContext,
+	instance: ^ModelInstance,
+	meshIdx: u32,
+	texture: TextureIndex,
+	index: u32,
+) {
 	instance.textureIdxs[meshIdx][texture] = index
 	updateTextureIndexBuffer(graphicsContext)
 }
