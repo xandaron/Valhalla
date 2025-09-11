@@ -95,18 +95,20 @@ main :: proc() {
 	valhallaInitInfo := valhalla.InitInfo {
 		appVersion = 0,
 		windowTitle = "Valhalla Demo",
-		shaders = {
-			shaderFiles = {
-				{filepath = "./shaders/Pre.slang", entryPoints = {"comp"}},
-				{filepath = "./shaders/Shadow.slang", entryPoints = {"vert", "frag"}},
-				{filepath = "./shaders/Main.slang", entryPoints = {"vert", "frag"}},
-				{filepath = "./shaders/Post.slang", entryPoints = {"comp"}},
-			},
-			preShaders = {shaderIdx = {0, 0}, entryPointIdxs = {0, 0}},
-			lightShaders = {shaderIdx = {1, 1}, entryPointIdxs = {0, 1}},
-			mainShaders = {shaderIdx = {2, 2}, entryPointIdxs = {0, 1}},
-			postShaders = {shaderIdx = {3, 0}, entryPointIdxs = {0, 0}},
+		shaderFiles = {
+			{file = "./shaders/Pre.slang", entryPoint = "comp"},
+			{file = "./shaders/Shadow.slang", entryPoint = "vert"},
+			{file = "./shaders/Shadow.slang", entryPoint = "frag"},
+			{file = "./shaders/Main.slang", entryPoint = "vert"},
+			{file = "./shaders/Main.slang", entryPoint = "frag"},
+			{file = "./shaders/Post.slang", entryPoint = "comp"},
 		},
+		preComp = 0,
+		lightVert = 1,
+		lightFrag = 2,
+		mainVert = 3,
+		mainFrag = 4,
+		postComp = 5,
 
 		// Callbacks
 		glfwCallbacks = {
