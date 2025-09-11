@@ -20,7 +20,7 @@ import vk "vendor:vulkan"
 
 VERSION: u32 : (0 << 22) | (1 << 12) | (0)
 
-UI_ENABLED: bool : true
+IMGUI_ENABLED: bool : true
 
 HDR_ENABLED: bool : true
 
@@ -385,7 +385,7 @@ GraphicsContext :: struct {
 	preComputeFinished:        [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	rendersFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	computeFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-	uiFinished:                [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+	imguiFinished:                [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	imagesAvailable:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 
 	// Commands
@@ -396,7 +396,7 @@ GraphicsContext :: struct {
 	shadowMapCommandBuffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	sceneCommandBuffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	postComputeCommandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	uiCommandBuffers:          [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+	imguiCommandBuffers:          [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	samplers:                  []vk.Sampler,
 
 	// Buffer
@@ -549,7 +549,7 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (graphicsContext: GraphicsContext
 
 	createComputePipelines(&graphicsContext, initInfo.preComp, initInfo.postComp) or_return
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		initImgui(&graphicsContext) or_return
 		updateImgui(&graphicsContext) or_return
 	}
@@ -577,7 +577,7 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 		panic("Failed to wait for device idle!")
 	}
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		cleanupImgui(graphicsContext)
 		vk.DestroyDescriptorPool(device, imguiData.descriptorPool, nil)
 	}
@@ -586,13 +586,13 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &mainCommandBuffers[0])
 	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &shadowMapCommandBuffers[0])
 	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &sceneCommandBuffers[0])
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		vk.FreeCommandBuffers(device, computeCommandPool, 2, &postComputeCommandBuffers[0])
 		vk.FreeCommandBuffers(
 			device,
 			graphicsCommandPool,
 			u32(len(swapchainImages)),
-			&uiCommandBuffers[0],
+			&imguiCommandBuffers[0],
 		)
 	} else {
 		vk.FreeCommandBuffers(
@@ -611,7 +611,7 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 		vk.DestroySemaphore(device, preComputeFinished[index], nil)
 		vk.DestroySemaphore(device, rendersFinished[index], nil)
 		vk.DestroySemaphore(device, computeFinished[index], nil)
-		vk.DestroySemaphore(device, uiFinished[index], nil)
+		vk.DestroySemaphore(device, imguiFinished[index], nil)
 		vk.DestroySemaphore(device, imagesAvailable[index], nil)
 	}
 
@@ -1354,10 +1354,6 @@ recreateSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> (err: Erro
 		return .FailedToRecreateSwapchain
 	}
 
-	when UI_ENABLED {
-		cleanupImgui(graphicsContext)
-	}
-
 	cleanupSwapchain(graphicsContext)
 
 	err = createSwapchain(graphicsContext)
@@ -1372,7 +1368,7 @@ recreateSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> (err: Erro
 		return err
 	}
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		cleanupImgui(graphicsContext)
 		err = updateImgui(graphicsContext)
 		if err != nil {
@@ -1458,7 +1454,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> Command
 		return .FailedToAllocateCommandBuffer
 	}
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		allocInfo = {
 			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 			pNext              = nil,
@@ -1466,7 +1462,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> Command
 			level              = .PRIMARY,
 			commandBufferCount = u32(len(swapchainImages)),
 		}
-		if res := vk.AllocateCommandBuffers(device, &allocInfo, &uiCommandBuffers[0]);
+		if res := vk.AllocateCommandBuffers(device, &allocInfo, &imguiCommandBuffers[0]);
 		   res != .SUCCESS {
 			errorCallback(
 				.Fatal,
@@ -1500,7 +1496,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> Command
 		return .FailedToAllocateCommandBuffer
 	}
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		allocInfo = {
 			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 			pNext              = nil,
@@ -3826,7 +3822,7 @@ createSyncObjects :: proc(using graphicsContext: ^GraphicsContext) -> SyncError 
 			return .FailedToCreateSemaphore
 		}
 
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &uiFinished[index]);
+		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &imguiFinished[index]);
 		   res != .SUCCESS {
 			errorCallback(.Fatal, fmt.tprintf("Failed to create semaphore! vkResult: %d", res))
 			return .FailedToCreateSemaphore
@@ -5489,13 +5485,13 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> (err: E
 		err = recordSceneBuffers(graphicsContext, bufferIndex)
 		err = recordMainGraphicsBuffer(graphicsContext, bufferIndex)
 
-		when UI_ENABLED {
+		when IMGUI_ENABLED {
 			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
 			err = recordPostComputeBuffer(graphicsContext, bufferIndex)
 		}
 	}
 
-	when !UI_ENABLED {
+	when !IMGUI_ENABLED {
 		for bufferIndex in 0 ..< u32(len(swapchainImages)) {
 			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
 			err = recordPostComputeBuffer(graphicsContext, bufferIndex)
@@ -6045,7 +6041,7 @@ recordPostComputeBuffer :: proc(
 		1,
 	)
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		transitionImageLayout(
 			graphicsContext,
 			postComputeCommandBuffers[index],
@@ -6130,7 +6126,7 @@ recordPostComputeBuffer :: proc(
 
 @(private = "file")
 @(require_results)
-recordUIBuffer :: proc(
+recordImguiBuffer :: proc(
 	using graphicsContext: ^GraphicsContext,
 	index: u32,
 ) -> RecordCommandBufferError {
@@ -6140,7 +6136,7 @@ recordUIBuffer :: proc(
 		flags            = {},
 		pInheritanceInfo = nil,
 	}
-	if res := vk.BeginCommandBuffer(uiCommandBuffers[index], &beginInfo); res != .SUCCESS {
+	if res := vk.BeginCommandBuffer(imguiCommandBuffers[index], &beginInfo); res != .SUCCESS {
 		errorCallback(
 			.Error,
 			fmt.tprintf("Failed to being recording command buffer! vkResult: %v", res),
@@ -6157,16 +6153,15 @@ recordUIBuffer :: proc(
 		clearValueCount = 0,
 		pClearValues = nil,
 	}
-	vk.CmdBeginRenderPass(uiCommandBuffers[index], &renderPassInfo, .INLINE)
+	vk.CmdBeginRenderPass(imguiCommandBuffers[index], &renderPassInfo, .INLINE)
 
 	imgui.Render()
-	imguiVulkan.RenderDrawData(imgui.GetDrawData(), uiCommandBuffers[index])
-
-	vk.CmdEndRenderPass(uiCommandBuffers[index])
+	imguiVulkan.RenderDrawData(imgui.GetDrawData(), imguiCommandBuffers[index])
+	vk.CmdEndRenderPass(imguiCommandBuffers[index])
 
 	transitionImageLayout(
 		graphicsContext,
-		uiCommandBuffers[index],
+		imguiCommandBuffers[index],
 		swapchainImages[index],
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
@@ -6175,7 +6170,7 @@ recordUIBuffer :: proc(
 	)
 
 	vk.CmdBlitImage(
-		uiCommandBuffers[index],
+		imguiCommandBuffers[index],
 		imguiData.colour.vkImage,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchainImages[index],
@@ -6208,7 +6203,7 @@ recordUIBuffer :: proc(
 
 	transitionImageLayout(
 		graphicsContext,
-		uiCommandBuffers[index],
+		imguiCommandBuffers[index],
 		swapchainImages[index],
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
@@ -6216,7 +6211,7 @@ recordUIBuffer :: proc(
 		1,
 	)
 
-	if res := vk.EndCommandBuffer(uiCommandBuffers[index]); res != .SUCCESS {
+	if res := vk.EndCommandBuffer(imguiCommandBuffers[index]); res != .SUCCESS {
 		errorCallback(.Error, fmt.tprintf("Failed to record ui command buffer! vkResult: %v", res))
 		return .FailedToRecordCommandBuffer
 	}
@@ -6269,7 +6264,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 	updateLightBuffer(graphicsContext, delta)
 	updateInstanceBuffer(graphicsContext, delta)
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		if drawImgui != nil {
 			imguiVulkan.NewFrame()
 			imguiGLFW.NewFrame()
@@ -6280,8 +6275,8 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 			imgui.End()
 			imgui.EndFrame()
 
-			vk.ResetCommandBuffer(uiCommandBuffers[imageIndex], {})
-			err = recordUIBuffer(graphicsContext, imageIndex)
+			vk.ResetCommandBuffer(imguiCommandBuffers[imageIndex], {})
+			err = recordImguiBuffer(graphicsContext, imageIndex)
 			if err != nil {
 				errorCallback(
 					.Error,
@@ -6404,7 +6399,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 	}
 
 	fence: vk.Fence
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		submitInfo.pCommandBufferInfos = raw_data(
 			[]vk.CommandBufferSubmitInfo {
 				{
@@ -6471,7 +6466,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 		return DrawError.FailedToSubmitPostCommandBuffer
 	}
 
-	when UI_ENABLED {
+	when IMGUI_ENABLED {
 		submitInfo = {
 			sType                    = .SUBMIT_INFO_2,
 			pNext                    = nil,
@@ -6503,7 +6498,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 					{
 						sType = .COMMAND_BUFFER_SUBMIT_INFO,
 						pNext = nil,
-						commandBuffer = uiCommandBuffers[imageIndex],
+						commandBuffer = imguiCommandBuffers[imageIndex],
 						deviceMask = 0,
 					},
 				},
@@ -6514,7 +6509,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 					{
 						sType = .SEMAPHORE_SUBMIT_INFO,
 						pNext = nil,
-						semaphore = uiFinished[currentFrame],
+						semaphore = imguiFinished[currentFrame],
 						value = 0,
 						stageMask = {.ALL_GRAPHICS},
 						deviceIndex = 0,
@@ -6543,14 +6538,16 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 		pResults           = nil,
 	}
 
-	when UI_ENABLED {
-		presentInfo.pWaitSemaphores = &uiFinished[currentFrame]
+	when IMGUI_ENABLED {
+		presentInfo.pWaitSemaphores = &imguiFinished[currentFrame]
 	} else {
 		presentInfo.pWaitSemaphores = &computeFinished[currentFrame]
 	}
 
-	if res := vk.QueuePresentKHR(presentQueue, &presentInfo);
-	   res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
+	#partial switch res := vk.QueuePresentKHR(presentQueue, &presentInfo); res {
+	case .SUCCESS:
+		break
+	case .ERROR_OUT_OF_DATE_KHR, .SUBOPTIMAL_KHR:
 		err = recreateSwapchain(graphicsContext)
 		if err != nil {
 			errorCallback(.Error, fmt.tprintf("Failed to recreate swapchain! Error: %v", err))
@@ -6562,7 +6559,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 			errorCallback(.Error, fmt.tprintf("Failed to update command buffers! Error: %v", err))
 			return err
 		}
-	} else if res != .SUCCESS {
+	case:
 		errorCallback(.Error, fmt.tprintf("Failed to present swapchain image! vkResult: %v", res))
 		return .FailedToPresentSwapchainImage
 	}
