@@ -5236,7 +5236,7 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) -> Error {
 cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	imguiVulkan.Shutdown()
 	imguiGLFW.Shutdown()
-	imgui.DestroyContext(imguiData.uiContext)
+	imgui.DestroyContext(imguiData.imguiContext)
 
 	for &frameBuffer in imguiData.frameBuffers {
 		vk.DestroyFramebuffer(device, frameBuffer, nil)
@@ -5254,8 +5254,8 @@ updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32) {
 	for &light, i in scene.lights {
 		colour := light.colour * light.brightness
 		lightData[i] = {
-			position = light.position, // Vec4{light.position.x, light.position.y, light.position.z, 1.0},
-			colour   = light.colour * light.brightness, // Vec4{colour.r, colour.g, colour.b, 1.0},
+			position = light.position,
+			colour   = light.colour * light.brightness,
 			dropoff  = light.dropoff,
 			near     = 0.01,
 			far      = 1000.0,

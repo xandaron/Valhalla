@@ -639,6 +639,7 @@ mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods
 		}
 		return
 	}
+
 	if button == glfw.MOUSE_BUTTON_LEFT && action == glfw.PRESS {
 		object, _ := castRay(screenPositionToWorldRay(mousePos), &globals.scene)
 		if object != nil && object.selectable {
@@ -649,6 +650,7 @@ mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods
 		}
 		return
 	}
+
 	if button == glfw.MOUSE_BUTTON_RIGHT && action == glfw.RELEASE {
 		if globals.selectedObject == nil {
 			return
