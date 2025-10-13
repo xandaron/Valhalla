@@ -340,7 +340,10 @@ GraphicsContext :: struct {
 	brightness:                f32,
 	saturation:                f32,
 	exposure:                  f32,
-	tonemapper:                f32,
+	tonemapper:                enum u32 {
+		None = 0,
+		NarkowiczACES = 1,
+	},
 	gamma:                     f32,
 	errorCallback:             ErrorCallback,
 	modelLoader:               ModelLoader,
@@ -561,10 +564,10 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (graphicsContext: GraphicsContext
 	exposure = 0.0
 
 	when HDR_ENABLED {
-		tonemapper = 0.0
+		tonemapper = .None
 		gamma = 1.0
 	} else {
-		tonemapper = 1.0
+		tonemapper = .NarkowiczACES
 		gamma = 2.2
 	}
 
@@ -5997,7 +6000,7 @@ recordPostComputeBuffer :: proc(
 					brightness,
 					saturation,
 					pow(f32(2.0), exposure),
-					tonemapper,
+					transmute(f32)tonemapper,
 					gamma,
 				},
 			),
