@@ -2,12 +2,17 @@ import "../../src/shaders/Light.slang";
 import "../../src/shaders/Buffers.slang";
 import "../../src/shaders/Textures.slang";
 
+enum ToneMapper : uint32_t {
+    None = 0,
+    NarkowiczACES = 1,
+}
+
 struct PushConstants {
     float contrast;
     float brightness;
     float saturation;
     float exposure;
-    float tonemapper;
+    ToneMapper tonemapper;
     float gamma;
     bool drawLights;
 };
@@ -61,8 +66,12 @@ void comp(uint3 dispatchThreadID : SV_DispatchThreadID) {
     colour = lerp(float3(grayscale, grayscale, grayscale), colour, pushConstants.saturation);
     colour *= pushConstants.exposure;
 
-    if (pushConstants.tonemapper == 1.0) {
+    switch (pushConstants.tonemapper) {
+    case ToneMapper.None:
+        break;
+    case ToneMapper.NarkowiczACES:
         colour = narkowiczACES(colour);
+        break;
     }
 
     colour = pow(colour, float3(1.0 / pushConstants.gamma));
