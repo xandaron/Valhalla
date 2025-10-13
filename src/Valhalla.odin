@@ -268,7 +268,7 @@ PointLight :: struct {
 
 @(private = "file")
 ImguiData :: struct {
-	uiContext:      ^imgui.Context,
+	imguiContext:   ^imgui.Context,
 	frameBuffers:   []vk.Framebuffer,
 	descriptorPool: vk.DescriptorPool,
 	renderPass:     vk.RenderPass,
@@ -385,7 +385,7 @@ GraphicsContext :: struct {
 	preComputeFinished:        [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	rendersFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	computeFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-	imguiFinished:                [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+	imguiFinished:             [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	imagesAvailable:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 
 	// Commands
@@ -396,7 +396,7 @@ GraphicsContext :: struct {
 	shadowMapCommandBuffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	sceneCommandBuffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	postComputeCommandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	imguiCommandBuffers:          [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+	imguiCommandBuffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 	samplers:                  []vk.Sampler,
 
 	// Buffer
@@ -5057,7 +5057,7 @@ ImguiError :: enum {
 @(private = "file")
 @(require_results)
 updateImgui :: proc(using graphicsContext: ^GraphicsContext) -> Error {
-	imguiData.uiContext = imgui.CreateContext()
+	imguiData.imguiContext = imgui.CreateContext()
 	io := imgui.GetIO()
 	imgui.StyleColorsClassic()
 
