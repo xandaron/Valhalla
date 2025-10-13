@@ -6272,7 +6272,6 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 
 			drawImgui(graphicsContext)
 
-			imgui.End()
 			imgui.EndFrame()
 
 			vk.ResetCommandBuffer(imguiCommandBuffers[imageIndex], {})
