@@ -6278,8 +6278,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext, vp: Mat4, delta: f32)
 			imgui.EndFrame()
 
 			vk.ResetCommandBuffer(imguiCommandBuffers[imageIndex], {})
-			err = recordImguiBuffer(graphicsContext, imageIndex)
-			if err != nil {
+			if err := recordImguiBuffer(graphicsContext, imageIndex); err != nil {
 				errorCallback(
 					.Error,
 					fmt.tprintf("Failed to record ui command buffer! Error: %v", err),
