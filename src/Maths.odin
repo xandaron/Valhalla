@@ -71,17 +71,15 @@ perspective :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
 	return
 }
 
-// Is this really correct?
 orthographic :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
 	assert(aspect != 0, "Aspect ratio can't be zero!")
-	tanHalfFov := tan(0.5 * fov)
-	top := tanHalfFov * near
-	right := top * aspect
+	top := near * tan(0.5 * fov)
+    right := top * aspect
 
 	m[0, 0] = 1 / right
-	m[1, 1] = -1 / top
-	m[2, 2] = 1 / (far - near)
-	m[2, 3] = -near / (far - near)
-	m[3, 2] = 1
+    m[1, 1] = -1 / top
+    m[2, 2] = 1 / (far - near)
+    m[2, 3] = -near / (far - near)
+    m[3, 3] = 1
 	return
 }
