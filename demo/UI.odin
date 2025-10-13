@@ -619,6 +619,7 @@ drawUI :: proc(graphicsContext: ^valhalla.GraphicsContext) {
 	if imgui.Begin("Scene Editor", nil, {.MenuBar}) {
 		constructSceneEditor(graphicsContext)
 	}
+	imgui.End()
 }
 
 mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
