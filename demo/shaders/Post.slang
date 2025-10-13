@@ -2,12 +2,14 @@ import "../../src/shaders/Light.slang";
 import "../../src/shaders/Buffers.slang";
 import "../../src/shaders/Textures.slang";
 
-enum ToneMapper : uint32_t {
+enum ToneMapper : uint32_t
+{
     None = 0,
     NarkowiczACES = 1,
 }
 
-struct PushConstants {
+struct PushConstants
+{
     float contrast;
     float brightness;
     float saturation;
@@ -17,9 +19,11 @@ struct PushConstants {
     bool drawLights;
 };
 
-[[vk::push_constant]] ConstantBuffer<PushConstants> pushConstants;
+[[vk::push_constant]]
+ConstantBuffer<PushConstants> pushConstants;
 
-float3 narkowiczACES(float3 colour) {
+float3 narkowiczACES(float3 colour)
+{
     const float A = 2.51;
     const float B = 0.03;
     const float C = 2.43;
@@ -30,7 +34,8 @@ float3 narkowiczACES(float3 colour) {
 
 [shader("compute")]
 [numthreads(32, 32, 1)]
-void comp(uint3 dispatchThreadID : SV_DispatchThreadID) {
+void comp(uint3 dispatchThreadID: SV_DispatchThreadID)
+{
     uint x = dispatchThreadID.x;
     uint y = dispatchThreadID.y;
 
@@ -40,19 +45,23 @@ void comp(uint3 dispatchThreadID : SV_DispatchThreadID) {
 
     float3 colour = renderedImage[int2(x, y)].xyz;
 
-    if (pushConstants.drawLights) {
-        for (uint i = 0; i < uniformBuffer.lightCount; i++) {
+    if (pushConstants.drawLights)
+    {
+        for (uint i = 0; i < uniformBuffer.lightCount; i++)
+        {
             float4 lightPosition = mul(uniformBuffer.viewProjection, float4(lightBuffer[i].position, 1.0));
             lightPosition /= lightPosition.w;
 
             float depth = sceneDepth.Sample(screenPosition).r;
-            if (lightPosition.z <= depth && lightPosition.z >= 0) {
+            if (lightPosition.z <= depth && lightPosition.z >= 0)
+            {
                 lightPosition.xy += 1.0;
                 lightPosition.xy /= 2.0;
 
                 const float radius = 0.1;
                 float2 position = screenPosition - lightPosition.xy;
-                if (dot(position, position) <= (radius * radius) * (1 - lightPosition.z)) {
+                if (dot(position, position) <= (radius * radius) * (1 - lightPosition.z))
+                {
                     colour = (0.5 * 0.5) / colour;
                 }
             }
@@ -66,7 +75,8 @@ void comp(uint3 dispatchThreadID : SV_DispatchThreadID) {
     colour = lerp(float3(grayscale, grayscale, grayscale), colour, pushConstants.saturation);
     colour *= pushConstants.exposure;
 
-    switch (pushConstants.tonemapper) {
+    switch (pushConstants.tonemapper)
+    {
     case ToneMapper.None:
         break;
     case ToneMapper.NarkowiczACES:
