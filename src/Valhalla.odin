@@ -4628,7 +4628,7 @@ createGraphicsPipelines :: proc(
 	mainPushConstant: vk.PushConstantRange = {
 		stageFlags = {.VERTEX, .FRAGMENT},
 		offset     = 0,
-		size       = size_of(f32) + size_of(u32),
+		size       = size_of(f32) + 3 * size_of(u32),
 	}
 
 	mainPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -5471,10 +5471,10 @@ updateTextureIndexBuffer :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 @(require_results)
-updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
+updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> RecordCommandBufferError {
 	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
 		errorCallback(.Error, fmt.tprintf("Failed to wait for device idle! vkResult: %v", res))
-		panic("Idk why this would ever fail so tell me when it does.")
+		panic("Idk why this would ever fail.")
 	}
 
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -5483,28 +5483,24 @@ updateCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> (err: E
 		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
 
-		err = recordPreComputeBuffer(graphicsContext, bufferIndex)
-		err = recordShadowMapBuffer(graphicsContext, bufferIndex)
-		err = recordSceneBuffers(graphicsContext, bufferIndex)
-		err = recordMainGraphicsBuffer(graphicsContext, bufferIndex)
+		recordPreComputeBuffer(graphicsContext, bufferIndex) or_return
+		recordShadowMapBuffer(graphicsContext, bufferIndex) or_return
+		recordSceneBuffers(graphicsContext, bufferIndex) or_return
+		recordMainGraphicsBuffer(graphicsContext, bufferIndex) or_return
 
 		when IMGUI_ENABLED {
 			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-			err = recordPostComputeBuffer(graphicsContext, bufferIndex)
+			recordPostComputeBuffer(graphicsContext, bufferIndex) or_return
 		}
 	}
 
 	when !IMGUI_ENABLED {
 		for bufferIndex in 0 ..< u32(len(swapchainImages)) {
 			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-			err = recordPostComputeBuffer(graphicsContext, bufferIndex)
+			recordPostComputeBuffer(graphicsContext, bufferIndex) or_return
 		}
 	}
 
-	if err != nil {
-		errorCallback(.Error, "Failed to record command buffers!")
-		return err
-	}
 	return nil
 }
 
@@ -5875,16 +5871,16 @@ recordSceneBuffers :: proc(
 	vk.CmdBindIndexBuffer(sceneCommandBuffers[index], scene.indexBuffer.buffer, 0, .UINT32)
 
 	offset: u32 = 0
-	instanceIndex := 0
+	instanceOffset: u32 = 0
 	for &model in scene.models {
-		for &mesh, meshIndex in model.meshes {
+		for &mesh in model.meshes {
 			vk.CmdPushConstants(
 				sceneCommandBuffers[index],
 				pipelines[PipelineIndex.MAIN].layout,
 				{.VERTEX, .FRAGMENT},
 				size_of(f32),
-				size_of(u32),
-				raw_data([]u32{offset - mesh.vertexOffset}),
+				3 * size_of(u32),
+				raw_data([]u32{offset - mesh.vertexOffset, u32(len(mesh.vertices)), instanceOffset}),
 			)
 
 			vk.CmdDrawIndexed(
@@ -5893,11 +5889,10 @@ recordSceneBuffers :: proc(
 				u32(len(model.instances)),
 				mesh.indiceOffset,
 				i32(mesh.vertexOffset),
-				u32(instanceIndex),
+				0,
 			)
-
 			offset += u32(len(mesh.vertices) * len(model.instances))
-			instanceIndex += len(model.instances)
+			instanceOffset += u32(len(model.instances))
 		}
 	}
 

@@ -40,6 +40,7 @@ enum TextureIndex
     NORMAL,
     // METALLIC,
     // ROUGHNESS,
+
     COUNT,
 };
 
