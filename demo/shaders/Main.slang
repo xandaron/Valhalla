@@ -7,6 +7,8 @@ struct PushConstants
 {
     float ambientLight;
     uint vertexOffset;
+    uint vertexCount;
+    uint instanceOffset;
 };
 
 [[vk::push_constant]]
@@ -46,7 +48,7 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID, uint instanceID: SV_Inst
 {
     VertOut output;
 
-    const uint idx = vertexID + pushConstants.vertexOffset; // + instanceID * pushConstants.vertexCount;
+    const uint idx = vertexID + pushConstants.vertexOffset + instanceID * pushConstants.vertexCount;
     const float4x4 vertexTransform = transformBufferRO[idx];
     const float4 worldPosition = mul(vertexTransform, float4(vertex.position, 1.0));
     output.position = mul(uniformBuffer.viewProjection, worldPosition);
@@ -92,9 +94,7 @@ FragOut frag(VertOut input)
 
     float3 cumulativeColour = { 0.0, 0.0, 0.0 };
 
-    // const uint textureIndex = 4;
-    // const uint textureIndex = input.instanceID == 0 ? 0 : 1;
-    const uint textureIndex = input.instanceID * TextureIndex.COUNT;
+    const uint textureIndex = (pushConstants.instanceOffset + input.instanceID) * TextureIndex.COUNT;
     const float3 albedo = pow(textures.Sample(float3(input.uv, textureIndexBuffer[textureIndex + TextureIndex.ALBEDO])).xyz, 1.0 / 2.2);
     const float3 normal = normalize(mul(input.TBN, 2.0 * textures.Sample(float3(input.uv, textureIndexBuffer[textureIndex + TextureIndex.NORMAL])).xyz - 1.0));
 
