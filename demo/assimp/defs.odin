@@ -90,21 +90,23 @@ else {
 
 Real :: f32
 
-// Int :: c.int
+Int :: i32
 
-// Uint :: c.uint
+Uint :: u32
 
 ASSIMP_AI_REAL_TEXT_PRECISION :: 9
 
+/* This is PI. Hi PI. */
 MATH_PI :: (3.141592653589793238462643383279)
 MATH_TWO_PI :: (MATH_PI*2.0)
 MATH_HALF_PI :: (MATH_PI*0.5)
 
+/* And this is to avoid endless casts to float */
 MATH_PI_F :: (3.1415926538)
 MATH_TWO_PI_F :: (MATH_PI_F*2.0)
 MATH_HALF_PI_F :: (MATH_PI_F*0.5)
 
-// ai_epsilon :: ((ai_real)1e-6)
+// ai_epsilon :: ((Real)1e-6)
 
 // NO_EXCEPT :: noexcept
 

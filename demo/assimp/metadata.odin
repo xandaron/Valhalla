@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -67,7 +65,7 @@ else {
 * Enum used to distinguish data types
 */
 // -------------------------------------------------------------------------------
-Metadata_Type :: enum c.int {
+Metadata_Type :: enum i32 {
 	BOOL,
 	INT32,
 	UINT64,
@@ -102,7 +100,7 @@ Metadata_Entry :: struct {
 // -------------------------------------------------------------------------------
 Metadata :: struct {
 	/** Length of the mKeys and mValues arrays, respectively */
-	mNumProperties: c.uint,
+	mNumProperties: u32,
 
 	/** Arrays of keys, may not be NULL. Entries in this array may not be NULL as well. */
 	mKeys: [^]String,

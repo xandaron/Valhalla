@@ -44,9 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -63,16 +61,22 @@ else {
 
 // VERSION_H_INC :: 
 
-ASSIMP_CFLAGS_SHARED :: 0x1
+//! Assimp was compiled as a shared object (Windows: DLL)
+ASSIMP_CFLAGS_SHARED  :: 0x1
 
+//! Assimp was compiled against STLport
 ASSIMP_CFLAGS_STLPORT :: 0x2
 
-ASSIMP_CFLAGS_DEBUG :: 0x4
+//! Assimp was compiled as a debug build
+ASSIMP_CFLAGS_DEBUG   :: 0x4
 
-ASSIMP_CFLAGS_NOBOOST :: 0x8
+//! Assimp was compiled with ASSIMP_BUILD_BOOST_WORKAROUND defined
+ASSIMP_CFLAGS_NOBOOST           :: 0x8
 
-ASSIMP_CFLAGS_SINGLETHREADED :: 0x10
+//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
+ASSIMP_CFLAGS_SINGLETHREADED    :: 0x10
 
+//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
 ASSIMP_CFLAGS_DOUBLE_SUPPORT :: 0x20
 
 @(default_calling_convention="c", link_prefix="ai")
@@ -89,28 +93,28 @@ foreign lib {
 	*  @return Patch version of the Assimp runtime the application was
 	*    linked/built against
 	*/
-	GetVersionPatch :: proc() -> c.uint ---
+	GetVersionPatch :: proc() -> u32 ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Returns the current minor version number of Assimp.
 	*  @return Minor version of the Assimp runtime the application was
 	*    linked/built against
 	*/
-	GetVersionMinor :: proc() -> c.uint ---
+	GetVersionMinor :: proc() -> u32 ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Returns the current major version number of Assimp.
 	*  @return Major version of the Assimp runtime the application was
 	*    linked/built against
 	*/
-	GetVersionMajor :: proc() -> c.uint ---
+	GetVersionMajor :: proc() -> u32 ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Returns the repository revision of the Assimp runtime.
 	*  @return SVN Repository revision number of the Assimp runtime the
 	*          application was linked/built against.
 	*/
-	GetVersionRevision :: proc() -> c.uint ---
+	GetVersionRevision :: proc() -> u32 ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Returns the branch-name of the Assimp runtime.
@@ -122,5 +126,5 @@ foreign lib {
 	/** @brief Returns assimp's compile flags
 	*  @return Any bitwise combination of the ASSIMP_CFLAGS_xxx constants.
 	*/
-	GetCompileFlags :: proc() -> c.uint ---
+	GetCompileFlags :: proc() -> u32 ---
 }

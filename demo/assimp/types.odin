@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -121,14 +119,14 @@ String :: struct {
 	length: Uint32,
 
 	/** String buffer. Size limit is AI_MAXLEN */
-	data: [1024]c.char,
+	data: [1024]i8,
 }
 
 // ----------------------------------------------------------------------------------
 /** Standard return type for some library functions.
 * Rarely used, and if, mostly in the C API.
 */
-Return :: enum c.int {
+Return :: enum i32 {
 	/** Indicates that a function was successful */
 	aiReturn_SUCCESS = 0,
 
@@ -146,6 +144,7 @@ Return :: enum c.int {
 	_AI_ENFORCE_ENUM_SIZE = 2147483647,
 }
 
+// just for backwards compatibility, don't use these constants anymore
 // SUCCESS :: aiReturn_SUCCESS
 // FAILURE :: aiReturn_FAILURE
 // OUTOFMEMORY :: aiReturn_OUTOFMEMORY
@@ -154,7 +153,7 @@ Return :: enum c.int {
 /** Seek origins (for the virtual file system API).
 *  Much cooler than using SEEK_SET, SEEK_CUR or SEEK_END.
 */
-Origin :: enum c.int {
+Origin :: enum i32 {
 	/** Beginning of the file */
 	aiOrigin_SET = 0,
 
@@ -175,7 +174,7 @@ Origin :: enum c.int {
 *  Logging to these streams can be enabled with a single call to
 *   #LogStream::createDefaultStream.
 */
-Default_Log_Stream_Flag :: enum c.int {
+Default_Log_Stream_Flag :: enum i32 {
 	/** Stream the log to a file */
 	FILE,
 
@@ -191,10 +190,11 @@ Default_Log_Stream_Flag :: enum c.int {
 	DEBUGGER,
 }
 
-Default_Log_Stream_Flags :: distinct bit_set[Default_Log_Stream_Flag; c.int]
+Default_Log_Stream_Flags :: distinct bit_set[Default_Log_Stream_Flag; i32]
 
 AI_DLS_ENFORCE_ENUM_SIZE :: Default_Log_Stream_Flags { .FILE, .STDOUT, .STDERR, .DEBUGGER }
 
+// just for backwards compatibility, don't use these constants anymore
 // DLS_FILE :: aiDefaultLogStream_FILE
 // DLS_STDOUT :: aiDefaultLogStream_STDOUT
 // DLS_STDERR :: aiDefaultLogStream_STDERR
@@ -207,28 +207,28 @@ AI_DLS_ENFORCE_ENUM_SIZE :: Default_Log_Stream_Flags { .FILE, .STDOUT, .STDERR, 
 */
 Memory_Info :: struct {
 	/** Storage allocated for texture data */
-	textures: c.uint,
+	textures: u32,
 
 	/** Storage allocated for material data  */
-	materials: c.uint,
+	materials: u32,
 
 	/** Storage allocated for mesh data */
-	meshes: c.uint,
+	meshes: u32,
 
 	/** Storage allocated for node data */
-	nodes: c.uint,
+	nodes: u32,
 
 	/** Storage allocated for animation data */
-	animations: c.uint,
+	animations: u32,
 
 	/** Storage allocated for camera data */
-	cameras: c.uint,
+	cameras: u32,
 
 	/** Storage allocated for light data */
-	lights: c.uint,
+	lights: u32,
 
 	/** Total storage allocated for the full import. */
-	total: c.uint,
+	total: u32,
 }
 
 /**

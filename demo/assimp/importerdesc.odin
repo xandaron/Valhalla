@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -64,7 +62,7 @@ else {
 
 /** Mixed set of flags for #aiImporterDesc, indicating some features
 *  common to many importers*/
-Importer_Flag :: enum c.int {
+Importer_Flag :: enum i32 {
 	/** Indicates that there is a textual encoding of the
 	*  file format; and that it is supported.*/
 	SupportTextFlavour,
@@ -90,7 +88,7 @@ Importer_Flag :: enum c.int {
 	Experimental,
 }
 
-Importer_Flags :: distinct bit_set[Importer_Flag; c.int]
+Importer_Flags :: distinct bit_set[Importer_Flag; i32]
 
 /** Meta information about a particular importer. Importers need to fill
 *  this structure, but they can freely decide how talkative they are.
@@ -120,8 +118,8 @@ Importer_Desc :: struct {
 	/** Minimum format version that can be loaded im major.minor format,
 	both are set to 0 if there is either no version scheme
 	or if the loader doesn't care. */
-	mMinMajor: c.uint,
-	mMinMinor: c.uint,
+	mMinMajor: u32,
+	mMinMinor: u32,
 
 	/** Maximum format version that can be loaded im major.minor format,
 	both are set to 0 if there is either no version scheme
@@ -129,8 +127,8 @@ Importer_Desc :: struct {
 	forward-compatible to potential future format versions should
 	indicate  zero, otherwise they should specify the current
 	maximum version.*/
-	mMaxMajor: c.uint,
-	mMaxMinor: c.uint,
+	mMaxMajor: u32,
+	mMaxMinor: u32,
 
 	/** List of file extensions this importer can handle.
 	List entries are separated by space characters.

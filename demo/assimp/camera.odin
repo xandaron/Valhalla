@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
