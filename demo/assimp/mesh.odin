@@ -44,9 +44,7 @@ returned by ASSIMP: aiMesh, aiFace and aiBone data structures.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -101,10 +99,10 @@ MAX_NUMBER_OF_TEXTURECOORDS :: 0x8
 Face :: struct {
 	//! Number of indices defining this face.
 	//! The maximum value for this member is #AI_MAX_FACE_INDICES.
-	mNumIndices: c.uint,
+	mNumIndices: u32,
 
 	//! Pointer to the indices array. Size of the array is given in numIndices.
-	mIndices: [^]c.uint,
+	mIndices: [^]u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +110,7 @@ Face :: struct {
 */
 Vertex_Weight :: struct {
 	//! Index of the vertex which is influenced by the bone.
-	mVertexId: c.uint,
+	mVertexId: u32,
 
 	//! The strength of the influence in the range (0...1).
 	//! The influence from all bones at one vertex amounts to 1.
@@ -137,7 +135,7 @@ Bone :: struct {
 	* The number of vertices affected by this bone.
 	* The maximum value for this member is #AI_MAX_BONE_WEIGHTS.
 	*/
-	mNumWeights: c.uint,
+	mNumWeights: u32,
 
 	/**
 	* The bone armature node - used for skeleton conversion
@@ -179,7 +177,7 @@ Bone :: struct {
 *  @see aiProcess_Triangulate Automatic triangulation
 *  @see AI_CONFIG_PP_SBP_REMOVE Removal of specific primitive types.
 */
-Primitive_Type_Flag :: enum c.int {
+Primitive_Type_Flag :: enum i32 {
 	/**
 	* @brief A point primitive.
 	*
@@ -232,7 +230,7 @@ Primitive_Type_Flag :: enum c.int {
 	NGONEncodingFlag,
 }
 
-Primitive_Type_Flags :: distinct bit_set[Primitive_Type_Flag; c.int]
+Primitive_Type_Flags :: distinct bit_set[Primitive_Type_Flag; i32]
 
 // ---------------------------------------------------------------------------
 /** @brief An AnimMesh is an attachment to an #aiMesh stores per-vertex
@@ -280,7 +278,7 @@ Anim_Mesh :: struct {
 	* of the member arrays accessible even if the aiMesh is not known, e.g.
 	* from language bindings.
 	*/
-	mNumVertices: c.uint,
+	mNumVertices: u32,
 
 	/**
 	* Weight of the AnimMesh.
@@ -291,7 +289,7 @@ Anim_Mesh :: struct {
 // ---------------------------------------------------------------------------
 /** @brief Enumerates the methods of mesh morphing supported by Assimp.
 */
-Morphing_Method :: enum c.int {
+Morphing_Method :: enum i32 {
 	/** Morphing method to be determined */
 	UNKNOWN,
 
@@ -338,14 +336,14 @@ Mesh :: struct {
 	* This is also the size of all of the per-vertex data arrays.
 	* The maximum value for this member is #AI_MAX_VERTICES.
 	*/
-	mNumVertices: c.uint,
+	mNumVertices: u32,
 
 	/**
 	* The number of primitives (triangles, polygons, lines) in this  mesh.
 	* This is also the size of the mFaces array.
 	* The maximum value for this member is #AI_MAX_FACES.
 	*/
-	mNumFaces: c.uint,
+	mNumFaces: u32,
 
 	/**
 	* @brief Vertex positions.
@@ -433,7 +431,7 @@ Mesh :: struct {
 	* If the value is 1 for a given channel, p.y is set to 0.0f, too.
 	* @note 4D coordinates are not supported
 	*/
-	mNumUVComponents: [8]c.uint,
+	mNumUVComponents: [8]u32,
 
 	/**
 	* @brief The faces the mesh is constructed from.
@@ -448,7 +446,7 @@ Mesh :: struct {
 	/**
 	* The number of bones this mesh contains. Can be 0, in which case the mBones array is nullptr.
 	*/
-	mNumBones: c.uint,
+	mNumBones: u32,
 
 	/**
 	* @brief The bones of this mesh.
@@ -465,7 +463,7 @@ Mesh :: struct {
 	* multiple materials, the import splits up the mesh. Use this value
 	* as index into the scene's material list.
 	*/
-	mMaterialIndex: c.uint,
+	mMaterialIndex: u32,
 
 	/**
 	*  Name of the mesh. Meshes can be named, but this is not a
@@ -487,7 +485,7 @@ Mesh :: struct {
 	* - Collada
 	* - gltf
 	*/
-	mNumAnimMeshes: c.uint,
+	mNumAnimMeshes: u32,
 
 	/**
 	* Attachment meshes for this mesh, for vertex-based animation.
@@ -533,7 +531,7 @@ Mesh :: struct {
 */
 Skeleton_Bone :: struct {
 	/// The parent bone index, is -1 one if this bone represents the root bone.
-	mParent: c.int,
+	mParent: i32,
 
 	/// @brief The bone armature node - used for skeleton conversion
 	/// you must enable aiProcess_PopulateArmatureData to populate this
@@ -544,7 +542,7 @@ Skeleton_Bone :: struct {
 	mNode: ^Node,
 
 	/// @brief The number of weights
-	mNumnWeights: c.uint,
+	mNumnWeights: u32,
 
 	/// The mesh index, which will get influenced by the weight.
 	mMeshId: ^Mesh,
@@ -592,7 +590,7 @@ Skeleton :: struct {
 	/**
 	*  @brief  The number of bones in the skeleton.
 	*/
-	mNumBones: c.uint,
+	mNumBones: u32,
 
 	/**
 	*  @brief The bone instance in the skeleton.

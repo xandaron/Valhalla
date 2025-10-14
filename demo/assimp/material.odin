@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -62,6 +60,7 @@ else {
 
 // MATERIAL_H_INC :: 
 
+// Name for default materials (2nd is used if meshes have UV coords)
 DEFAULT_MATERIAL_NAME :: "DefaultMaterial"
 
 // ---------------------------------------------------------------------------
@@ -83,7 +82,7 @@ DEFAULT_MATERIAL_NAME :: "DefaultMaterial"
 *  @endcode
 *  where 'diffContrib' is the intensity of the incoming light for that pixel.
 */
-Texture_Op :: enum c.int {
+Texture_Op :: enum i32 {
 	/** T = T1 * T2 */
 	Multiply,
 
@@ -108,7 +107,7 @@ Texture_Op :: enum c.int {
 *
 *  Commonly referred to as 'wrapping mode'.
 */
-Texture_Map_Mode :: enum c.int {
+Texture_Map_Mode :: enum i32 {
 	/** A texture coordinate u|v is translated to u%1|v%1
 	*/
 	Wrap = 0,
@@ -138,7 +137,7 @@ Texture_Map_Mode :: enum c.int {
 *  how the mapping should look like (e.g spherical) is given.
 *  See the #AI_MATKEY_MAPPING property for more details.
 */
-Texture_Mapping :: enum c.int {
+Texture_Mapping :: enum i32 {
 	/** The mapping coordinates are taken from an UV channel.
 	*
 	*  #AI_MATKEY_UVWSRC property specifies from which UV channel
@@ -178,7 +177,7 @@ Texture_Mapping :: enum c.int {
 *  and the artists working on models have to conform to this specification,
 *  regardless which 3D tool they're using.
 */
-Texture_Type :: enum c.int {
+Texture_Type :: enum i32 {
 	/** Dummy value.
 	*
 	*  No texture, but the value to be used as 'texture semantic'
@@ -396,7 +395,7 @@ Texture_Type :: enum c.int {
 *  3D modeler which wrote a particular model as closely as possible.
 *
 */
-Shading_Mode :: enum c.int {
+Shading_Mode :: enum i32 {
 	/** Flat shading. Shading is done on per-face base,
 	*  diffuse only. Also known as 'faceted shading'.
 	*/
@@ -476,7 +475,7 @@ Shading_Mode :: enum c.int {
 *
 *  This corresponds to the #AI_MATKEY_TEXFLAGS property.
 */
-Texture_Flag :: enum c.int {
+Texture_Flag :: enum i32 {
 	/** The texture's color values have to be inverted (component-wise 1-n)
 	*/
 	Invert,
@@ -500,7 +499,7 @@ Texture_Flag :: enum c.int {
 	IgnoreAlpha,
 }
 
-Texture_Flags :: distinct bit_set[Texture_Flag; c.int]
+Texture_Flags :: distinct bit_set[Texture_Flag; i32]
 
 // ---------------------------------------------------------------------------
 /**
@@ -519,7 +518,7 @@ Texture_Flags :: distinct bit_set[Texture_Flag; c.int]
 *  calculation.<br>
 *  This corresponds to the #AI_MATKEY_BLEND_FUNC property.
 */
-Blend_Mode :: enum c.int {
+Blend_Mode :: enum i32 {
 	/**
 	*  Formula:
 	*  @code
@@ -576,7 +575,7 @@ Uvtransform :: struct {
 /**
 *  @brief A very primitive RTTI system for the contents of material properties.
 */
-Property_Type_Info :: enum c.int {
+Property_Type_Info :: enum i32 {
 	/** Array of single-precision (32 Bit) floats
 	*
 	*  It is possible to use aiGetMaterialInteger[Array]() (or the C++-API
@@ -643,17 +642,17 @@ Material_Property :: struct {
 	* For non-texture properties, this member is always 0
 	* (or, better-said, #aiTextureType_NONE).
 	*/
-	mSemantic: c.uint,
+	mSemantic: u32,
 
 	/** Textures: Specifies the index of the texture.
 	*  For non-texture properties, this member is always 0.
 	*/
-	mIndex: c.uint,
+	mIndex: u32,
 
 	/** Size of the buffer mData is pointing to, in bytes.
 	*  This value may not be 0.
 	*/
-	mDataLength: c.uint,
+	mDataLength: u32,
 
 	/** Type information for the property.
 	*
@@ -675,99 +674,143 @@ Material :: struct {
 	mProperties: [^]^Material_Property,
 
 	/** Number of properties in the data base */
-	mNumProperties: c.uint,
+	mNumProperties: u32,
 
 	/** Storage allocated */
-	mNumAllocated: c.uint,
+	mNumAllocated: u32,
 }
 
-// MATKEY_NAME :: "?mat.name",0,0
-// MATKEY_TWOSIDED :: "$mat.twosided",0,0
-// MATKEY_SHADING_MODEL :: "$mat.shadingm",0,0
-// MATKEY_ENABLE_WIREFRAME :: "$mat.wireframe",0,0
-// MATKEY_BLEND_FUNC :: "$mat.blend",0,0
-// MATKEY_OPACITY :: "$mat.opacity",0,0
-// MATKEY_TRANSPARENCYFACTOR :: "$mat.transparencyfactor",0,0
-// MATKEY_BUMPSCALING :: "$mat.bumpscaling",0,0
-// MATKEY_SHININESS :: "$mat.shininess",0,0
-// MATKEY_REFLECTIVITY :: "$mat.reflectivity",0,0
-// MATKEY_SHININESS_STRENGTH :: "$mat.shinpercent",0,0
-// MATKEY_REFRACTI :: "$mat.refracti",0,0
-// MATKEY_COLOR_DIFFUSE :: "$clr.diffuse",0,0
-// MATKEY_COLOR_AMBIENT :: "$clr.ambient",0,0
-// MATKEY_COLOR_SPECULAR :: "$clr.specular",0,0
-// MATKEY_COLOR_EMISSIVE :: "$clr.emissive",0,0
-// MATKEY_COLOR_TRANSPARENT :: "$clr.transparent",0,0
-// MATKEY_COLOR_REFLECTIVE :: "$clr.reflective",0,0
-// MATKEY_GLOBAL_BACKGROUND_IMAGE :: "?bg.global",0,0
-// MATKEY_GLOBAL_SHADERLANG :: "?sh.lang",0,0
-// MATKEY_SHADER_VERTEX :: "?sh.vs",0,0
-// MATKEY_SHADER_FRAGMENT :: "?sh.fs",0,0
-// MATKEY_SHADER_GEO :: "?sh.gs",0,0
-// MATKEY_SHADER_TESSELATION :: "?sh.ts",0,0
-// MATKEY_SHADER_PRIMITIVE :: "?sh.ps",0,0
-// MATKEY_SHADER_COMPUTE :: "?sh.cs",0,0
+// ---------------------------------------------------------------------------
+// MATKEY_NAME :: "?mat.name", 0, 0
+// MATKEY_TWOSIDED :: "$mat.twosided", 0, 0
+// MATKEY_SHADING_MODEL :: "$mat.shadingm", 0, 0
+// MATKEY_ENABLE_WIREFRAME :: "$mat.wireframe", 0, 0
+// MATKEY_BLEND_FUNC :: "$mat.blend", 0, 0
+// MATKEY_OPACITY :: "$mat.opacity", 0, 0
+// MATKEY_TRANSPARENCYFACTOR :: "$mat.transparencyfactor", 0, 0
+// MATKEY_BUMPSCALING :: "$mat.bumpscaling", 0, 0
+// MATKEY_SHININESS :: "$mat.shininess", 0, 0
+// MATKEY_REFLECTIVITY :: "$mat.reflectivity", 0, 0
+// MATKEY_SHININESS_STRENGTH :: "$mat.shinpercent", 0, 0
+// MATKEY_REFRACTI :: "$mat.refracti", 0, 0
+// MATKEY_COLOR_DIFFUSE :: "$clr.diffuse", 0, 0
+// MATKEY_COLOR_AMBIENT :: "$clr.ambient", 0, 0
+// MATKEY_COLOR_SPECULAR :: "$clr.specular", 0, 0
+// MATKEY_COLOR_EMISSIVE :: "$clr.emissive", 0, 0
+// MATKEY_COLOR_TRANSPARENT :: "$clr.transparent", 0, 0
+// MATKEY_COLOR_REFLECTIVE :: "$clr.reflective", 0, 0
+// MATKEY_GLOBAL_BACKGROUND_IMAGE :: "?bg.global", 0, 0
+// MATKEY_GLOBAL_SHADERLANG :: "?sh.lang", 0, 0
+// MATKEY_SHADER_VERTEX :: "?sh.vs", 0, 0
+// MATKEY_SHADER_FRAGMENT :: "?sh.fs", 0, 0
+// MATKEY_SHADER_GEO :: "?sh.gs", 0, 0
+// MATKEY_SHADER_TESSELATION :: "?sh.ts", 0, 0
+// MATKEY_SHADER_PRIMITIVE :: "?sh.ps", 0, 0
+// MATKEY_SHADER_COMPUTE :: "?sh.cs", 0, 0
 
-// MATKEY_USE_COLOR_MAP :: "$mat.useColorMap",0,0
+// ---------------------------------------------------------------------------
+// PBR material support
+// --------------------
+// Properties defining PBR rendering techniques
+// MATKEY_USE_COLOR_MAP :: "$mat.useColorMap", 0, 0
 
-// MATKEY_BASE_COLOR :: "$clr.base",0,0
-// MATKEY_BASE_COLOR_TEXTURE :: aiTextureType_BASE_COLOR,0
-// MATKEY_USE_METALLIC_MAP :: "$mat.useMetallicMap",0,0
+// Metallic/Roughness Workflow
+// ---------------------------
+// Base RGBA color factor. Will be multiplied by final base color texture values if extant
+// Note: Importers may choose to copy this into AI_MATKEY_COLOR_DIFFUSE for compatibility
+// with renderers and formats that do not support Metallic/Roughness PBR
+// MATKEY_BASE_COLOR :: "$clr.base", 0, 0
+// MATKEY_BASE_COLOR_TEXTURE :: aiTextureType_BASE_COLOR, 0
+// MATKEY_USE_METALLIC_MAP :: "$mat.useMetallicMap", 0, 0
 
-// MATKEY_METALLIC_FACTOR :: "$mat.metallicFactor",0,0
-// MATKEY_METALLIC_TEXTURE :: aiTextureType_METALNESS,0
-// MATKEY_USE_ROUGHNESS_MAP :: "$mat.useRoughnessMap",0,0
+// Metallic factor. 0.0 = Full Dielectric, 1.0 = Full Metal
+// MATKEY_METALLIC_FACTOR :: "$mat.metallicFactor", 0, 0
+// MATKEY_METALLIC_TEXTURE :: aiTextureType_METALNESS, 0
+// MATKEY_USE_ROUGHNESS_MAP :: "$mat.useRoughnessMap", 0, 0
 
-// MATKEY_ROUGHNESS_FACTOR :: "$mat.roughnessFactor",0,0
-// MATKEY_ROUGHNESS_TEXTURE :: aiTextureType_DIFFUSE_ROUGHNESS,0
+// Roughness factor. 0.0 = Perfectly Smooth, 1.0 = Completely Rough
+// MATKEY_ROUGHNESS_FACTOR :: "$mat.roughnessFactor", 0, 0
+// MATKEY_ROUGHNESS_TEXTURE :: aiTextureType_DIFFUSE_ROUGHNESS, 0
 
-// MATKEY_ANISOTROPY_FACTOR :: "$mat.anisotropyFactor",0,0
+// Anisotropy factor. 0.0 = isotropic, 1.0 = anisotropy along tangent direction,
+// -1.0 = anisotropy along bitangent direction
+// MATKEY_ANISOTROPY_FACTOR :: "$mat.anisotropyFactor", 0, 0
 
-// MATKEY_SPECULAR_FACTOR :: "$mat.specularFactor",0,0
+// Specular/Glossiness Workflow
+// ---------------------------
+// Diffuse/Albedo Color. Note: Pure Metals have a diffuse of {0,0,0}
+// AI_MATKEY_COLOR_DIFFUSE
+// Specular Color.
+// Note: Metallic/Roughness may also have a Specular Color
+// AI_MATKEY_COLOR_SPECULAR
+// MATKEY_SPECULAR_FACTOR :: "$mat.specularFactor", 0, 0
 
-// MATKEY_GLOSSINESS_FACTOR :: "$mat.glossinessFactor",0,0
+// Glossiness factor. 0.0 = Completely Rough, 1.0 = Perfectly Smooth
+// MATKEY_GLOSSINESS_FACTOR :: "$mat.glossinessFactor", 0, 0
 
-// MATKEY_SHEEN_COLOR_FACTOR :: "$clr.sheen.factor",0,0
+// Sheen
+// -----
+// Sheen base RGB color. Default {0,0,0}
+// MATKEY_SHEEN_COLOR_FACTOR :: "$clr.sheen.factor", 0, 0
 
-// MATKEY_SHEEN_ROUGHNESS_FACTOR :: "$mat.sheen.roughnessFactor",0,0
-// MATKEY_SHEEN_COLOR_TEXTURE :: aiTextureType_SHEEN,0
-// MATKEY_SHEEN_ROUGHNESS_TEXTURE :: aiTextureType_SHEEN,1
+// Sheen Roughness Factor.
+// MATKEY_SHEEN_ROUGHNESS_FACTOR :: "$mat.sheen.roughnessFactor", 0, 0
+// MATKEY_SHEEN_COLOR_TEXTURE :: aiTextureType_SHEEN, 0
+// MATKEY_SHEEN_ROUGHNESS_TEXTURE :: aiTextureType_SHEEN, 1
 
-// MATKEY_CLEARCOAT_FACTOR :: "$mat.clearcoat.factor",0,0
-// MATKEY_CLEARCOAT_ROUGHNESS_FACTOR :: "$mat.clearcoat.roughnessFactor",0,0
-// MATKEY_CLEARCOAT_TEXTURE :: aiTextureType_CLEARCOAT,0
-// MATKEY_CLEARCOAT_ROUGHNESS_TEXTURE :: aiTextureType_CLEARCOAT,1
-// MATKEY_CLEARCOAT_NORMAL_TEXTURE :: aiTextureType_CLEARCOAT,2
+// Clearcoat
+// ---------
+// Clearcoat layer intensity. 0.0 = none (disabled)
+// MATKEY_CLEARCOAT_FACTOR           :: "$mat.clearcoat.factor", 0, 0
+// MATKEY_CLEARCOAT_ROUGHNESS_FACTOR :: "$mat.clearcoat.roughnessFactor", 0, 0
+// MATKEY_CLEARCOAT_TEXTURE :: aiTextureType_CLEARCOAT, 0
+// MATKEY_CLEARCOAT_ROUGHNESS_TEXTURE :: aiTextureType_CLEARCOAT, 1
+// MATKEY_CLEARCOAT_NORMAL_TEXTURE :: aiTextureType_CLEARCOAT, 2
 
-// MATKEY_TRANSMISSION_FACTOR :: "$mat.transmission.factor",0,0
+// Base percentage of light transmitted through the surface. 0.0 = Opaque, 1.0 = Fully transparent
+// MATKEY_TRANSMISSION_FACTOR :: "$mat.transmission.factor", 0, 0
 
-// MATKEY_TRANSMISSION_TEXTURE :: aiTextureType_TRANSMISSION,0
+// Texture defining percentage of light transmitted through the surface.
+// Multiplied by AI_MATKEY_TRANSMISSION_FACTOR
+// MATKEY_TRANSMISSION_TEXTURE :: aiTextureType_TRANSMISSION, 0
 
-// MATKEY_VOLUME_THICKNESS_FACTOR :: "$mat.volume.thicknessFactor",0,0
+// The thickness of the volume beneath the surface. If the value is 0 the material is thin-walled. Otherwise the material is a volume boundary.
+// MATKEY_VOLUME_THICKNESS_FACTOR :: "$mat.volume.thicknessFactor", 0, 0
 
-// MATKEY_VOLUME_THICKNESS_TEXTURE :: aiTextureType_TRANSMISSION,1
+// Texture that defines the thickness.
+// Multiplied by AI_MATKEY_THICKNESS_FACTOR
+// MATKEY_VOLUME_THICKNESS_TEXTURE :: aiTextureType_TRANSMISSION, 1
 
-// MATKEY_VOLUME_ATTENUATION_DISTANCE :: "$mat.volume.attenuationDistance",0,0
+// Density of the medium given as the average distance that light travels in the medium before interacting with a particle.
+// MATKEY_VOLUME_ATTENUATION_DISTANCE :: "$mat.volume.attenuationDistance", 0, 0
 
-// MATKEY_VOLUME_ATTENUATION_COLOR :: "$mat.volume.attenuationColor",0,0
+// The color that white light turns into due to absorption when reaching the attenuation distance.
+// MATKEY_VOLUME_ATTENUATION_COLOR :: "$mat.volume.attenuationColor", 0, 0
 
-// MATKEY_USE_EMISSIVE_MAP :: "$mat.useEmissiveMap",0,0
-// MATKEY_EMISSIVE_INTENSITY :: "$mat.emissiveIntensity",0,0
-// MATKEY_USE_AO_MAP :: "$mat.useAOMap",0,0
+// Emissive
+// --------
+// MATKEY_USE_EMISSIVE_MAP   :: "$mat.useEmissiveMap", 0, 0
+// MATKEY_EMISSIVE_INTENSITY :: "$mat.emissiveIntensity", 0, 0
+// MATKEY_USE_AO_MAP         :: "$mat.useAOMap", 0, 0
 
-// MATKEY_ANISOTROPY_ROTATION :: "$mat.anisotropyRotation",0,0
-// MATKEY_ANISOTROPY_TEXTURE :: aiTextureType_ANISOTROPY,0
+// Anisotropy
+// ----------
+// MATKEY_ANISOTROPY_ROTATION :: "$mat.anisotropyRotation", 0, 0
+// MATKEY_ANISOTROPY_TEXTURE :: aiTextureType_ANISOTROPY, 0
 
-AI_MATKEY_TEXTURE_BASE :: "$tex.file"
-AI_MATKEY_UVWSRC_BASE :: "$tex.uvwsrc"
-AI_MATKEY_TEXOP_BASE :: "$tex.op"
-AI_MATKEY_MAPPING_BASE :: "$tex.mapping"
-AI_MATKEY_TEXBLEND_BASE :: "$tex.blend"
+// ---------------------------------------------------------------------------
+// Pure key names for all texture-related properties
+//! @cond MATS_DOC_FULL
+AI_MATKEY_TEXTURE_BASE       :: "$tex.file"
+AI_MATKEY_UVWSRC_BASE        :: "$tex.uvwsrc"
+AI_MATKEY_TEXOP_BASE         :: "$tex.op"
+AI_MATKEY_MAPPING_BASE       :: "$tex.mapping"
+AI_MATKEY_TEXBLEND_BASE      :: "$tex.blend"
 AI_MATKEY_MAPPINGMODE_U_BASE :: "$tex.mapmodeu"
 AI_MATKEY_MAPPINGMODE_V_BASE :: "$tex.mapmodev"
-AI_MATKEY_TEXMAP_AXIS_BASE :: "$tex.mapaxis"
-AI_MATKEY_UVTRANSFORM_BASE :: "$tex.uvtrafo"
-AI_MATKEY_TEXFLAGS_BASE :: "$tex.flags"
+AI_MATKEY_TEXMAP_AXIS_BASE   :: "$tex.mapaxis"
+AI_MATKEY_UVTRANSFORM_BASE   :: "$tex.uvtrafo"
+AI_MATKEY_TEXFLAGS_BASE      :: "$tex.flags"
 
 @(default_calling_convention="c", link_prefix="ai")
 foreign lib {
@@ -793,7 +836,7 @@ foreign lib {
 	* @param pPropOut Pointer to receive a pointer to a valid aiMaterialProperty
 	*        structure or NULL if the key has not been found. */
 	// ---------------------------------------------------------------------------
-	GetMaterialProperty :: proc(pMat: ^Material, pKey: cstring, type: c.uint, index: c.uint, pPropOut: ^^Material_Property) -> Return ---
+	GetMaterialProperty :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pPropOut: ^^Material_Property) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Retrieve an array of float values with a specific key
@@ -821,35 +864,35 @@ foreign lib {
 	* @return Specifies whether the key has been found. If not, the output
 	*   arrays remains unmodified and pMax is set to 0.*/
 	// ---------------------------------------------------------------------------
-	GetMaterialFloatArray :: proc(pMat: ^Material, pKey: cstring, type: c.uint, index: c.uint, pOut: ^Real, pMax: ^c.uint) -> Return ---
+	GetMaterialFloatArray :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^Real, pMax: ^u32) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Retrieve an array of integer values with a specific key
 	*  from a material
 	*
 	* See the sample for aiGetMaterialFloatArray for more information.*/
-	GetMaterialIntegerArray :: proc(pMat: ^Material, pKey: cstring, type: c.uint, index: c.uint, pOut: ^c.int, pMax: ^c.uint) -> Return ---
+	GetMaterialIntegerArray :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^i32, pMax: ^u32) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Retrieve a color value from the material property table
 	*
 	* See the sample for aiGetMaterialFloat for more information*/
 	// ---------------------------------------------------------------------------
-	GetMaterialColor :: proc(pMat: ^Material, pKey: cstring, type: c.uint, index: c.uint, pOut: ^Color4D) -> Return ---
+	GetMaterialColor :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^Color4D) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Retrieve a aiUVTransform value from the material property table
 	*
 	* See the sample for aiGetMaterialFloat for more information*/
 	// ---------------------------------------------------------------------------
-	GetMaterialUVTransform :: proc(pMat: ^Material, pKey: cstring, type: c.uint, index: c.uint, pOut: ^Uvtransform) -> Return ---
+	GetMaterialUVTransform :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^Uvtransform) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Retrieve a string from the material property table
 	*
 	* See the sample for aiGetMaterialFloat for more information.*/
 	// ---------------------------------------------------------------------------
-	GetMaterialString :: proc(pMat: ^Material, pKey: cstring, type: c.uint, index: c.uint, pOut: ^String) -> Return ---
+	GetMaterialString :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^String) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** Get the number of textures for a particular texture type.
@@ -858,6 +901,6 @@ foreign lib {
 	*  @return Number of textures for this type.
 	*  @note A texture can be easily queried using #aiGetMaterialTexture() */
 	// ---------------------------------------------------------------------------
-	GetMaterialTextureCount :: proc(pMat: ^Material, type: Texture_Type) -> c.uint ---
-	GetMaterialTexture      :: proc(mat: ^Material, type: Texture_Type, index: c.uint, path: ^String, mapping: ^Texture_Mapping, uvindex: ^c.uint, blend: ^Real, op: ^Texture_Op, mapmode: ^Texture_Map_Mode, flags: ^c.uint) -> Return ---
+	GetMaterialTextureCount :: proc(pMat: ^Material, type: Texture_Type) -> u32 ---
+	GetMaterialTexture      :: proc(mat: ^Material, type: Texture_Type, index: u32, path: ^String, mapping: ^Texture_Mapping, uvindex: ^u32, blend: ^Real, op: ^Texture_Op, mapmode: ^Texture_Map_Mode, flags: ^u32) -> Return ---
 }

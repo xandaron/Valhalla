@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -104,18 +102,18 @@ Node :: struct {
 	mParent: ^Node,
 
 	/** The number of child nodes of this node. */
-	mNumChildren: c.uint,
+	mNumChildren: u32,
 
 	/** The child nodes of this node. nullptr if mNumChildren is 0. */
 	mChildren: [^]^Node,
 
 	/** The number of meshes of this node. */
-	mNumMeshes: c.uint,
+	mNumMeshes: u32,
 
 	/** The meshes of this node. Each entry is an index into the
 	* mesh list of the #aiScene.
 	*/
-	mMeshes: [^]c.uint,
+	mMeshes: [^]u32,
 
 	/** Metadata associated with this node or nullptr if there is no metadata.
 	*  Whether any metadata is generated depends on the source file format. See the
@@ -125,17 +123,61 @@ Node :: struct {
 	mMetaData: ^Metadata,
 }
 
-SCENE_FLAGS_INCOMPLETE :: 0x1
+// -------------------------------------------------------------------------------
+/**
+ * Specifies that the scene data structure that was imported is not complete.
+ * This flag bypasses some internal validations and allows the import
+ * of animation skeletons, material libraries or camera animation paths
+ * using Assimp. Most applications won't support such data.
+ */
+SCENE_FLAGS_INCOMPLETE   :: 0x1
 
-SCENE_FLAGS_VALIDATED :: 0x2
+/**
+ * This flag is set by the validation postprocess-step (aiPostProcess_ValidateDS)
+ * if the validation is successful. In a validated scene you can be sure that
+ * any cross references in the data structure (e.g. vertex indices) are valid.
+ */
+SCENE_FLAGS_VALIDATED    :: 0x2
 
-SCENE_FLAGS_VALIDATION_WARNING :: 0x4
+/**
+ * This flag is set by the validation postprocess-step (aiPostProcess_ValidateDS)
+ * if the validation is successful but some issues have been found.
+ * This can for example mean that a texture that does not exist is referenced
+ * by a material or that the bone weights for a vertex don't sum to 1.0 ... .
+ * In most cases you should still be able to use the import. This flag could
+ * be useful for applications which don't capture Assimp's log output.
+ */
+SCENE_FLAGS_VALIDATION_WARNING   :: 0x4
 
-SCENE_FLAGS_NON_VERBOSE_FORMAT :: 0x8
+/**
+ * This flag is currently only set by the aiProcess_JoinIdenticalVertices step.
+ * It indicates that the vertices of the output meshes aren't in the internal
+ * verbose format anymore. In the verbose format all vertices are unique,
+ * no vertex is ever referenced by more than one face.
+ */
+SCENE_FLAGS_NON_VERBOSE_FORMAT   :: 0x8
 
+/**
+ * Denotes pure height-map terrain data. Pure terrains usually consist of quads,
+ * sometimes triangles, in a regular grid. The x,y coordinates of all vertex
+ * positions refer to the x,y coordinates on the terrain height map, the z-axis
+ * stores the elevation at a specific point.
+ *
+ * TER (Terragen) and HMP (3D Game Studio) are height map formats.
+ * @note Assimp is probably not the best choice for loading *huge* terrains -
+ * fully triangulated data takes extremely much free store and should be avoided
+ * as long as possible (typically you'll do the triangulation when you actually
+ * need to render it).
+ */
 SCENE_FLAGS_TERRAIN :: 0x10
 
-SCENE_FLAGS_ALLOW_SHARED :: 0x20
+/**
+ * Specifies that the scene data can be shared between structures. For example:
+ * one vertex in few faces. \ref AI_SCENE_FLAGS_NON_VERBOSE_FORMAT can not be
+ * used for this because \ref AI_SCENE_FLAGS_NON_VERBOSE_FORMAT has internal
+ * meaning about postprocessing steps.
+ */
+SCENE_FLAGS_ALLOW_SHARED   :: 0x20
 
 // -------------------------------------------------------------------------------
 /** The root structure of the imported data.
@@ -152,7 +194,7 @@ Scene :: struct {
 	* want to reject all scenes with the AI_SCENE_FLAGS_INCOMPLETE
 	* bit set.
 	*/
-	mFlags: c.uint,
+	mFlags: u32,
 
 	/** The root node of the hierarchy.
 	*
@@ -164,7 +206,7 @@ Scene :: struct {
 	mRootNode: ^Node,
 
 	/** The number of meshes in the scene. */
-	mNumMeshes: c.uint,
+	mNumMeshes: u32,
 
 	/** The array of meshes.
 	*
@@ -176,7 +218,7 @@ Scene :: struct {
 	mMeshes: [^]^Mesh,
 
 	/** The number of materials in the scene. */
-	mNumMaterials: c.uint,
+	mNumMaterials: u32,
 
 	/** The array of materials.
 	*
@@ -188,7 +230,7 @@ Scene :: struct {
 	mMaterials: [^]^Material,
 
 	/** The number of animations in the scene. */
-	mNumAnimations: c.uint,
+	mNumAnimations: u32,
 
 	/** The array of animations.
 	*
@@ -198,7 +240,7 @@ Scene :: struct {
 	mAnimations: [^]^Animation,
 
 	/** The number of textures embedded into the file */
-	mNumTextures: c.uint,
+	mNumTextures: u32,
 
 	/** The array of embedded textures.
 	*
@@ -211,7 +253,7 @@ Scene :: struct {
 	/** The number of light sources in the scene. Light sources
 	* are fully optional, in most cases this attribute will be 0
 	*/
-	mNumLights: c.uint,
+	mNumLights: u32,
 
 	/** The array of light sources.
 	*
@@ -223,7 +265,7 @@ Scene :: struct {
 	/** The number of cameras in the scene. Cameras
 	* are fully optional, in most cases this attribute will be 0
 	*/
-	mNumCameras: c.uint,
+	mNumCameras: u32,
 
 	/** The array of cameras.
 	*
@@ -250,7 +292,7 @@ Scene :: struct {
 	/**
 	*
 	*/
-	mNumSkeletons: c.uint,
+	mNumSkeletons: u32,
 
 	/**
 	*

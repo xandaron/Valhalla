@@ -384,7 +384,7 @@ loadModel: valhalla.ModelLoader : proc(
 	valhalla.LoaderError,
 ) {
 	aiStringToCstring :: proc(aiStr: ^ai.String, allocator := context.allocator) -> string {
-		return strings.clone_from_bytes(aiStr.data[:aiStr.length])
+		return strings.clone_from_bytes(aiStr.data[:aiStr.length], allocator = allocator)
 	}
 
 	aiVectorToVec3 :: proc(aiVec: ^ai.Vector3D) -> Vec3 {

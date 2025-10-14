@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -65,7 +63,7 @@ else {
 // ---------------------------------------------------------------------------
 /** Enumerates all supported types of light sources.
 */
-Light_Source_Type :: enum c.int {
+Light_Source_Type :: enum i32 {
 	UNDEFINED,
 
 	//! A directional light source has a well-defined direction

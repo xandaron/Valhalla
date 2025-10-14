@@ -45,9 +45,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -67,7 +65,7 @@ else {
 // ---------------------------------------------------------------------------
 /**
 */
-Anim_Interpolation :: enum c.int {
+Anim_Interpolation :: enum i32 {
 	/** */
 	Step,
 
@@ -118,7 +116,7 @@ Mesh_Key :: struct {
 	*  mesh corresponding to the #aiMeshAnim hosting this
 	*  key frame. The referenced anim mesh is evaluated
 	*  according to the rules defined in the docs for #aiAnimMesh.*/
-	mValue: c.uint,
+	mValue: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -131,18 +129,18 @@ Mesh_Morph_Key :: struct {
 	*   - mValues: index of attachment mesh to apply weight at the same position in mWeights
 	*   - mWeights: weight to apply to the blend shape index at the same position in mValues
 	*/
-	mValues: [^]c.uint,
+	mValues: [^]u32,
 	mWeights: [^]f64,
 
 	/** The number of values and weights */
-	mNumValuesAndWeights: c.uint,
+	mNumValuesAndWeights: u32,
 }
 
 // ---------------------------------------------------------------------------
 /** Defines how an animation channel behaves outside the defined time
 *  range. This corresponds to aiNodeAnim::mPreState and
 *  aiNodeAnim::mPostState.*/
-Anim_Behaviour :: enum c.int {
+Anim_Behaviour :: enum i32 {
 	/** The value from the default node transformation is taken*/
 	DEFAULT,
 
@@ -181,7 +179,7 @@ Node_Anim :: struct {
 	mNodeName: String,
 
 	/** The number of position keys */
-	mNumPositionKeys: c.uint,
+	mNumPositionKeys: u32,
 
 	/** The position keys of this animation channel. Positions are
 	* specified as 3D vector. The array is mNumPositionKeys in size.
@@ -191,7 +189,7 @@ Node_Anim :: struct {
 	mPositionKeys: [^]Vector_Key,
 
 	/** The number of rotation keys */
-	mNumRotationKeys: c.uint,
+	mNumRotationKeys: u32,
 
 	/** The rotation keys of this animation channel. Rotations are
 	*  given as quaternions,  which are 4D vectors. The array is
@@ -202,7 +200,7 @@ Node_Anim :: struct {
 	mRotationKeys: [^]Quat_Key,
 
 	/** The number of scaling keys */
-	mNumScalingKeys: c.uint,
+	mNumScalingKeys: u32,
 
 	/** The scaling keys of this animation channel. Scalings are
 	*  specified as 3D vector. The array is mNumScalingKeys in size.
@@ -240,7 +238,7 @@ Mesh_Anim :: struct {
 	mName: String,
 
 	/** Size of the #mKeys array. Must be 1, at least. */
-	mNumKeys: c.uint,
+	mNumKeys: u32,
 
 	/** Key frames of the animation. May not be nullptr. */
 	mKeys: [^]Mesh_Key,
@@ -256,7 +254,7 @@ Mesh_Morph_Anim :: struct {
 	mName: String,
 
 	/** Size of the #mKeys array. Must be 1, at least. */
-	mNumKeys: c.uint,
+	mNumKeys: u32,
 
 	/** Key frames of the animation. May not be nullptr. */
 	mKeys: [^]Mesh_Morph_Key,
@@ -279,7 +277,7 @@ Animation :: struct {
 
 	/** The number of bone animation channels. Each channel affects
 	*  a single node. */
-	mNumChannels: c.uint,
+	mNumChannels: u32,
 
 	/** The node animation channels. Each channel affects a single node.
 	*  The array is mNumChannels in size. */
@@ -287,7 +285,7 @@ Animation :: struct {
 
 	/** The number of mesh animation channels. Each channel affects
 	*  a single mesh and defines vertex-based animation. */
-	mNumMeshChannels: c.uint,
+	mNumMeshChannels: u32,
 
 	/** The mesh animation channels. Each channel affects a single mesh.
 	*  The array is mNumMeshChannels in size. */
@@ -295,7 +293,7 @@ Animation :: struct {
 
 	/** The number of mesh animation channels. Each channel affects
 	*  a single mesh and defines morphing animation. */
-	mNumMorphMeshChannels: c.uint,
+	mNumMorphMeshChannels: u32,
 
 	/** The morph mesh animation channels. Each channel affects a single mesh.
 	*  The array is mNumMorphMeshChannels in size. */

@@ -43,9 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package assimp
 
-import "core:c"
 
-_ :: c
 
 when ODIN_OS == .Windows {
     foreign import lib {
@@ -74,7 +72,7 @@ else {
 *  @see aiImportFileEx
 */
 // -----------------------------------------------------------------------------------
-Post_Process_Step_Flag :: enum c.int {
+Post_Process_Step_Flag :: enum i32 {
 	// -------------------------------------------------------------------------
 	/** <hr>Calculates the tangents and bitangents for the imported meshes.
 	*
@@ -595,18 +593,72 @@ Post_Process_Step_Flag :: enum c.int {
 	* This process gives sense back to aiProcess_JoinIdenticalVertices
 	*/
 	DropNormals,
-
-	GenBoundingBoxes,
 }
 
-Post_Process_Step_Flags :: distinct bit_set[Post_Process_Step_Flag; c.int]
+Post_Process_Step_Flags :: distinct bit_set[Post_Process_Step_Flag; i32]
 
-// PROCESS_GENBOUNDINGBOXES :: Post_Process_Step_Flags {  }
+PROCESS_GENBOUNDINGBOXES :: Post_Process_Step_Flags {  }
 
+// ---------------------------------------------------------------------------------------
+/** @def aiProcess_ConvertToLeftHanded
+ *  @brief Shortcut flag for Direct3D-based applications.
+ *
+ *  Supersedes the #aiProcess_MakeLeftHanded and #aiProcess_FlipUVs and
+ *  #aiProcess_FlipWindingOrder flags.
+ *  The output data matches Direct3D's conventions: left-handed geometry, upper-left
+ *  origin for UV coordinates and finally clockwise face order, suitable for CCW culling.
+ *
+ *  @deprecated
+ */
 // aiProcess_ConvertToLeftHanded :: (aiProcess_MakeLeftHanded|aiProcess_FlipUVs|aiProcess_FlipWindingOrder|0)
 
+// ---------------------------------------------------------------------------------------
+/** @def aiProcessPreset_TargetRealtime_Fast
+ *  @brief Default postprocess configuration optimizing the data for real-time rendering.
+ *
+ *  Applications would want to use this preset to load models on end-user PCs,
+ *  maybe for direct use in game.
+ *
+ * If you're using DirectX, don't forget to combine this value with
+ * the #aiProcess_ConvertToLeftHanded step. If you don't support UV transformations
+ * in your application apply the #aiProcess_TransformUVCoords step, too.
+ *  @note Please take the time to read the docs for the steps enabled by this preset.
+ *  Some of them offer further configurable properties, while some of them might not be of
+ *  use for you so it might be better to not specify them.
+ */
 // aiProcessPreset_TargetRealtime_Fast :: (aiProcess_CalcTangentSpace|aiProcess_GenNormals|aiProcess_JoinIdenticalVertices|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_SortByPType|0)
 
+// ---------------------------------------------------------------------------------------
+ /** @def aiProcessPreset_TargetRealtime_Quality
+  *  @brief Default postprocess configuration optimizing the data for real-time rendering.
+  *
+  *  Unlike #aiProcessPreset_TargetRealtime_Fast, this configuration
+  *  performs some extra optimizations to improve rendering speed and
+  *  to minimize memory usage. It could be a good choice for a level editor
+  *  environment where import speed is not so important.
+  *
+  *  If you're using DirectX, don't forget to combine this value with
+  *  the #aiProcess_ConvertToLeftHanded step. If you don't support UV transformations
+  *  in your application apply the #aiProcess_TransformUVCoords step, too.
+  *  @note Please take the time to read the docs for the steps enabled by this preset.
+  *  Some of them offer further configurable properties, while some of them might not be
+  *  of use for you so it might be better to not specify them.
+  */
 // aiProcessPreset_TargetRealtime_Quality :: (aiProcess_CalcTangentSpace|aiProcess_GenSmoothNormals|aiProcess_JoinIdenticalVertices|aiProcess_ImproveCacheLocality|aiProcess_LimitBoneWeights|aiProcess_RemoveRedundantMaterials|aiProcess_SplitLargeMeshes|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_SortByPType|aiProcess_FindDegenerates|aiProcess_FindInvalidData|0)
 
+// ---------------------------------------------------------------------------------------
+ /** @def aiProcessPreset_TargetRealtime_MaxQuality
+  *  @brief Default postprocess configuration optimizing the data for real-time rendering.
+  *
+  *  This preset enables almost every optimization step to achieve perfectly
+  *  optimized data. It's your choice for level editor environments where import speed
+  *  is not important.
+  *
+  *  If you're using DirectX, don't forget to combine this value with
+  *  the #aiProcess_ConvertToLeftHanded step. If you don't support UV transformations
+  *  in your application, apply the #aiProcess_TransformUVCoords step, too.
+  *  @note Please take the time to read the docs for the steps enabled by this preset.
+  *  Some of them offer further configurable properties, while some of them might not be
+  *  of use for you so it might be better to not specify them.
+  */
 // aiProcessPreset_TargetRealtime_MaxQuality :: (aiProcessPreset_TargetRealtime_Quality|aiProcess_FindInstances|aiProcess_ValidateDataStructure|aiProcess_OptimizeMeshes|0)
