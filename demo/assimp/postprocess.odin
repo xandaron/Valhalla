@@ -593,11 +593,10 @@ Post_Process_Step_Flag :: enum i32 {
 	* This process gives sense back to aiProcess_JoinIdenticalVertices
 	*/
 	DropNormals,
+	GenBoundingBoxes,
 }
 
 Post_Process_Step_Flags :: distinct bit_set[Post_Process_Step_Flag; i32]
-
-PROCESS_GENBOUNDINGBOXES :: Post_Process_Step_Flags {  }
 
 // ---------------------------------------------------------------------------------------
 /** @def aiProcess_ConvertToLeftHanded
