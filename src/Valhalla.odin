@@ -5309,14 +5309,16 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 			skeleton := &model.skeleton
 
 			animation := inst.animation
-			inst.animTimer += f64(delta)
-			if inst.animTimer >= animation.duration {
-				inst.animTimer -= animation.duration
+			if animation.duration == 0 {
+				inst.animTimer = 0
+			} else {
+				inst.animTimer += f64(delta)
 			}
+			for ; inst.animTimer > animation.duration; inst.animTimer -= animation.duration {}
 
 			for &node, nodeIndex in animation.nodes {
 				transform := IMAT4
-				// a *= b == a = a * b
+				// (a *= b) == (a = a * b)
 				// therefore I *= T *= R *= S == aT = I * T * R * S
 				if len(node.keyPositions) == 1 {
 					transform *= translate(node.keyPositions[0].value)
@@ -5409,8 +5411,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 			}
 
 			for boneIndex in 0 ..< u32(len(skeleton)) {
-				boneTransforms[boneOffset + boneIndex] =
-					boneTransforms[boneOffset + boneIndex] * skeleton[boneIndex].inverseBind
+				boneTransforms[boneOffset + boneIndex] *= skeleton[boneIndex].inverseBind
 			}
 			boneOffset += u32(len(skeleton))
 		}
