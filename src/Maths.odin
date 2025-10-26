@@ -19,6 +19,7 @@ tan :: math.tan
 Quat :: linalg.Quaternionf32
 IQUAT :: linalg.QUATERNIONF32_IDENTITY
 
+lerp :: linalg.lerp
 slerp :: linalg.quaternion_slerp_f32
 
 Mat4 :: linalg.Matrix4f32
@@ -31,9 +32,6 @@ scale :: linalg.matrix4_scale
 transform :: #force_inline proc(p: Vec3, r: Quat, s: Vec3) -> Mat4 {
 	return translate(p) * quatToMat4(r) * scale(s)
 }
-
-lerp :: linalg.lerp
-
 
 lookAt :: proc(eye, center, up: Vec3) -> Mat4 {
 	f := normalize(center - eye)
