@@ -33,7 +33,7 @@ DEVICE_EXTENSIONS: []cstring : {
 	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
 	vk.EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
 	vk.KHR_MULTIVIEW_EXTENSION_NAME,
-	vk.NV_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
+	vk.KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
 }
 
 when HDR_ENABLED {
@@ -341,7 +341,7 @@ GraphicsContext :: struct {
 	saturation:                f32,
 	exposure:                  f32,
 	tonemapper:                enum u32 {
-		None = 0,
+		None          = 0,
 		NarkowiczACES = 1,
 	},
 	gamma:                     f32,
@@ -3149,8 +3149,8 @@ createBuffersDescriptorSets :: proc(
 	}
 
 	poolSizes: []vk.DescriptorPoolSize = {
-		{type = .UNIFORM_BUFFER, descriptorCount = 1},
-		{type = .STORAGE_BUFFER, descriptorCount = 6},
+		{type = .UNIFORM_BUFFER, descriptorCount = 1 * 2},
+		{type = .STORAGE_BUFFER, descriptorCount = 7 * 2},
 	}
 
 	poolInfo: vk.DescriptorPoolCreateInfo = {
@@ -3261,7 +3261,10 @@ createTexturesDescriptorSets :: proc(
 		return .FailedToCreateDescriptorSetLayout
 	}
 
-	poolSizes: []vk.DescriptorPoolSize = {{type = .COMBINED_IMAGE_SAMPLER, descriptorCount = 3}}
+	poolSizes: []vk.DescriptorPoolSize = {
+		{type = .COMBINED_IMAGE_SAMPLER, descriptorCount = 3 * 2},
+		{type = .STORAGE_IMAGE, descriptorCount = 2 * 2},
+	}
 
 	poolInfo: vk.DescriptorPoolCreateInfo = {
 		sType         = .DESCRIPTOR_POOL_CREATE_INFO,
@@ -5319,7 +5322,7 @@ updateInstanceBuffer :: proc(using graphicsContext: ^GraphicsContext, delta: f32
 			for &node, nodeIndex in animation.nodes {
 				transform := IMAT4
 				// (a *= b) == (a = a * b)
-				// therefore I *= T *= R *= S == aT = I * T * R * S
+				// therefore I *= T *= R *= S == I * T * R * S
 				if len(node.keyPositions) == 1 {
 					transform *= translate(node.keyPositions[0].value)
 				} else if len(node.keyPositions) != 0 {
@@ -5881,7 +5884,9 @@ recordSceneBuffers :: proc(
 				{.VERTEX, .FRAGMENT},
 				size_of(f32),
 				3 * size_of(u32),
-				raw_data([]u32{offset - mesh.vertexOffset, u32(len(mesh.vertices)), instanceOffset}),
+				raw_data(
+					[]u32{offset - mesh.vertexOffset, u32(len(mesh.vertices)), instanceOffset},
+				),
 			)
 
 			vk.CmdDrawIndexed(
