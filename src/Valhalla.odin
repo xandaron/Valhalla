@@ -5783,7 +5783,7 @@ recordShadowMapBuffer :: proc(
 					{.VERTEX},
 					size_of(u32),
 					2 * size_of(u32),
-					raw_data([]u32{offset - mesh.vertexOffset, u32(len(mesh.vertices))}),
+					raw_data([]u32{offset, u32(len(mesh.vertices))}),
 				)
 
 				vk.CmdDrawIndexed(
@@ -5885,7 +5885,7 @@ recordSceneBuffers :: proc(
 				size_of(f32),
 				3 * size_of(u32),
 				raw_data(
-					[]u32{offset - mesh.vertexOffset, u32(len(mesh.vertices)), instanceOffset},
+					[]u32{offset, u32(len(mesh.vertices)), instanceOffset},
 				),
 			)
 
