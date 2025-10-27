@@ -2,8 +2,8 @@ package Valhalla
 
 import "base:runtime"
 import "core:fmt"
+import logging "core:log"
 import vk "vendor:vulkan"
-
 
 VK_DEBUG_MESSENGER_CREATE_INFO :: vk.DebugUtilsMessengerCreateInfoEXT {
 	sType           = vk.StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
@@ -14,27 +14,13 @@ VK_DEBUG_MESSENGER_CREATE_INFO :: vk.DebugUtilsMessengerCreateInfoEXT {
 	pUserData       = nil,
 }
 
+log :: logging.log
+logf :: logging.logf
+
 // GLFW
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
 	context = runtime.default_context()
-	fmt.printfln("[GLFW Error]: Code %d, Description: %s", code, string(desc))
-}
-
-// Error Callback
-valhallaErrLevelToLogErrLevel :: proc(level: ErrorLevel) -> string {
-	switch level {
-	case .Warning:
-		return "Warning"
-	case .Error:
-		return "Error"
-	case .Fatal:
-		return "Fatal"
-	}
-	panic("Unknown error level!")
-}
-
-errorCallback: ErrorCallback : proc(level: ErrorLevel, message: string) {
-	fmt.printfln("[%s]: %s", valhallaErrLevelToLogErrLevel(level), message)
+	logf(.Error, "GLFW Error: Code %d, Description: %s", code, string(desc))
 }
 
 // Vulkan
@@ -45,8 +31,9 @@ vkDebugCallback :: proc "system" (
 	pUserData: rawptr,
 ) -> b32 {
 	context = runtime.default_context()
-	fmt.printfln(
-		"[%s] Vulkan validation layer (%s):\n%s\n",
+	logf(
+		.Error,
+		"[%s] Vulkan validation layer (%s):\n%s",
 		vkDecodeSeverity(messageSeverity),
 		vkDecodeMessageTypeFlag(messageType),
 		pCallbackData.pMessage,
@@ -54,9 +41,7 @@ vkDebugCallback :: proc "system" (
 	return false
 }
 
-vkDecodeSeverity :: proc(
-	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
-) -> string {
+vkDecodeSeverity :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT) -> string {
 	if vk.DebugUtilsMessageSeverityFlagEXT.VERBOSE in messageSeverity {
 		return "Info"
 	}
@@ -106,8 +91,8 @@ imguiCheckVkResult :: proc "c" (err: vk.Result) {
 	context = runtime.default_context()
 	if int(err) == 0 {return}
 	if int(err) < 0 {
-		fmt.printfln("[Imgui-Vulkan] Fatal: VkResult = %v", err)
+		logf(.Error, "[Imgui-Vulkan] Fatal: VkResult = %v", err)
 		panic("Imgui error")
 	}
-	fmt.printfln("[Imgui-Vulkan] Error: VkResult = %v", err)
+	logf(.Error, "[Imgui-Vulkan] Error: VkResult = %v", err)
 }

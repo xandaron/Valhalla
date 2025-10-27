@@ -1,10 +1,10 @@
 # Valhalla Graphics Engine
 
-Valhalla is a graphics engine for rendering 3D scenes, structured as a reusable Odin package that can be imported into other projects. A demo program is included to showcase how to use the package.
+Valhalla is a 3D graphics rendering demo showcasing modern graphics techniques and real-time rendering capabilities. This project serves as a demonstration of graphics programming concepts and rendering features.
 
 ## Why Valhalla?
 
-Valhalla is an active work in progress. The project is designed to be as implementation-agnostic as possible, making it easy to integrate into a variety of Odin projects. Its modular architecture and real-time rendering features aim to support both games and visualization tools.
+Valhalla is an active work in progress. The project is designed to demonstrate various graphics programming techniques and serves as a learning platform for 3D rendering concepts. Its implementation showcases real-time rendering features that could be adapted for both games and visualization tools.
 
 ## Features
 
@@ -18,9 +18,9 @@ Valhalla is an active work in progress. The project is designed to be as impleme
 
 ## Project Structure
 
-- `valhalla/` &mdash; Core graphics engine package (importable in Odin projects)
-- `demo/` &mdash; Example program demonstrating usage of the Valhalla package
-- `demo/assets/` &mdash; Assets used by the demo (models, shaders, textures)
+- `src/` &mdash; Core graphics engine implementation
+- `shaders/` &mdash; Shader files for rendering
+- `assets/` &mdash; Assets used by the demo (models, textures)
 
 ## Getting Started
 
@@ -46,16 +46,6 @@ odin build . -out:demo.exe
 ```
 
 > **Note:** On Linux, you will need to install the GLFW 3.4+ library separately. Anything earlier will cause crashes.
-
-### Using the Valhalla Package in Your Project
-
-You can import the graphics engine into your own Odin projects:
-
-```odin
-import valhalla "path/to/valhalla"
-```
-
-See the `demo/` directory for a complete example of initialization, rendering loop, and resource management.
 
 ## Roadmap
 

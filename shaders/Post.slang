@@ -1,6 +1,6 @@
-import "../../src/shaders/Light.slang";
-import "../../src/shaders/Buffers.slang";
-import "../../src/shaders/Textures.slang";
+import "Light.slang";
+import "Buffers.slang";
+import "Textures.slang";
 
 enum ToneMapper : uint32_t
 {

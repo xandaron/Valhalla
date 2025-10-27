@@ -1,10 +1,7 @@
-*.exe
-*.pdb
+bin/
 logs/
-NSight/
 imgui.ini
 .zed/
 .vscode/
 ols.json
 docs/
-assets_game/
