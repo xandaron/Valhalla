@@ -6,17 +6,17 @@ import "core:strings"
 Scene :: struct {
 	filePath:      string,
 	name:          string,
+	
+	// Scene Settings
+	ambientLight:  f32,
+	clearColour:   Vec4,
 
-	// Scene
+	// Assets
 	models:        [dynamic]Model,
 	objects:       [dynamic]GameObject,
 	lights:        [dynamic]PointLight,
 	cameras:       [dynamic]Camera,
 	activeCamera:  u32,
-
-	// Assets
-	ambientLight:  f32,
-	clearColour:   Vec4,
 	vertexCount:   u32,
 	textureCount:  u32,
 	vertices:      [dynamic]Vertex,
