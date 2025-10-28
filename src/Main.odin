@@ -84,7 +84,9 @@ main :: proc() {
 	free_all(context.temp_allocator)
 	globals.runtimeContext = context
 
-	os.set_current_directory(filepath.dir(filepath.dir(os.args[0], context.temp_allocator), context.temp_allocator))
+	os.set_current_directory(
+		filepath.dir(filepath.dir(os.args[0], context.temp_allocator), context.temp_allocator),
+	)
 
 	valhallaInitInfo := InitInfo {
 		appVersion = 0,
@@ -177,43 +179,6 @@ main :: proc() {
 		if globals.paused {
 			delta = 0
 		}
-
-		// for &object in scene.objects {
-		// 	switch &action in object.action {
-		// 	case MoveAction:
-		// 		facingDirection := quatMulVec3(object.rotation, object.forward)
-
-		// 		direction := action.destination - object.position
-		// 		dist := length(direction)
-
-		// 		targetDirection := direction / dist
-		// 		if distance(facingDirection, targetDirection) > 0.05 {
-		// 			angleBetween := angle(object.forward, targetDirection)
-		// 			targetRotation := quatFromAxisAngle(
-		// 				angleBetween,
-		// 				Vec3{0, direction.x < 0 ? 1 : -1, 0},
-		// 			)
-
-		// 			ROTATION_SPEED :: PI // 180 degrees per second
-		// 			lerpTime := delta * ROTATION_SPEED / angle(facingDirection, targetDirection)
-		// 			if lerpTime >= 1 {
-		// 				object.rotation = targetRotation
-		// 			} else {
-		// 				object.rotation = slerp(object.rotation, targetRotation, lerpTime)
-		// 			}
-		// 		} else {
-		// 			MOVE_SPEED :: 5
-		// 			lerpTime := delta * MOVE_SPEED / dist
-		// 			if lerpTime >= 1 {
-		// 				object.position = action.destination
-		// 				globals.inputLock = false
-		// 				object.action = nil
-		// 			} else {
-		// 				object.position = lerp(object.position, action.destination, lerpTime)
-		// 			}
-		// 		}
-		// 	}
-		// }
 
 		update(delta)
 		if err = drawFrame(&globals.graphicsContext); err != nil {
