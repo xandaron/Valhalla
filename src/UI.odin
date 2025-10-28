@@ -8,7 +8,7 @@ import "core:strings"
 import "vendor:glfw"
 
 drawImgui :: proc(graphicsContext: ^GraphicsContext) {
-	toCstring :: proc(str: string, allocator := context.temp_allocator) -> cstring {
+	toCstring :: #force_inline proc(str: string, allocator := context.temp_allocator) -> cstring {
 		return strings.clone_to_cstring(str, allocator = allocator)
 	}
 
@@ -24,11 +24,6 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 
 	imgui.SetNextWindowBgAlpha(1.0)
 	if imgui.Begin("Scene Editor", nil, {.MenuBar}) {
-		constructSceneEditor(graphicsContext)
-	}
-	imgui.End()
-
-	constructSceneEditor :: proc(graphicsContext: ^GraphicsContext) {
 		scene := &globals.scenes[globals.activeScene]
 		if imgui.BeginMenuBar() {
 			if imgui.BeginMenu("File") {
@@ -63,11 +58,10 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 				}
 				imgui.EndMenu()
 			}
-
 			imgui.EndMenuBar()
 		}
 
-		if imgui.TreeNode("Scene Settings") {
+		if imgui.CollapsingHeader("Scene Settings") {
 			str: cstring = strings.clone_to_cstring("None0Narkowicz ACES0", context.temp_allocator)
 			str_buff := transmute([^]u8)(str)
 			str_buff[len("None")] = 0
@@ -78,26 +72,37 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 			   imgui.DragFloat("Exposure", &graphicsContext.exposure, 0.01) ||
 			   imgui.Combo("Tonemapper", transmute(^i32)(&graphicsContext.tonemapper), str) ||
 			   imgui.DragFloat("Gamma", &graphicsContext.gamma, 0.01) {
-				// TODO: Update uniform buffer
+				if err := updateSceneBuffers(graphicsContext, scene); err != nil {
+					logf(.Error, "Failed to update scene buffers: %v", err)
+					panic("Failed to update scene buffers")
+				}
 			}
-			imgui.TreePop()
 		}
 
-		if imgui.TreeNode("Scene") {
-			imgui.DragFloat("Ambient light", &scene.ambientLight, 0.01, 0, 1)
-			imgui.DragFloat4("Clear colour", &scene.clearColour, 0.01, 0, 1)
-			imgui.TreePop()
+		if imgui.CollapsingHeader("Scene") {
+			if imgui.DragFloat("Ambient light", &scene.ambientLight, 0.01, 0, 1) ||
+			   imgui.DragFloat4("Clear colour", &scene.clearColour, 0.01, 0, 1) {
+				if err := updateSceneBuffers(graphicsContext, scene); err != nil {
+					logf(.Error, "Failed to update scene buffers: %v", err)
+					panic("Failed to update scene buffers")
+				}
+			}
 		}
 
-		if imgui.TreeNode("Objects") {
-			for &object in scene.objects {
+		if imgui.CollapsingHeader("Objects") {
+			for &object, objectIdx in scene.objects {
 				if imgui.TreeNode(toCstring(object.name)) {
 					imgui.DragFloat3("Position", &object.position, 0.1)
 
 					x, y, z := quatToEuler(object.rotation)
-					rotation := Vec3{x, y, z}
+					rotation := Vec3{degrees(x), degrees(y), degrees(z)}
 					if imgui.DragFloat3("Rotation", &rotation, 0.1) {
-						object.rotation = quatFromEuler(rotation.x, rotation.y, rotation.z, .XYZ)
+						object.rotation = quatFromEuler(
+							radians(rotation.x),
+							radians(rotation.y),
+							radians(rotation.z),
+							.XYZ,
+						)
 					}
 					imgui.DragFloat3("Scale", &object.scale, 0.1)
 
@@ -151,7 +156,16 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 
 							model := &scene.models[modelIdx]
 							if imgui.Selectable(toCstring(model.name)) {
-								// TODO: Switch model and update instance data
+								changeModel(scene, u32(objectIdx), u32(modelIdx))
+								if err := updateSceneBuffers(graphicsContext, scene); err != nil {
+									logf(.Error, "Failed to update scene buffers: %v", err)
+									panic("Failed to update scene buffers")
+								}
+								if err := updateCommandBuffers(graphicsContext, scene);
+								   err != nil {
+									logf(.Error, "Failed to update command buffers: %v", err)
+									panic("Failed to update command buffers")
+								}
 							}
 						}
 						imgui.EndCombo()
@@ -159,8 +173,22 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 
 					for mesh, meshIdx in scene.models[object.modelIdx].meshes {
 						if imgui.TreeNode(toCstring(mesh.name)) {
-							if imgui.BeginCombo(toCstring("Albedo"), toCstring("")) {
+							buf: [10]u8
+							num_str := strconv.write_uint(
+								buf[:],
+								u64(object.textureIdxs[meshIdx][TextureIndex.ALBEDO]),
+								10,
+							)
+							if imgui.BeginCombo(
+								"Albedo",
+								toCstring(fmt.tprintf("Texture %s", transmute(cstring)(&buf[0]))),
+							) {
 								for textureIdx in 0 ..< scene.textureCount {
+									if object.textureIdxs[meshIdx][TextureIndex.ALBEDO] ==
+									   u32(textureIdx) {
+										continue
+									}
+
 									buf: [10]u8
 									num_str := strconv.write_uint(buf[:], u64(textureIdx), 10)
 									if imgui.Selectable(
@@ -168,14 +196,33 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 											fmt.tprintf("Texture %s", transmute(cstring)(&buf[0])),
 										),
 									) {
-										// TODO: Change texture index
+										object.textureIdxs[meshIdx][TextureIndex.ALBEDO] = u32(
+											textureIdx,
+										)
+										if err := updateSceneBuffers(graphicsContext, scene);
+										   err != nil {
+											logf(.Error, "Failed to update scene buffers: %v", err)
+											panic("Failed to update scene buffers")
+										}
 									}
 								}
 								imgui.EndCombo()
 							}
 
-							if imgui.BeginCombo(toCstring("Normal Map"), toCstring("")) {
+							num_str = strconv.write_uint(
+								buf[:],
+								u64(object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP]),
+								10,
+							)
+							if imgui.BeginCombo(
+								"Normal Map",
+								toCstring(fmt.tprintf("Texture %s", transmute(cstring)(&buf[0]))),
+							) {
 								for textureIdx in 0 ..< scene.textureCount {
+									if object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP] ==
+									   u32(textureIdx) {
+										continue
+									}
 									buf: [10]u8
 									num_str := strconv.write_uint(buf[:], u64(textureIdx), 10)
 									if imgui.Selectable(
@@ -183,7 +230,14 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 											fmt.tprintf("Texture %s", transmute(cstring)(&buf[0])),
 										),
 									) {
-										// TODO: Change texture index
+										object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP] = u32(
+											textureIdx,
+										)
+										if err := updateSceneBuffers(graphicsContext, scene);
+										   err != nil {
+											logf(.Error, "Failed to update scene buffers: %v", err)
+											panic("Failed to update scene buffers")
+										}
 									}
 								}
 								imgui.EndCombo()
@@ -194,10 +248,9 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 					imgui.TreePop()
 				}
 			}
-			imgui.TreePop()
 		}
 
-		if imgui.TreeNode("Cameras") {
+		if imgui.CollapsingHeader("Cameras") {
 			for &camera, cameraIdx in scene.cameras {
 				if imgui.TreeNode(toCstring(camera.name)) {
 					if imgui.BeginCombo("Mode", toCstring(fmt.tprintf("%v", camera.mode))) {
@@ -224,43 +277,44 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 					imgui.TreePop()
 				}
 			}
-			imgui.TreePop()
 		}
 
-		if imgui.TreeNode("Lights") {
+		if imgui.CollapsingHeader("Lights") {
 			for &light, lightIdx in scene.lights {
 				if imgui.TreeNode(toCstring(light.name)) {
-					if imgui.DragFloat3("Position", &light.position, 0.1) ||
-					   imgui.DragFloat3("Colour", &light.colour, 0.01, 0, 1) ||
-					   imgui.DragFloat("Brightness", &light.brightness, 0.1) ||
-					   imgui.DragFloat("Dropoff", &light.dropoff, 0.1) {
-						// TODO: Update light UBO
-					}
+					imgui.DragFloat3("Position", &light.position, 0.1)
+					imgui.DragFloat3("Colour", &light.colour, 0.01, 0, 1)
+					imgui.DragFloat("Brightness", &light.brightness, 0.1)
+					imgui.DragFloat("Dropoff", &light.dropoff, 0.1)
 
 					imgui.TreePop()
 				}
 			}
-			imgui.TreePop()
 		}
 
-		if imgui.TreeNode("Models") {
+		if imgui.CollapsingHeader("Models") {
 			for &model, modelIdx in scene.models {
 				if imgui.TreeNode(toCstring(model.name)) {
 					imgui.DragFloat3("Position", &model.position, 0.1)
 
 					x, y, z := quatToEuler(model.rotation)
-					rotation := Vec3{x, y, z}
+					rotation := Vec3{degrees(x), degrees(y), degrees(z)}
 					if imgui.DragFloat3("Rotation", &rotation, 0.1) {
-						model.rotation = quatFromEuler(rotation.x, rotation.y, rotation.z, .XYZ)
+						model.rotation = quatFromEuler(
+							radians(rotation.x),
+							radians(rotation.y),
+							radians(rotation.z),
+							.XYZ,
+						)
 					}
 
 					imgui.DragFloat3("Scale", &model.scale, 0.1)
 					imgui.TreePop()
 				}
 			}
-			imgui.TreePop()
 		}
 	}
+	imgui.End()
 }
 
 mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {

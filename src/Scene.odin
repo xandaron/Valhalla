@@ -149,7 +149,12 @@ loadSceneAssets :: proc(scene: ^Scene, modelPaths: []string, texturePaths: []str
 	}
 
 	// Load Textures
-	return loadImages(&globals.graphicsContext, scene, texturePaths)
+	if err := loadImages(&globals.graphicsContext, scene, texturePaths); err != nil {
+		return err
+	}
+	scene.textureCount = u32(len(texturePaths))
+
+	return nil
 }
 
 loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
@@ -159,10 +164,6 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 			allocator = allocator,
 		)
 	}
-
-	// aiVectorToVec3 :: proc(aiVec: ^ai.Vector3D) -> Vec3 {
-	// 	return {aiVec.x, aiVec.y, aiVec.z}
-	// }
 
 	aiQuaternionToQuat :: proc(aiQuat: ^ai.Quaternion) -> Quat {
 		return transmute(Quat)Vec4{aiQuat.x, aiQuat.y, aiQuat.z, aiQuat.w}
