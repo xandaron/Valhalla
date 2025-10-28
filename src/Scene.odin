@@ -6,7 +6,7 @@ import "core:strings"
 Scene :: struct {
 	filePath:      string,
 	name:          string,
-	
+
 	// Scene Settings
 	ambientLight:  f32,
 	clearColour:   Vec4,
@@ -399,13 +399,29 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 		searchNodeTree(aiScene.mRootNode, &model.skeleton, &boneMap)
 		model.animations = make([]Animation, aiScene.mNumAnimations)
 		for &animation, animationIndex in model.animations {
+			translateInterpolation :: proc(
+				aiInterpolation: ai.Anim_Interpolation,
+			) -> InterpolationType {
+				switch aiInterpolation {
+				case .Step:
+					return .Step
+				case .Linear:
+					return .Linear
+				case .Spherical_Linear:
+					return .SphericalLinear
+				case .Cubic_Spline:
+					return .CubicSpline
+				}
+				panic("Unreachable!")
+			}
+
 			sceneAnimation := aiScene.mAnimations[animationIndex]
 
-			ticksToSecond :=
+			ticksToSeconds :=
 				1 / (sceneAnimation.mTicksPerSecond == 0.0 ? 1.0 : sceneAnimation.mTicksPerSecond)
 			animation = {
 				name     = aiStringToString(&sceneAnimation.mName),
-				duration = sceneAnimation.mDuration * ticksToSecond,
+				duration = sceneAnimation.mDuration * ticksToSeconds,
 				nodes    = make([]AnimationNode, len(model.skeleton)),
 			}
 
@@ -420,70 +436,81 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 			for nodeIndex in 0 ..< sceneAnimation.mNumChannels {
 				animationNode := sceneAnimation.mChannels[nodeIndex]
 
-				boneIndex, exists :=
+				boneIdx, exists :=
 					boneMap[aiStringToString(&animationNode.mNodeName, context.temp_allocator)]
 				if !exists {
 					continue
 				}
 
-				node := &animation.nodes[boneIndex]
-
+				node := &animation.nodes[boneIdx]
 				offset: u32 = 0
 				if animationNode.mPositionKeys[0].mTime != 0.0 {
-					node.keyPositions = make([]KeyVec3, animationNode.mNumPositionKeys + 1)
+					node.keyPositions = make([]KeyValue(Vec3), animationNode.mNumPositionKeys + 1)
 					node.keyPositions[0] = {
-						time  = 0.0,
-						value = animationNode.mPositionKeys[animationNode.mNumPositionKeys - 1].mValue,
+						time          = 0.0,
+						value         = animationNode.mPositionKeys[animationNode.mNumPositionKeys - 1].mValue,
+						interpolation = translateInterpolation(
+							animationNode.mPositionKeys[animationNode.mNumPositionKeys - 1].mInterpolation,
+						),
 					}
 					offset = 1
 				} else {
-					node.keyPositions = make([]KeyVec3, animationNode.mNumPositionKeys)
+					node.keyPositions = make([]KeyValue(Vec3), animationNode.mNumPositionKeys)
 				}
-				for keyIndex in 0 ..< animationNode.mNumPositionKeys {
-					positionKey := &animationNode.mPositionKeys[keyIndex]
-					node.keyPositions[keyIndex + offset] = {
-						time  = positionKey.mTime * ticksToSecond,
-						value = positionKey.mValue,
+				for keyIdx in 0 ..< animationNode.mNumPositionKeys {
+					positionKey := &animationNode.mPositionKeys[keyIdx]
+					node.keyPositions[keyIdx + offset] = {
+						time          = positionKey.mTime * ticksToSeconds,
+						value         = positionKey.mValue,
+						interpolation = translateInterpolation(positionKey.mInterpolation),
 					}
 				}
 
 				offset = 0
 				if animationNode.mRotationKeys[0].mTime != 0.0 {
-					node.keyRotations = make([]KeyQuat, animationNode.mNumRotationKeys + 1)
+					node.keyRotations = make([]KeyValue(Quat), animationNode.mNumRotationKeys + 1)
 					node.keyRotations[0] = {
-						time  = 0.0,
-						value = aiQuaternionToQuat(
+						time          = 0.0,
+						value         = aiQuaternionToQuat(
 							&animationNode.mRotationKeys[animationNode.mNumRotationKeys - 1].mValue,
+						),
+						interpolation = translateInterpolation(
+							animationNode.mRotationKeys[animationNode.mNumRotationKeys - 1].mInterpolation,
 						),
 					}
 					offset = 1
 				} else {
-					node.keyRotations = make([]KeyQuat, animationNode.mNumRotationKeys)
+					node.keyRotations = make([]KeyValue(Quat), animationNode.mNumRotationKeys)
 				}
-				for keyIndex in 0 ..< animationNode.mNumRotationKeys {
-					rotationKey := &animationNode.mRotationKeys[keyIndex]
-					node.keyRotations[keyIndex + offset] = {
-						time  = rotationKey.mTime * ticksToSecond,
-						value = aiQuaternionToQuat(&rotationKey.mValue),
+				for keyIdx in 0 ..< animationNode.mNumRotationKeys {
+					rotationKey := &animationNode.mRotationKeys[keyIdx]
+					node.keyRotations[keyIdx + offset] = {
+						time          = rotationKey.mTime * ticksToSeconds,
+						value         = aiQuaternionToQuat(&rotationKey.mValue),
+						interpolation = translateInterpolation(rotationKey.mInterpolation),
 					}
 				}
 
 				offset = 0
 				if animationNode.mScalingKeys[0].mTime != 0.0 {
-					node.keyScales = make([]KeyVec3, animationNode.mNumScalingKeys + 1)
+					node.keyScales = make([]KeyValue(Vec3), animationNode.mNumScalingKeys + 1)
 					node.keyScales[0] = {
-						time  = 0.0,
-						value = animationNode.mScalingKeys[animationNode.mNumScalingKeys - 1].mValue,
+						time          = 0.0,
+						value         = animationNode.mScalingKeys[animationNode.mNumScalingKeys - 1].mValue,
+						interpolation = translateInterpolation(
+							animationNode.mScalingKeys[animationNode.mNumScalingKeys - 1].mInterpolation,
+						),
 					}
 					offset = 1
 				} else {
-					node.keyScales = make([]KeyVec3, animationNode.mNumScalingKeys)
+					node.keyScales = make([]KeyValue(Vec3), animationNode.mNumScalingKeys)
 				}
-				for keyIndex in 0 ..< animationNode.mNumScalingKeys {
-					scaleKey := &animationNode.mScalingKeys[keyIndex]
-					node.keyScales[keyIndex + offset] = {
-						time  = scaleKey.mTime * ticksToSecond,
-						value = scaleKey.mValue,
+				for keyIdx in 0 ..< animationNode.mNumScalingKeys {
+					scaleKey := &animationNode.mScalingKeys[keyIdx]
+					node.keyScales[keyIdx + offset] = {
+						time          = scaleKey.mTime * ticksToSeconds,
+						value         = scaleKey.mValue,
+						interpolation = translateInterpolation(scaleKey.mInterpolation),
 					}
 				}
 			}
