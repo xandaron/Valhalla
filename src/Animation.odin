@@ -20,9 +20,9 @@ deleteAnimation :: proc(animation: ^Animation) {
 }
 
 AnimationNode :: struct {
-	keyPositions: []KeyVec3,
-	keyRotations: []KeyQuat,
-	keyScales:    []KeyVec3,
+	keyPositions: []KeyValue(Vec3),
+	keyRotations: []KeyValue(Quat),
+	keyScales:    []KeyValue(Vec3),
 }
 
 deleteAnimationNode :: proc(node: ^AnimationNode) {
@@ -31,22 +31,17 @@ deleteAnimationNode :: proc(node: ^AnimationNode) {
 	delete(node.keyScales)
 }
 
-KeyVec3 :: struct {
+KeyValue :: struct($valueType: typeid) {
 	time:          f64,
-	value:         Vec3,
-	interpolation: InterpolationType,
-}
-
-KeyQuat :: struct {
-	time:          f64,
-	value:         Quat,
+	value:         valueType,
 	interpolation: InterpolationType,
 }
 
 InterpolationType :: enum {
 	Step,
 	Linear,
-	// CubicSpline,
+	SphericalLinear,
+	CubicSpline,
 }
 
 ObjectAnimation :: struct {
@@ -85,6 +80,79 @@ AnimationTransition :: struct {
 }
 
 updateAnimations :: proc(scene: ^Scene, delta: f32) {
+	boneTransform :: proc(values: []KeyValue($T), cachedIdx: ^u32, time: f64) -> T {
+		assert(len(values) != 0, "No keyframes in animation node!")
+		if len(values) == 1 {
+			return values[0].value
+		}
+
+		for true {
+			if values[cachedIdx^].time <= time && time <= values[cachedIdx^ + 1].time {
+				break
+			}
+			cachedIdx^ += 1
+			if cachedIdx^ == u32(len(values)) - 1 {
+				cachedIdx^ = 0
+			}
+		}
+
+		switch values[cachedIdx^].interpolation {
+		case .CubicSpline:
+			when T != Quat {
+				// Catmull-Rom spline - calculates tangents automatically
+				t1 := values[cachedIdx^].time
+				t2 := values[cachedIdx^ + 1].time
+				dt := f32((time - t1) / (t2 - t1))
+
+				p0 := values[cachedIdx^].value
+				p1 := values[cachedIdx^ + 1].value
+
+				// Get neighboring points for tangent calculation
+				p_prev :=
+					cachedIdx^ > 0 ? values[cachedIdx^ - 1].value : values[len(values) - 1].value
+				p_next :=
+					cachedIdx^ + 2 < u32(len(values)) ? values[cachedIdx^ + 2].value : values[0].value
+
+				// Catmull-Rom tangents (scaled by time differences for proper parameterization)
+				m0 := 0.5 * (p1 - p_prev)
+				m1 := 0.5 * (p_next - p0)
+
+				// Hermite interpolation
+				dt2 := dt * dt
+				dt3 := dt2 * dt
+				h00 := 2 * dt3 - 3 * dt2 + 1
+				h10 := dt3 - 2 * dt2 + dt
+				h01 := -2 * dt3 + 3 * dt2
+				h11 := dt3 - dt2
+
+				return h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1
+			} else {
+				// Cubic spline interpolation is not typically used for quaternions
+				// So we will fallback to spherical linear interpolation for quaternions
+				fallthrough
+			}
+		case .SphericalLinear:
+			when T == Quat {
+				t1 := values[cachedIdx^].time
+				t2 := values[cachedIdx^ + 1].time
+				dt := (time - t1) / (t2 - t1)
+				return slerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
+			} else {
+				// Spherical linear interpolation is only valid for quaternions
+				// So we will fallback to linear interpolation for other types
+				fallthrough
+			}
+		case .Linear:
+			t1 := values[cachedIdx^].time
+			t2 := values[cachedIdx^ + 1].time
+			dt := (time - t1) / (t2 - t1)
+			return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
+		case .Step:
+			return values[cachedIdx^].value
+		}
+		panic("Unreachable!")
+	}
+
 	for &object in scene.objects {
 		animationData := object.animation
 		if !animationData.playing || animationData.idx < 0 {
@@ -102,103 +170,28 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 		    animationData.timer -= animation.duration {}
 
 		for &node, nodeIdx in animation.nodes {
-			animationData.state[nodeIdx] = IMAT4
-			// (a *= b) == (a = a * b)
-			// therefore I *= T *= R *= S == I * T * R * S
-			if len(node.keyPositions) == 1 {
-				animationData.state[nodeIdx] *= translate(node.keyPositions[0].value)
-			} else if len(node.keyPositions) != 0 {
-				id := animationData.cache[nodeIdx].positionIdx
-				if id > u32(len(node.keyPositions)) {
-					id = 0
-				}
-				for true {
-					if node.keyPositions[id].time <= animationData.timer &&
-					   animationData.timer <= node.keyPositions[id + 1].time {
-						animationData.cache[nodeIdx].positionIdx = id
-						break
-					}
-					id += 1
-					if id == u32(len(node.keyPositions)) - 1 {
-						id = 0
-					}
-				}
-
-				positionIdx := animationData.cache[nodeIdx].positionIdx
-				thisTime := node.keyPositions[positionIdx].time
-				nextTime := node.keyPositions[positionIdx + 1].time
-				dt := (animationData.timer - thisTime) / (nextTime - thisTime)
-				animationData.state[nodeIdx] *= translate(
-					lerp(
-						node.keyPositions[positionIdx].value,
-						node.keyPositions[positionIdx + 1].value,
-						f32(dt),
+			animationData.state[nodeIdx] =
+				translate(
+					boneTransform(
+						node.keyPositions,
+						&animationData.cache[nodeIdx].positionIdx,
+						animationData.timer,
+					),
+				) *
+				quatToMat4(
+					boneTransform(
+						node.keyRotations,
+						&animationData.cache[nodeIdx].rotationIdx,
+						animationData.timer,
+					),
+				) *
+				scale(
+					boneTransform(
+						node.keyScales,
+						&animationData.cache[nodeIdx].scaleIdx,
+						animationData.timer,
 					),
 				)
-			}
-
-			if len(node.keyRotations) == 1 {
-				animationData.state[nodeIdx] *= quatToMat4(node.keyRotations[0].value)
-			} else if len(node.keyRotations) != 0 {
-				id := animationData.cache[nodeIdx].rotationIdx
-				if id > u32(len(node.keyRotations)) {
-					id = 0
-				}
-				for true {
-					if node.keyRotations[id].time <= animationData.timer &&
-					   animationData.timer <= node.keyRotations[id + 1].time {
-						animationData.cache[nodeIdx].rotationIdx = id
-						break
-					}
-					id += 1
-					if id == u32(len(node.keyRotations)) - 1 {
-						id = 0
-					}
-				}
-
-				rotationIdx := animationData.cache[nodeIdx].rotationIdx
-				thisTime := node.keyRotations[rotationIdx].time
-				nextTime := node.keyRotations[rotationIdx + 1].time
-				timeDiff := f32((animationData.timer - thisTime) / (nextTime - thisTime))
-				animationData.state[nodeIdx] *= quatToMat4(
-					slerp(
-						node.keyRotations[rotationIdx].value,
-						node.keyRotations[rotationIdx + 1].value,
-						f32(timeDiff),
-					),
-				)
-			}
-
-			if len(node.keyScales) == 1 {
-				animationData.state[nodeIdx] *= scale(node.keyScales[0].value)
-			} else if len(node.keyScales) != 0 {
-				id := animationData.cache[nodeIdx].scaleIdx
-				if id > u32(len(node.keyScales)) {
-					id = 0
-				}
-				for true {
-					if node.keyScales[id].time <= animationData.timer &&
-					   animationData.timer <= node.keyScales[id + 1].time {
-						animationData.cache[nodeIdx].scaleIdx = id
-						break
-					}
-					id += 1
-					if id == u32(len(node.keyScales)) - 1 {
-						id = 0
-					}
-				}
-
-				scaleIdx := animationData.cache[nodeIdx].scaleIdx
-				thisTime := node.keyScales[scaleIdx].time
-				nextTime := node.keyScales[scaleIdx + 1].time
-				timeDiff := f32((animationData.timer - thisTime) / (nextTime - thisTime))
-				value := lerp(
-					node.keyScales[scaleIdx].value,
-					node.keyScales[scaleIdx + 1].value,
-					timeDiff,
-				)
-				animationData.state[nodeIdx] *= scale(value)
-			}
 		}
 	}
 }
