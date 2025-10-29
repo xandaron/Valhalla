@@ -53,21 +53,8 @@ Planned features and improvements:
 
 - Improved omni-directional light shadow mapping
 - Directional light support
-- Expanded documentation and usage examples
-- Additional rendering techniques and optimizations
 - Raytracing
-
-## Contributing
-
-Contributions are welcome! Please open issues or pull requests for bug fixes, new features, or improvements. For major changes, discuss them in an issue first.
-
-## Feedback
-
-Feedback is appreciated! You can:
-
-- Email me (address available on my GitHub profile)
-- Ping me in the Odin Discord server (`@Xandaron`)
-- Open an issue or discussion on GitHub
+- Additional rendering techniques and optimizations
 
 ## License
 
