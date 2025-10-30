@@ -14,6 +14,7 @@ GameObject :: struct {
 deleteGameObject :: proc(object: ^GameObject) {
 	delete(object.name)
 	delete(object.textureIdxs)
+	deleteObjectAnimation(&object.animation)
 }
 
 changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {

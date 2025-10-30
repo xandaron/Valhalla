@@ -4899,18 +4899,19 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 	boneOffset: u32 = 1
 	instanceIdx := 0
 	for &model in scene.models {
-		for &instanceIdx in model.instances {
-			instance := &scene.objects[instanceIdx]
-			instanceData[instanceIdx] = {
+		for &objectIdx in model.instances {
+			value := objectIdx
+			object := &scene.objects[objectIdx]
+			instanceData[objectIdx] = {
 				modelTransform = transform(
-					instance.position + model.position,
-					instance.rotation * model.rotation,
-					instance.scale * model.scale,
+					object.position + model.position,
+					object.rotation * model.rotation,
+					object.scale * model.scale,
 				),
 				boneOffset     = boneOffset,
 			}
 
-			animationData := &instance.animation
+			animationData := &object.animation
 			if animationData.idx < 0 || len(model.skeleton) == 0 {
 				instanceData[instanceIdx].boneOffset = 0
 				continue
@@ -4926,8 +4927,8 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 				}
 			}
 
-			for boneIndex in 0 ..< u32(len(skeleton)) {
-				boneTransforms[boneOffset + boneIndex] *= skeleton[boneIndex].offsetMatrix
+			for boneIdx in 0 ..< u32(len(skeleton)) {
+				boneTransforms[boneOffset + boneIdx] *= skeleton[boneIdx].offsetMatrix
 			}
 			boneOffset += u32(len(skeleton))
 			instanceIdx += 1
@@ -4959,13 +4960,10 @@ updateTextureIndexBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scen
 	for &model in scene.models {
 		for &mesh, meshIdx in model.meshes {
 			for &objectIdx in model.instances {
-				instance := &scene.objects[objectIdx]
-				textureIndices[idx + int(TextureIndex.ALBEDO)] =
-					instance.textureIdxs[meshIdx][TextureIndex.ALBEDO]
-				textureIndices[idx + int(TextureIndex.NORMAL_MAP)] =
-					instance.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP]
-				// textureIndices[idx + int(TextureIndex.MATERIAL)] = instance.textureIdxs[meshIdx][TextureIndex.MATERIAL]
-				// textureIndices[idx + int(TextureIndex.ROUGHNESS)] = instance.textureIdxs[meshIdx][TextureIndex.ROUGHNESS]
+				object := &scene.objects[objectIdx]
+				for val in TextureIndex {
+					textureIndices[idx + int(val)] = object.textureIdxs[meshIdx][val]
+				}
 				idx += len(TextureIndex)
 			}
 		}
