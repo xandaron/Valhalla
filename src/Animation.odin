@@ -55,6 +55,7 @@ ObjectAnimation :: struct {
 
 deleteObjectAnimation :: proc(animation: ^ObjectAnimation) {
 	delete(animation.state)
+	delete(animation.cache)
 }
 
 ObjectAnimationCache :: struct {
@@ -143,10 +144,17 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 				fallthrough
 			}
 		case .Linear:
-			t1 := values[cachedIdx^].time
-			t2 := values[cachedIdx^ + 1].time
-			dt := (time - t1) / (t2 - t1)
-			return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
+		  when T == Quat {
+				t1 := values[cachedIdx^].time
+				t2 := values[cachedIdx^ + 1].time
+				dt := (time - t1) / (t2 - t1)
+				return slerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
+			} else {
+  			t1 := values[cachedIdx^].time
+  			t2 := values[cachedIdx^ + 1].time
+  			dt := (time - t1) / (t2 - t1)
+  			return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
+			}
 		case .Step:
 			return values[cachedIdx^].value
 		}
@@ -154,7 +162,7 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 	}
 
 	for &object in scene.objects {
-		animationData := object.animation
+		animationData := &object.animation
 		if !animationData.playing || animationData.idx < 0 {
 			continue
 		}

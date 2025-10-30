@@ -37,52 +37,66 @@ createNewScene :: proc() -> (scene: Scene) {
 
 	if loadSceneAssets(
 		   &scene,
-		   {"./assets/Wizard.glb", "./assets/cube.fbx"},
-		   {"./assets/albedo.png", "./assets/white.jpg", "./assets/normal.jpg"},
+		   {"./assets/cube/cube.fbx", "./assets/mage/Mage_Simplified.glb"},
+		   {"./assets/cube/white.jpg", "./assets/blank_normal.jpg", "./assets/mage/texture.png"},
 	   ) !=
 	   nil {
 		panic("Failed to load scene assets")
 	}
 
-	scene.models[0].name = strings.clone("Wizard")
-	scene.models[0].scale = {0.165, 0.165, 0.165}
-	scene.models[0].rotation = quatFromEuler(radians(f32(90.0)), 0, 0, .XYZ)
+	scene.models[0].name = strings.clone("Meter Cube")
+	scene.models[0].scale = {0.5, 0.5, 0.5}
 
-	scene.models[1].name = strings.clone("Meter Cube")
-	scene.models[1].scale = {0.5, 0.5, 0.5}
+	scene.models[1].name = strings.clone("Knight Model")
+	scene.models[1].scale = {0.165, 0.165, 0.165}
+	scene.models[1].rotation = quatFromEuler(0, 0, 0, .XYZ)
 
 	scene.clearColour = {0.5, 0.5, 0.5, 1.0}
 	scene.ambientLight = 0.25
 
-	scene.objects = make([dynamic]GameObject, 2)
-	scene.objects[0] = {
-		name = strings.clone("Wizard"),
-		position = {0, 0, 0},
-		rotation = IQUAT,
-		scale = {1, 1, 1},
-		modelIdx = 0,
-		instanceIdx = addInstance(&scene, &scene.models[0], 0),
-		textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[0].meshes)),
-		animation = ObjectAnimation{idx = -1},
+	append(
+		&scene.objects,
+		GameObject {
+			name = strings.clone("Floor"),
+			position = {0, -0.05, 0},
+			rotation = IQUAT,
+			scale = {10, 0.1, 10},
+			modelIdx = 0,
+			instanceIdx = addInstance(&scene, &scene.models[0], u32(len(scene.objects))),
+			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[0].meshes)),
+			animation = ObjectAnimation{idx = -1},
+		},
+	)
+
+	for i in 0 ..< len(scene.models[scene.objects[0].modelIdx].meshes) {
+		scene.objects[0].textureIdxs[i][TextureIndex.ALBEDO] = 0
+		scene.objects[0].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
 	}
 
-	scene.objects[0].textureIdxs[0][TextureIndex.ALBEDO] = 0
-	scene.objects[0].textureIdxs[0][TextureIndex.NORMAL_MAP] = 2
+	append(
+		&scene.objects,
+		GameObject {
+			name = strings.clone("Knight"),
+			position = {0, 0, 0},
+			rotation = IQUAT,
+			scale = {1, 1, 1},
+			modelIdx = 1,
+			instanceIdx = addInstance(&scene, &scene.models[1], u32(len(scene.objects))),
+			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[1].meshes)),
+			animation = ObjectAnimation {
+				idx = 0,
+				timer = 0,
+				state = make([]Mat4, len(scene.models[1].skeleton)),
+				cache = make([]ObjectAnimationCache, len(scene.models[1].skeleton)),
+				playing = true,
+				end = ObjectAnimationEnd{behavior = .Loop, transition = {}, nextIdx = -1},
+			},
+		},
+	)
 
-	scene.objects[1] = {
-		name = strings.clone("Floor"),
-		position = {0, -0.05, 0},
-		rotation = IQUAT,
-		scale = {10, 0.1, 10},
-		modelIdx = 1,
-		instanceIdx = addInstance(&scene, &scene.models[1], 1),
-		textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[1].meshes)),
-		animation = ObjectAnimation{idx = 0},
-	}
-
-	for i in 0 ..< len(scene.models[1].meshes) {
-		scene.objects[1].textureIdxs[i][TextureIndex.ALBEDO] = 1
-		scene.objects[1].textureIdxs[i][TextureIndex.NORMAL_MAP] = 2
+	for i in 0 ..< len(scene.models[scene.objects[1].modelIdx].meshes) {
+		scene.objects[1].textureIdxs[i][TextureIndex.ALBEDO] = 2
+		scene.objects[1].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
 	}
 
 	scene.lights = make([dynamic]PointLight, 1)
@@ -260,12 +274,11 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 	model: Model
 	model.meshes = make([]Mesh, aiScene.mNumMeshes)
 
-	boneMap := make(map[string]u32)
-	defer delete(boneMap)
+	boneNames := make(map[string]struct{})
+	defer delete(boneNames)
 
 	vertexCount: u32 = 0
 	indexCount: u32 = 0
-	boneCount: u32 = 0
 	for &mesh, meshIndex in model.meshes {
 		sceneMesh := aiScene.mMeshes[meshIndex]
 
@@ -283,13 +296,10 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 		}
 		vertexCount += mesh.vertexCount
 		indexCount += mesh.indexCount
-
-		for i in 0 ..< sceneMesh.mNumBones {
-			// Avoid duplicate bones
-			if str := aiStringToString(&sceneMesh.mBones[i].mName, context.temp_allocator);
-			   str not_in boneMap {
-				boneMap[str] = boneCount
-				boneCount += 1
+		
+		for &bone in sceneMesh.mBones[:sceneMesh.mNumBones] {
+		  if str := aiStringToString(&bone.mName, context.temp_allocator); str not_in boneNames {
+		    boneNames[str] = {}
 			}
 		}
 	}
@@ -298,9 +308,21 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 	reserve(&scene.vertices, u32(len(scene.vertices)) + vertexCount)
 	reserve(&scene.indices, u32(len(scene.indices)) + indexCount)
 
-	model.skeleton = make([]Bone, boneCount)
+	findBones :: proc(node: ^ai.Node, boneNames: ^map[string]struct{}, boneMap: ^map[string]u32) {
+		if str := aiStringToString(&node.mName, context.temp_allocator); str in boneNames {
+		  boneMap[str] = u32(len(boneMap))
+		}
+	  for &child in node.mChildren[:node.mNumChildren] {
+			findBones(child, boneNames, boneMap)
+	  }
+	}
 
-	vertexCount = 0
+	boneMap := make(map[string]u32)
+	defer delete(boneMap)
+
+	findBones(aiScene.mRootNode, &boneNames, &boneMap)
+	model.skeleton = make([]Bone, len(boneMap))
+
 	for &mesh, meshIndex in model.meshes {
 		sceneMesh := aiScene.mMeshes[meshIndex]
 
@@ -337,8 +359,7 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 
 			for weightIdx in 0 ..< sceneBone.mNumWeights {
 				weight := &sceneBone.mWeights[weightIdx]
-				vertex := &scene.vertices[u32(weight.mVertexId) + vertexCount]
-
+				vertex := &scene.vertices[u32(weight.mVertexId) + mesh.vertexOffset]
 
 				for n in 0 ..< 4 {
 					if vertex.weights[n] == 0 {
@@ -358,8 +379,8 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 	for idx in vertexOffset ..< u32(len(scene.vertices)) {
 		vertex := &scene.vertices[idx]
 		if sum := vertex.weights.x + vertex.weights.y + vertex.weights.z + vertex.weights.w;
-		   sum == 0.0 {
-			vertex.weights = {1.0, 0.0, 0.0, 0.0}
+		   sum == 0 {
+			vertex.weights = {1, 0, 0, 0}
 			vertex.bones = {0, 0, 0, 0}
 		} else if sum != 1 {
 			vertex.weights /= sum
@@ -398,7 +419,7 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 
 		searchNodeTree(aiScene.mRootNode, &model.skeleton, &boneMap)
 		model.animations = make([]Animation, aiScene.mNumAnimations)
-		for &animation, animationIndex in model.animations {
+		for &animation, animationIdx in model.animations {
 			translateInterpolation :: proc(
 				aiInterpolation: ai.Anim_Interpolation,
 			) -> InterpolationType {
@@ -415,7 +436,7 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 				panic("Unreachable!")
 			}
 
-			sceneAnimation := aiScene.mAnimations[animationIndex]
+			sceneAnimation := aiScene.mAnimations[animationIdx]
 
 			ticksToSeconds :=
 				1 / (sceneAnimation.mTicksPerSecond == 0.0 ? 1.0 : sceneAnimation.mTicksPerSecond)
@@ -433,8 +454,8 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 				}
 			}
 
-			for nodeIndex in 0 ..< sceneAnimation.mNumChannels {
-				animationNode := sceneAnimation.mChannels[nodeIndex]
+			for nodeIdx in 0 ..< sceneAnimation.mNumChannels {
+				animationNode := sceneAnimation.mChannels[nodeIdx]
 
 				boneIdx, exists :=
 					boneMap[aiStringToString(&animationNode.mNodeName, context.temp_allocator)]
