@@ -1,8 +1,13 @@
 package Valhalla
 
 Bone :: struct {
-	parentIndex:  u32,
+  name:         string,
+	parentIdx:    u32,
 	offsetMatrix: Mat4,
+}
+
+deleteBone :: proc(bone: ^Bone) {
+	delete(bone.name)
 }
 
 Animation :: struct {
@@ -144,16 +149,16 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 				fallthrough
 			}
 		case .Linear:
-		  when T == Quat {
+			when T == Quat {
 				t1 := values[cachedIdx^].time
 				t2 := values[cachedIdx^ + 1].time
 				dt := (time - t1) / (t2 - t1)
 				return slerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
 			} else {
-  			t1 := values[cachedIdx^].time
-  			t2 := values[cachedIdx^ + 1].time
-  			dt := (time - t1) / (t2 - t1)
-  			return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
+				t1 := values[cachedIdx^].time
+				t2 := values[cachedIdx^ + 1].time
+				dt := (time - t1) / (t2 - t1)
+				return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
 			}
 		case .Step:
 			return values[cachedIdx^].value
@@ -162,44 +167,55 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 	}
 
 	for &object in scene.objects {
-		animationData := &object.animation
-		if !animationData.playing || animationData.idx < 0 {
+		model := &scene.models[object.modelIdx]
+		if len(scene.models[object.modelIdx].skeleton) == 0 {
 			continue
 		}
 
-		animation := scene.models[object.modelIdx].animations[animationData.idx]
-
-		if animation.duration == 0 {
-			animationData.timer = 0
-		} else {
-			animationData.timer += f64(delta)
+		objectAnimation := &object.animation
+		if objectAnimation.playing {
+			objectAnimation.timer += f64(delta)
 		}
-		for ; animationData.timer > animation.duration;
-		    animationData.timer -= animation.duration {}
 
-		for &node, nodeIdx in animation.nodes {
-			animationData.state[nodeIdx] =
-				translate(
-					boneTransform(
-						node.keyPositions,
-						&animationData.cache[nodeIdx].positionIdx,
-						animationData.timer,
-					),
-				) *
-				quatToMat4(
-					boneTransform(
-						node.keyRotations,
-						&animationData.cache[nodeIdx].rotationIdx,
-						animationData.timer,
-					),
-				) *
-				scale(
-					boneTransform(
-						node.keyScales,
-						&animationData.cache[nodeIdx].scaleIdx,
-						animationData.timer,
-					),
-				)
+		if objectAnimation.idx >= 0 {
+			animation := scene.models[object.modelIdx].animations[objectAnimation.idx]
+			if animation.duration == 0 {
+				objectAnimation.timer = 0
+			} else {
+				objectAnimation.timer -=
+					floor(objectAnimation.timer / animation.duration) * animation.duration
+			}
+
+			objectAnimation.state[0] = IMAT4
+			for &node, nodeIdx in animation.nodes {
+				objectAnimation.state[nodeIdx] =
+					objectAnimation.state[model.skeleton[nodeIdx].parentIdx] *
+					translate(
+						boneTransform(
+							node.keyPositions,
+							&objectAnimation.cache[nodeIdx].positionIdx,
+							objectAnimation.timer,
+						),
+					) *
+					quatToMat4(
+						boneTransform(
+							node.keyRotations,
+							&objectAnimation.cache[nodeIdx].rotationIdx,
+							objectAnimation.timer,
+						),
+					) *
+					scale(
+						boneTransform(
+							node.keyScales,
+							&objectAnimation.cache[nodeIdx].scaleIdx,
+							objectAnimation.timer,
+						),
+					)
+			}
+		} else {
+			for &node in objectAnimation.state {
+				node = IMAT4
+			}
 		}
 	}
 }
