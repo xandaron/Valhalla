@@ -4903,33 +4903,40 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 			defer instanceIdx += 1
 			value := objectIdx
 			object := &scene.objects[objectIdx]
-			instanceData[objectIdx] = {
-				modelTransform = transform(
-					object.position + model.position,
-					object.rotation * model.rotation,
-					object.scale * model.scale,
-				),
+
+			modelTransform := transform(
+				object.position + model.position,
+				object.rotation * model.rotation,
+				object.scale * model.scale,
+			)
+
+			if object.attachment.targetIdx >= 0 {
+				attachmentObject := &scene.objects[object.attachment.targetIdx]
+				attachmentModel := &scene.models[attachmentObject.modelIdx]
+				bindpoint := &attachmentModel.bindpoints[object.attachment.bindpointIdx]
+
+				modelTransform *= attachmentObject.animation.state[bindpoint.boneIdx]
+				modelTransform *= transform(
+					attachmentObject.position,
+					attachmentObject.rotation,
+					attachmentObject.scale,
+				)
+			}
+
+			instanceData[instanceIdx] = {
+				modelTransform = modelTransform,
 				boneOffset     = boneOffset,
 			}
 
-			animationData := &object.animation
-			if animationData.idx < 0 || len(model.skeleton) == 0 {
+			if len(model.skeleton) == 0 {
 				instanceData[instanceIdx].boneOffset = 0
 				continue
 			}
 
 			skeleton := &model.skeleton
+			animationData := &object.animation
 			for &transform, idx in animationData.state {
-				if idx == 0 {
-					boneTransforms[boneOffset + u32(idx)] = transform
-				} else {
-					boneTransforms[boneOffset + u32(idx)] =
-						boneTransforms[boneOffset + skeleton[idx].parentIndex] * transform
-				}
-			}
-
-			for boneIdx in 0 ..< u32(len(skeleton)) {
-				boneTransforms[boneOffset + boneIdx] *= skeleton[boneIdx].offsetMatrix
+				boneTransforms[boneOffset + u32(idx)] = transform * skeleton[idx].offsetMatrix
 			}
 			boneOffset += u32(len(skeleton))
 		}

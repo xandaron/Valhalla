@@ -9,12 +9,19 @@ GameObject :: struct {
 	instanceIdx: u32,
 	textureIdxs: [][len(TextureIndex)]u32,
 	animation:   ObjectAnimation,
+	attachment:  Attachment,
 }
 
 deleteGameObject :: proc(object: ^GameObject) {
 	delete(object.name)
 	delete(object.textureIdxs)
 	deleteObjectAnimation(&object.animation)
+}
+
+Attachment :: struct {
+	targetIdx:    i32,
+	bindpointIdx: u32,
+	offsetMatrix: Mat4,
 }
 
 changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
@@ -50,6 +57,9 @@ deleteModel :: proc(model: ^Model) {
 	}
 	delete(model.meshes)
 
+	for &bone in model.skeleton {
+		deleteBone(&bone)
+	}
 	delete(model.skeleton)
 
 	for &animation in model.animations {
@@ -57,19 +67,17 @@ deleteModel :: proc(model: ^Model) {
 	}
 	delete(model.animations)
 
-	for &bindpoint in model.bindpoints {
-		deleteBindpoint(&bindpoint)
-	}
 	delete(model.bindpoints)
 
 	delete(model.instances)
 }
 
 Mesh :: struct {
-	name:         string,
+	name:                      string,
 	vertexOffset, vertexCount: u32,
-	indexOffset, indexCount: u32,
-	boundingBox:  AABB,
+	indexOffset, indexCount:   u32,
+	boundingBox:               AABB,
+	bindpoints:                []Bindpoint,
 }
 
 deleteMesh :: proc(mesh: ^Mesh) {
@@ -105,7 +113,7 @@ AABB :: struct {
 
 Bindpoint :: struct {
 	name:         string,
-	boneIndex:    i32,
+	boneIdx:      u32,
 	offsetMatrix: Mat4,
 }
 

@@ -53,6 +53,8 @@ sign :: math.sign
 clamp :: math.clamp
 round :: linalg.round
 ceil :: math.ceil
+floor :: math.floor
+floor_div :: math.floor_div
 
 pow :: linalg.pow
 sqrt :: math.sqrt
