@@ -4900,6 +4900,7 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 	instanceIdx := 0
 	for &model in scene.models {
 		for &objectIdx in model.instances {
+			defer instanceIdx += 1
 			value := objectIdx
 			object := &scene.objects[objectIdx]
 			instanceData[objectIdx] = {
@@ -4931,7 +4932,6 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 				boneTransforms[boneOffset + boneIdx] *= skeleton[boneIdx].offsetMatrix
 			}
 			boneOffset += u32(len(skeleton))
-			instanceIdx += 1
 		}
 	}
 
