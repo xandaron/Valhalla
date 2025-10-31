@@ -37,8 +37,9 @@ createNewScene :: proc() -> (scene: Scene) {
 		   &scene,
 		   {
 			   "./assets/cube/cube.fbx",
-			   "./assets/knight/Knight_Helmet.glb",
 			   "./assets/knight/Knight_Simplified.glb",
+			   "./assets/knight/Knight_Helmet.glb",
+			   "./assets/knight/Knight_Sword.glb",
 		   },
 		   {"./assets/cube/white.jpg", "./assets/blank_normal.jpg", "./assets/knight/texture.png"},
 	   ) !=
@@ -49,22 +50,36 @@ createNewScene :: proc() -> (scene: Scene) {
 	scene.models[0].name = strings.clone("Meter Cube")
 	scene.models[0].scale = {0.5, 0.5, 0.5}
 
-	scene.models[1].name = strings.clone("Knight Helmet")
+	scene.models[1].name = strings.clone("Knight Model")
 	scene.models[1].scale = {0.165, 0.165, 0.165}
 
-	scene.models[2].name = strings.clone("Knight Model")
+	scene.models[2].name = strings.clone("Knight Helmet")
 	scene.models[2].scale = {0.165, 0.165, 0.165}
 	
-	scene.models[2].bindpoints = make([]Bindpoint, 1)
-	for &bone, boneIdx in scene.models[2].skeleton {
+	scene.models[3].name = strings.clone("Knight Sword")
+	scene.models[3].scale = {0.165, 0.165, 0.165}
+	
+	scene.models[1].bindpoints = make([]Bindpoint, 3)
+	for &bone, boneIdx in scene.models[1].skeleton {
 	  if bone.name == "head" {
-			scene.models[2].bindpoints[0] = {
-        name = "Head",
+			scene.models[1].bindpoints[0] = {
+        name = "head",
    			boneIdx = u32(boneIdx),
    			offsetMatrix = IMAT4,
 			}
-			break
-		}
+		} else if bone.name == "hand.l" {
+  		scene.models[1].bindpoints[1] = {
+        name = "left hand",
+   			boneIdx = u32(boneIdx),
+   			offsetMatrix = IMAT4,
+  		}
+  	} else if bone.name == "hand.r" {
+   		scene.models[1].bindpoints[2] = {
+        name = "right hand",
+   			boneIdx = u32(boneIdx),
+   			offsetMatrix = IMAT4,
+   		}
+   	}
 	}
 
 	scene.clearColour = {0.5, 0.5, 0.5, 1.0}
@@ -92,7 +107,7 @@ createNewScene :: proc() -> (scene: Scene) {
 		scene.objects[objectIdx].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
 	}
 
-	modelIdx = 2
+	modelIdx = 1
 	objectIdx = u32(len(scene.objects))
 	append(
 		&scene.objects,
@@ -121,7 +136,7 @@ createNewScene :: proc() -> (scene: Scene) {
 		scene.objects[objectIdx].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
 	}
 
-	modelIdx = 1
+	modelIdx = 2
 	objectIdx = u32(len(scene.objects))
 	append(
 		&scene.objects,
@@ -137,7 +152,31 @@ createNewScene :: proc() -> (scene: Scene) {
 			attachment = {
   	 	  targetIdx = 1,
   			bindpointIdx = 0,
-  			offsetMatrix = IMAT4,
+			},
+		},
+	)
+
+	for i in 0 ..< len(scene.models[scene.objects[objectIdx].modelIdx].meshes) {
+		scene.objects[objectIdx].textureIdxs[i][TextureIndex.ALBEDO] = 2
+		scene.objects[objectIdx].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
+	}
+
+	modelIdx = 3
+	objectIdx = u32(len(scene.objects))
+	append(
+		&scene.objects,
+		GameObject {
+			name = strings.clone("Knight_Sword"),
+			position = {0, 0, 0},
+			rotation = IQUAT,
+			scale = {1, 1, 1},
+			modelIdx = modelIdx,
+			instanceIdx = addInstance(&scene, &scene.models[modelIdx], objectIdx),
+			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
+			animation = {idx = -1},
+			attachment = {
+  	 	  targetIdx = 1,
+  			bindpointIdx = 2,
 			},
 		},
 	)

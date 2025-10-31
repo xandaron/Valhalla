@@ -21,7 +21,6 @@ deleteGameObject :: proc(object: ^GameObject) {
 Attachment :: struct {
 	targetIdx:    i32,
 	bindpointIdx: u32,
-	offsetMatrix: Mat4,
 }
 
 changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
