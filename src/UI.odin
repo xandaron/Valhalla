@@ -122,6 +122,7 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 									animationData.timer = 0
 								}
 							}
+							imgui.EndCombo()
 						}
 					}
 
@@ -173,29 +174,17 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 
 					for mesh, meshIdx in scene.models[object.modelIdx].meshes {
 						if imgui.TreeNode(toCstring(mesh.name)) {
-							buf: [10]u8
-							num_str := strconv.write_uint(
-								buf[:],
-								u64(object.textureIdxs[meshIdx][TextureIndex.ALBEDO]),
-								10,
-							)
 							if imgui.BeginCombo(
 								"Albedo",
-								toCstring(fmt.tprintf("Texture %s", transmute(cstring)(&buf[0]))),
+								toCstring(scene.textures[object.textureIdxs[meshIdx][TextureIndex.ALBEDO]].name),
 							) {
-								for textureIdx in 0 ..< scene.textureCount {
+								for &texture, textureIdx in scene.textures {
 									if object.textureIdxs[meshIdx][TextureIndex.ALBEDO] ==
 									   u32(textureIdx) {
 										continue
 									}
 
-									buf: [10]u8
-									num_str := strconv.write_uint(buf[:], u64(textureIdx), 10)
-									if imgui.Selectable(
-										toCstring(
-											fmt.tprintf("Texture %s", transmute(cstring)(&buf[0])),
-										),
-									) {
+									if imgui.Selectable(toCstring(texture.name)) {
 										object.textureIdxs[meshIdx][TextureIndex.ALBEDO] = u32(
 											textureIdx,
 										)
@@ -209,27 +198,16 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 								imgui.EndCombo()
 							}
 
-							num_str = strconv.write_uint(
-								buf[:],
-								u64(object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP]),
-								10,
-							)
 							if imgui.BeginCombo(
 								"Normal Map",
-								toCstring(fmt.tprintf("Texture %s", transmute(cstring)(&buf[0]))),
+								toCstring(scene.textures[object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP]].name),
 							) {
-								for textureIdx in 0 ..< scene.textureCount {
+								for &texture, textureIdx in scene.textures {
 									if object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP] ==
 									   u32(textureIdx) {
 										continue
 									}
-									buf: [10]u8
-									num_str := strconv.write_uint(buf[:], u64(textureIdx), 10)
-									if imgui.Selectable(
-										toCstring(
-											fmt.tprintf("Texture %s", transmute(cstring)(&buf[0])),
-										),
-									) {
+									if imgui.Selectable(toCstring(texture.name)) {
 										object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP] = u32(
 											textureIdx,
 										)
