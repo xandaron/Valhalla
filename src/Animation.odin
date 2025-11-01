@@ -52,9 +52,9 @@ InterpolationType :: enum {
 ObjectAnimation :: struct {
 	idx:     i32,
 	timer:   f64,
+	playing: bool,
 	state:   []Mat4,
 	cache:   []ObjectAnimationCache,
-	playing: bool,
 	end:     ObjectAnimationEnd,
 }
 

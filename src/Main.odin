@@ -6,6 +6,7 @@ import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:time"
+import "core:strings"
 
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 
@@ -39,7 +40,6 @@ globals: struct {
 
 	// Graphics Engine Data
 	graphicsContext: GraphicsContext,
-	selectedObject:  ^GameObject,
 
 	// Scene Data
 	scenes:          [dynamic]Scene,
@@ -58,7 +58,6 @@ globals: struct {
 main :: proc() {
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
-
 
 	when ODIN_DEBUG {
 		tracker: mem.Tracking_Allocator
@@ -122,10 +121,22 @@ main :: proc() {
 	globals.graphicsContext, err = initVkGraphics(&valhallaInitInfo)
 	defer cleanupVkGraphics(&globals.graphicsContext)
 
-	append(&globals.scenes, createNewScene())
-	defer delete(globals.scenes)
-	defer deleteScene(&globals.scenes[0])
+	// {
+	// 	scene := createNewScene()
+	// 	scene.path = "./scene/knight.scene"
+	// 	saveScene(&scene)
+	// }
 
+	append(&globals.scenes, Scene {
+		path = "./scene/knight.scene",
+	})
+	lerr := loadScene(&globals.scenes[0])
+	if lerr != nil {
+		panic("Failed to load scene")
+	}
+	defer deleteScene(&globals.scenes[0])
+	defer delete(globals.scenes)
+	
 	if updateSceneBuffers(&globals.graphicsContext, &globals.scenes[0]) != nil {
 		panic("Failed to update scene")
 	}
@@ -243,7 +254,7 @@ castRay :: proc(
 	rayOrigin, rayDirection: Vec3,
 	scene: ^Scene,
 ) -> (
-	object: ^GameObject,
+	object: ^Object,
 	distance: f32,
 ) {
 	rayIntersects :: proc(

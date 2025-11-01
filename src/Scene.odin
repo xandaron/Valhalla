@@ -1,50 +1,100 @@
 package Valhalla
 
 import ai "../assimp"
+import "core:os/os2"
 import "core:strings"
 
 Scene :: struct {
-	filePath:      string,
-	name:          string,
+	path:         string,
+	name:         string,
 
 	// Scene Settings
-	ambientLight:  f32,
-	clearColour:   Vec4,
+	ambientLight: f32,
+	clearColour:  Vec4,
 
 	// Assets
-	models:        [dynamic]Model,
-	objects:       [dynamic]GameObject,
-	lights:        [dynamic]PointLight,
-	cameras:       [dynamic]Camera,
-	activeCamera:  u32,
-	vertexCount:   u32,
-	textureCount:  u32,
-	vertices:      [dynamic]Vertex,
-	indices:       [dynamic]u32,
-	instanceCount: int,
-	boneCount:     int,
+	models:       [dynamic]Model,
+	textures:     [dynamic]Texture,
+	objects:      [dynamic]Object,
+	lights:       [dynamic]PointLight,
+	cameras:      [dynamic]Camera,
+	activeCamera: u32,
+	vertexCount:  u32,
+	vertices:     [dynamic]Vertex,
+	indices:      [dynamic]u32,
+	boneCount:    int,
 
 	// Graphics Data
-	buffers:       SceneBuffers,
+	buffers:      SceneBuffers,
+}
+
+Texture :: struct {
+	path:      string,
+	assetPath: string,
+	name:      string,
+	// I want to transition to having multiple vk.Images and binding them as opposed to how I do it right now.
+	// vkImage: vk.Image,
+	// memory:  vk.DeviceMemory,
+	// view:    vk.ImageView,
+	// format:  vk.Format,
+	// sampler: u32,
+}
+
+deleteTexture :: proc(texture: ^Texture) {
+	delete(texture.path)
+	delete(texture.assetPath)
+	delete(texture.name)
 }
 
 createNewScene :: proc() -> (scene: Scene) {
-	scene.filePath = ""
+	scene.path = ""
 	scene.name = strings.clone("New Scene")
 	scene.boneCount = 1
 
-	if loadSceneAssets(
-		   &scene,
-		   {
-			   "./assets/cube/cube.fbx",
-			   "./assets/knight/Knight_Simplified.glb",
-			   "./assets/knight/Knight_Helmet.glb",
-			   "./assets/knight/Knight_Sword.glb",
-		   },
-		   {"./assets/cube/white.jpg", "./assets/blank_normal.jpg", "./assets/knight/texture.png"},
-	   ) !=
-	   nil {
-		panic("Failed to load scene assets")
+	modelPaths := [?]string {
+		strings.clone("./assets/cube/cube.fbx"),
+		strings.clone("./assets/knight/Knight_Simplified.glb"),
+		strings.clone("./assets/knight/Knight_Helmet.glb"),
+		strings.clone("./assets/knight/Knight_Sword.glb"),
+	}
+	modelComponentsPaths := [?]string {
+		strings.clone("./scene_components/models/cube.model"),
+		strings.clone("./scene_components/models/Knight.model"),
+		strings.clone("./scene_components/models/Knight_Helmet.model"),
+		"./scene_components/models/Knight_Sword.model",
+	}
+
+	texturePaths := [?]string {
+		strings.clone("./assets/cube/white.jpg"),
+		strings.clone("./assets/blank_normal.jpg"),
+		strings.clone("./assets/knight/texture.png"),
+	}
+	textureComponentsPaths := [?]string {
+		strings.clone("./scene_components/textures/cube.texture"),
+		strings.clone("./scene_components/textures/blank_normal.texture"),
+		strings.clone("./scene_components/textures/knight.texture"),
+	}
+	texNames := [?]string{"Cube Texture", "Blank Normal Texture", "Knight Texture"}
+
+	scene.models = make([dynamic]Model, len(modelPaths))
+	scene.textures = make([dynamic]Texture, len(texturePaths))
+
+	for path, idx in modelPaths {
+		scene.models[idx].path = modelComponentsPaths[idx]
+		scene.models[idx].assetPath = path
+		loadModel(&scene, &scene.models[idx])
+	}
+
+	for path, idx in texturePaths {
+		scene.textures[idx].path = textureComponentsPaths[idx]
+		scene.textures[idx].assetPath = path
+		scene.textures[idx].name = texNames[idx]
+	}
+
+	err := loadImages(&globals.graphicsContext, &scene, texturePaths[:])
+	if err != nil {
+		logf(.Error, "Could not load textures: %v", err)
+		return {}
 	}
 
 	scene.models[0].name = strings.clone("Meter Cube")
@@ -55,31 +105,31 @@ createNewScene :: proc() -> (scene: Scene) {
 
 	scene.models[2].name = strings.clone("Knight Helmet")
 	scene.models[2].scale = {0.165, 0.165, 0.165}
-	
+
 	scene.models[3].name = strings.clone("Knight Sword")
 	scene.models[3].scale = {0.165, 0.165, 0.165}
-	
-	scene.models[1].bindpoints = make([]Bindpoint, 3)
+
+	scene.models[1].bindpoints = make([dynamic]Bindpoint, 3)
 	for &bone, boneIdx in scene.models[1].skeleton {
-	  if bone.name == "head" {
+		if bone.name == "head" {
 			scene.models[1].bindpoints[0] = {
-        name = "head",
-   			boneIdx = u32(boneIdx),
-   			offsetMatrix = IMAT4,
+				name         = "head",
+				boneIdx      = u32(boneIdx),
+				offsetMatrix = IMAT4,
 			}
 		} else if bone.name == "hand.l" {
-  		scene.models[1].bindpoints[1] = {
-        name = "left hand",
-   			boneIdx = u32(boneIdx),
-   			offsetMatrix = IMAT4,
-  		}
-  	} else if bone.name == "hand.r" {
-   		scene.models[1].bindpoints[2] = {
-        name = "right hand",
-   			boneIdx = u32(boneIdx),
-   			offsetMatrix = IMAT4,
-   		}
-   	}
+			scene.models[1].bindpoints[1] = {
+				name         = "left hand",
+				boneIdx      = u32(boneIdx),
+				offsetMatrix = IMAT4,
+			}
+		} else if bone.name == "hand.r" {
+			scene.models[1].bindpoints[2] = {
+				name         = "right hand",
+				boneIdx      = u32(boneIdx),
+				offsetMatrix = IMAT4,
+			}
+		}
 	}
 
 	scene.clearColour = {0.5, 0.5, 0.5, 1.0}
@@ -89,7 +139,7 @@ createNewScene :: proc() -> (scene: Scene) {
 	objectIdx: u32 = 0
 	append(
 		&scene.objects,
-		GameObject {
+		Object {
 			name = strings.clone("Floor"),
 			position = {0, -0.05, 0},
 			rotation = IQUAT,
@@ -111,7 +161,7 @@ createNewScene :: proc() -> (scene: Scene) {
 	objectIdx = u32(len(scene.objects))
 	append(
 		&scene.objects,
-		GameObject {
+		Object {
 			name = strings.clone("Knight"),
 			position = {0, 0, 0},
 			rotation = IQUAT,
@@ -140,7 +190,7 @@ createNewScene :: proc() -> (scene: Scene) {
 	objectIdx = u32(len(scene.objects))
 	append(
 		&scene.objects,
-		GameObject {
+		Object {
 			name = strings.clone("Knight_Helmet"),
 			position = {0, 0, 0},
 			rotation = IQUAT,
@@ -149,10 +199,7 @@ createNewScene :: proc() -> (scene: Scene) {
 			instanceIdx = addInstance(&scene, &scene.models[modelIdx], objectIdx),
 			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
 			animation = {idx = -1},
-			attachment = {
-  	 	  targetIdx = 1,
-  			bindpointIdx = 0,
-			},
+			attachment = {targetIdx = 1, bindpointIdx = 0},
 		},
 	)
 
@@ -165,7 +212,7 @@ createNewScene :: proc() -> (scene: Scene) {
 	objectIdx = u32(len(scene.objects))
 	append(
 		&scene.objects,
-		GameObject {
+		Object {
 			name = strings.clone("Knight_Sword"),
 			position = {0, 0, 0},
 			rotation = IQUAT,
@@ -174,10 +221,7 @@ createNewScene :: proc() -> (scene: Scene) {
 			instanceIdx = addInstance(&scene, &scene.models[modelIdx], objectIdx),
 			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
 			animation = {idx = -1},
-			attachment = {
-  	 	  targetIdx = 1,
-  			bindpointIdx = 2,
-			},
+			attachment = {targetIdx = 1, bindpointIdx = 2},
 		},
 	)
 
@@ -212,13 +256,17 @@ createNewScene :: proc() -> (scene: Scene) {
 }
 
 deleteScene :: proc(scene: ^Scene) {
-	delete(scene.filePath)
 	delete(scene.name)
 
 	for &model in scene.models {
 		deleteModel(&model)
 	}
 	delete(scene.models)
+	
+	for &texture in scene.textures {
+		deleteTexture(&texture)
+	}
+	delete(scene.textures)
 
 	for &object in scene.objects {
 		deleteGameObject(&object)
@@ -241,24 +289,382 @@ deleteScene :: proc(scene: ^Scene) {
 	deleteSceneBuffers(&globals.graphicsContext, &scene.buffers)
 }
 
-loadSceneAssets :: proc(scene: ^Scene, modelPaths: []string, texturePaths: []string) -> Error {
-	// Load Models
-	for path in modelPaths {
-		if err := loadModel(path, scene); err != nil {
-			return err
+SceneData :: struct {
+	nameLength:   u32,
+	ambientLight: f32,
+	clearColour:  Vec4,
+	modelCount:   u32,
+	textureCount: u32,
+	objectCount:  u32,
+	lightCount:   u32,
+	cameraCount:  u32,
+}
+
+ObjectComponent :: struct {
+	nameLength:    u32,
+	position:      Vec3,
+	rotation:      Quat,
+	scale:         Vec3,
+	modelIdx:      u32,
+	texturesCount: u32,
+	animation:     AnimationComponent,
+	attachment:    Attachment,
+}
+
+AnimationComponent :: struct {
+	idx:     i32,
+	timer:   f64,
+	playing: bool,
+	end:     ObjectAnimationEnd,
+}
+
+LightComponent :: struct {
+	nameLength: u32,
+	position:   Vec3,
+	colour:     Vec3,
+	brightness: f32,
+	dropoff:    f32,
+}
+
+CameraComponent :: struct {
+	nameLength: u32,
+	mode:       CameraMode,
+	eye:        Vec3,
+	center:     Vec3,
+	up:         Vec3,
+	fov:        f32,
+	near:       f32,
+	far:        f32,
+}
+
+SaveError :: enum {
+	None,
+	InvalidScene,
+	InvalidSceneData,
+	IO,
+}
+
+saveScene :: proc(scene: ^Scene) -> SaveError {
+	if scene == nil {
+		log(.Error, "Scene is nil")
+		return .InvalidScene
+	} else if scene.path == "" {
+		log(.Error, "Scene path is empty")
+		return .InvalidScene
+	}
+
+	for &model in scene.models {
+		if saveModelComponent(&model) != .None {
+			return .InvalidSceneData
 		}
 	}
 
-	// Load Textures
-	if err := loadImages(&globals.graphicsContext, scene, texturePaths); err != nil {
-		return err
+	for &texture in scene.textures {
+		if saveTextureComponent(&texture) != .None {
+			return .InvalidSceneData
+		}
 	}
-	scene.textureCount = u32(len(texturePaths))
 
-	return nil
+	file, err := os2.open(scene.path, {.Write, .Trunc, .Create})
+	if err != nil {
+		return .IO
+	}
+	defer os2.close(file)
+
+	saveData := SceneData {
+		nameLength   = u32(len(scene.name)),
+		ambientLight = scene.ambientLight,
+		clearColour  = scene.clearColour,
+		modelCount   = u32(len(scene.models)),
+		textureCount = u32(len(scene.textures)),
+		objectCount  = u32(len(scene.objects)),
+		lightCount   = u32(len(scene.lights)),
+		cameraCount  = u32(len(scene.cameras)),
+	}
+	_, err = os2.write_ptr(file, &saveData, size_of(SceneData))
+	if err != nil {
+		return .IO
+	}
+	_, err = os2.write_string(file, scene.name)
+	if err != nil {
+		return .IO
+	}
+
+	for &model in scene.models {
+		length := u32(len(model.path))
+		os2.write_ptr(file, &length, size_of(u32))
+		os2.write_string(file, model.path)
+	}
+
+	for &texture in scene.textures {
+		length := u32(len(texture.path))
+		os2.write_ptr(file, &length, size_of(u32))
+		os2.write_string(file, texture.path)
+	}
+
+	for &object in scene.objects {
+		objectData := ObjectComponent {
+			nameLength = u32(len(object.name)),
+			position = object.position,
+			rotation = object.rotation,
+			scale = object.scale,
+			modelIdx = object.modelIdx,
+			texturesCount = u32(len(object.textureIdxs)),
+			animation = AnimationComponent {
+				idx = object.animation.idx,
+				timer = object.animation.timer,
+				playing = object.animation.playing,
+				end = object.animation.end,
+			},
+			attachment = object.attachment,
+		}
+		os2.write_ptr(file, &objectData, size_of(ObjectComponent))
+		os2.write_string(file, object.name)
+		os2.write_ptr(
+			file,
+			raw_data(object.textureIdxs),
+			len(object.textureIdxs) * size_of([len(TextureIndex)]u32),
+		)
+	}
+
+	for &light in scene.lights {
+		lightData := LightComponent {
+			nameLength = u32(len(light.name)),
+			position   = light.position,
+			colour     = light.colour,
+			brightness = light.brightness,
+			dropoff    = light.dropoff,
+		}
+		os2.write_ptr(file, &lightData, size_of(LightComponent))
+		os2.write_string(file, light.name)
+	}
+
+	for &camera in scene.cameras {
+		cameraData := CameraComponent {
+			nameLength = u32(len(camera.name)),
+			mode       = camera.mode,
+			eye        = camera.eye,
+			center     = camera.center,
+			up         = camera.up,
+			fov        = camera.fov,
+			near       = camera.near,
+			far        = camera.far,
+		}
+		os2.write_ptr(file, &cameraData, size_of(CameraComponent))
+		os2.write_string(file, camera.name)
+	}
+
+	return .None
 }
 
-loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
+LoadError :: enum {
+	None,
+	InvalidArgument,
+	IO,
+	Asset,
+}
+
+loadScene :: proc(scene: ^Scene) -> LoadError {
+	if scene == nil || scene.path == "" {
+		return .InvalidArgument
+	}
+
+	file, err := os2.open(scene.path, {.Read})
+	if err != nil {
+		return .IO
+	}
+	defer os2.close(file)
+
+	sceneData: SceneData
+	os2.read_ptr(file, &sceneData, size_of(SceneData))
+
+	scene.name         = string(make([]byte, sceneData.nameLength))
+	scene.ambientLight = sceneData.ambientLight
+	scene.clearColour  = sceneData.clearColour
+	scene.models       = make([dynamic]Model, sceneData.modelCount)
+	scene.textures     = make([dynamic]Texture, sceneData.textureCount)
+	scene.objects      = make([dynamic]Object, sceneData.objectCount)
+	scene.lights       = make([dynamic]PointLight, sceneData.lightCount)
+	scene.cameras      = make([dynamic]Camera, sceneData.cameraCount)
+	scene.boneCount    = 1
+
+	os2.read(file, transmute([]byte)scene.name)
+
+	for &model in scene.models {
+		pathLength: u32
+		os2.read_ptr(file, &pathLength, size_of(u32))
+		modelPath := make([]byte, pathLength)
+		os2.read(file, modelPath)
+
+		lerr: LoadError
+		model, lerr = loadModelComponent(string(modelPath))
+		if lerr != .None {
+			logf(.Error, "Failed to load model \"%s\": %v", modelPath, lerr)
+			return lerr
+		}
+		model.path = string(modelPath)
+
+		lerr = loadModel(scene, &model)
+		if lerr != .None {
+			logf(.Error, "Failed to load model data \"%s\": %v", modelPath, lerr)
+			return .Asset
+		}
+	}
+
+	texPaths := make([]string, sceneData.textureCount)
+	defer delete(texPaths)
+	for &texture, idx in scene.textures {
+		pathLength: u32
+		os2.read_ptr(file, &pathLength, size_of(u32))
+		texturePath := make([]byte, pathLength)
+		os2.read(file, texturePath)
+
+		lerr: LoadError
+		texture, lerr = loadTextureComponent(string(texturePath))
+		if lerr != .None {
+			logf(.Error, "Failed to load texture \"%s\": %v", texturePath, lerr)
+			return lerr
+		}
+		texture.path = string(texturePath)
+
+		texPaths[idx] = texture.assetPath
+	}
+	lerr := loadImages(&globals.graphicsContext, scene, texPaths)
+	if lerr != nil {
+		logf(.Error, "Failed to load images: %v", lerr)
+		return .Asset
+	}
+
+	for &object, objectIdx in scene.objects {
+		objectData: ObjectComponent
+		os2.read_ptr(file, &objectData, size_of(ObjectComponent))
+		object = {
+			name = string(make([]byte, objectData.nameLength)),
+			position = objectData.position,
+			rotation = objectData.rotation,
+			scale = objectData.scale,
+			modelIdx = objectData.modelIdx,
+			textureIdxs = make([][len(TextureIndex)]u32, objectData.texturesCount),
+			animation = ObjectAnimation {
+				idx = objectData.animation.idx,
+				timer = objectData.animation.timer,
+				playing = objectData.animation.playing,
+				state = make([]Mat4, len(scene.models[objectData.modelIdx].skeleton)),
+				cache = make([]ObjectAnimationCache, len(scene.models[objectData.modelIdx].skeleton)),
+				end = objectData.animation.end,
+			},
+			attachment = objectData.attachment,
+		}
+		os2.read(file, transmute([]byte)object.name)
+		os2.read_ptr(
+			file,
+			raw_data(object.textureIdxs),
+			int(objectData.texturesCount) * size_of([len(TextureIndex)]u32),
+		)
+		object.instanceIdx = addInstance(scene, &scene.models[object.modelIdx], u32(objectIdx))
+	}
+
+	for &light in scene.lights {
+		lightData: LightComponent
+		os2.read_ptr(file, &lightData, size_of(LightComponent))
+		light = {
+			name       = string(make([]byte, lightData.nameLength)),
+			position   = lightData.position,
+			colour     = lightData.colour,
+			brightness = lightData.brightness,
+			dropoff    = lightData.dropoff,
+		}
+		os2.read(file, transmute([]byte)light.name)
+	}
+
+	for &camera in scene.cameras {
+		cameraData: CameraComponent
+		os2.read_ptr(file, &cameraData, size_of(CameraComponent))
+		camera = {
+			name   = string(make([]byte, cameraData.nameLength)),
+			eye    = cameraData.eye,
+			center = cameraData.center,
+			up     = cameraData.up,
+			fov    = cameraData.fov,
+			near   = cameraData.near,
+			far    = cameraData.far,
+		}
+		os2.read(file, transmute([]byte)camera.name)
+	}
+
+	return .None
+}
+
+ModelComponent :: struct {
+	nameLength:     u32,
+	pathLength:     u32,
+	position:       Vec3,
+	rotation:       Quat,
+	scale:          Vec3,
+	bindpointCount: u32,
+}
+
+saveModelComponent :: proc(model: ^Model) -> SaveError {
+	if model.path == "" {
+		logf(.Error, "Model \"%s\" path is empty", model.name)
+		return .InvalidSceneData
+	}
+
+	file, err := os2.open(model.path, {.Write, .Create, .Trunc})
+	if err != nil {
+		return .InvalidSceneData
+	}
+	defer os2.close(file)
+
+	modelData := ModelComponent {
+		nameLength     = u32(len(model.name)),
+		pathLength     = u32(len(model.assetPath)),
+		position       = model.position,
+		rotation       = model.rotation,
+		scale          = model.scale,
+		bindpointCount = u32(len(model.bindpoints)),
+	}
+	os2.write_ptr(file, &modelData, size_of(ModelComponent))
+	os2.write_string(file, model.name)
+	os2.write_string(file, model.assetPath)
+	os2.write_ptr(file, raw_data(model.bindpoints), len(model.bindpoints) * size_of(Bindpoint))
+
+	return .None
+}
+
+loadModelComponent :: proc(path: string) -> (Model, LoadError) {
+	if path == "" {
+		return {}, .InvalidArgument
+	}
+
+	file, err := os2.open(path, {.Read})
+	if err != nil {
+		return {}, .IO
+	}
+
+	modelData: ModelComponent
+	os2.read_ptr(file, &modelData, size_of(ModelComponent))
+
+	model := Model {
+		assetPath  = string(make([]byte, modelData.pathLength)),
+		name       = string(make([]byte, modelData.nameLength)),
+		position   = modelData.position,
+		rotation   = modelData.rotation,
+		scale      = modelData.scale,
+		bindpoints = make([dynamic]Bindpoint, modelData.bindpointCount),
+	}
+	os2.read(file, transmute([]byte)model.name)
+	os2.read(file, transmute([]byte)model.assetPath)
+	os2.read_ptr(
+		file,
+		raw_data(model.bindpoints),
+		int(modelData.bindpointCount * size_of(Bindpoint)),
+	)
+
+	return model, .None
+}
+
+loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 	aiStringToString :: proc(aiStr: ^ai.String, allocator := context.allocator) -> string {
 		return strings.clone_from_bytes(
 			transmute([]u8)aiStr.data[:aiStr.length],
@@ -342,50 +748,57 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 	}
 
 	aiScene := ai.ImportFileExWithProperties(
-		strings.clone_to_cstring(filename, context.temp_allocator),
+		strings.clone_to_cstring(model.assetPath, context.temp_allocator),
 		IMPORT_FLAGS,
 		nil,
 		propertyStore,
 	)
 	if aiScene == nil {
 		logf(.Error, "Failed to load file: %s", ai.GetErrorString())
-		return .FailedToLoadFile
+		return .IO
 	}
 	defer ai.FreeScene(aiScene)
 
 	if aiScene.mNumMeshes == 0 {
 		log(.Error, "Model has no meshes!")
-		return .InvalidFileData
+		return .InvalidArgument
 	}
 
-	model: Model
+	// I'm finding meshes this way as the names of the meshes are rarely correct so we use the node name instead.
+	findMeshes :: proc(
+		aiScene: ^ai.Scene,
+		node: ^ai.Node,
+		meshes: ^[]Mesh,
+		boneNames: ^map[string]struct{},
+	) {
+		if node.mNumMeshes == 1 {
+			mesh := aiScene.mMeshes[node.mMeshes[0]]
+
+			meshes[node.mMeshes[0]] = {
+				name        = aiStringToString(&node.mName),
+				vertexCount = mesh.mNumVertices,
+				indexCount  = mesh.mNumFaces * 3,
+				boundingBox = {mesh.mAABB.mMin, mesh.mAABB.mMax},
+			}
+
+			for &bone in mesh.mBones[:mesh.mNumBones] {
+				if str := aiStringToString(&bone.mName, context.temp_allocator);
+				   str not_in boneNames {
+					boneNames[str] = {}
+				}
+			}
+		}
+
+		for &child in node.mChildren[:node.mNumChildren] {
+			findMeshes(aiScene, child, meshes, boneNames)
+		}
+	}
+
 	model.meshes = make([]Mesh, aiScene.mNumMeshes)
 
 	boneNames := make(map[string]struct{})
 	defer delete(boneNames)
-
-	for &mesh, meshIndex in model.meshes {
-		sceneMesh := aiScene.mMeshes[meshIndex]
-
-		if .TRIANGLE not_in sceneMesh.mPrimitiveTypes {
-			continue
-		}
-
-		mesh = {
-			name = aiStringToString(&sceneMesh.mName),
-			vertexOffset = u32(len(scene.vertices)),
-			vertexCount = sceneMesh.mNumVertices,
-			indexOffset = u32(len(scene.indices)),
-			indexCount = sceneMesh.mNumFaces * 3,
-			boundingBox = {min = sceneMesh.mAABB.mMin, max = sceneMesh.mAABB.mMax},
-		}
-
-		for &bone in sceneMesh.mBones[:sceneMesh.mNumBones] {
-			if str := aiStringToString(&bone.mName, context.temp_allocator); str not_in boneNames {
-				boneNames[str] = {}
-			}
-		}
-	}
+	findMeshes(aiScene, aiScene.mRootNode, &model.meshes, &boneNames)
 
 	findBones :: proc(node: ^ai.Node, boneNames: ^map[string]struct{}, boneMap: ^map[string]u32) {
 		if str := aiStringToString(&node.mName, context.temp_allocator); str in boneNames {
@@ -621,6 +1034,62 @@ loadModel :: proc(filename: string, scene: ^Scene) -> LoaderError {
 		}
 	}
 
-	append(&scene.models, model)
 	return .None
+}
+
+TextureComponent :: struct {
+	nameLength: u32,
+	pathLength: u32,
+	// In the future I should generate bitmaps from the image at path
+	// and save the bitmap in a file so I can load it later
+	// width, height: u32,
+	// miplevels: u32,
+	// data: []byte,
+}
+
+saveTextureComponent :: proc(texture: ^Texture) -> SaveError {
+	if texture.path == "" {
+		logf(.Error, "Texture \"%s\" path is empty", texture.name)
+		return .InvalidSceneData
+	}
+
+	file, err := os2.open(texture.path, {.Write, .Create, .Trunc})
+	if err != nil {
+		return .IO
+	}
+	defer os2.close(file)
+
+	textureData := TextureComponent {
+		nameLength = u32(len(texture.name)),
+		pathLength = u32(len(texture.assetPath)),
+	}
+	os2.write_ptr(file, &textureData, size_of(TextureComponent))
+	os2.write_string(file, texture.name)
+	os2.write_string(file, texture.assetPath)
+
+	return .None
+}
+
+loadTextureComponent :: proc(path: string) -> (Texture, LoadError) {
+	if path == "" {
+		return {}, .InvalidArgument
+	}
+
+	file, err := os2.open(path, {.Read})
+	if err != nil {
+		return {}, .IO
+	}
+	defer os2.close(file)
+
+	textureData: TextureComponent
+	os2.read_ptr(file, &textureData, size_of(TextureComponent))
+
+	texture := Texture {
+		assetPath = string(make([]byte, textureData.pathLength)),
+		name      = string(make([]byte, textureData.nameLength)),
+	}
+	os2.read(file, transmute([]byte)texture.name)
+	os2.read(file, transmute([]byte)texture.assetPath)
+
+	return texture, .None
 }

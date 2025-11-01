@@ -1,6 +1,6 @@
 package Valhalla
 
-GameObject :: struct {
+Object :: struct {
 	name:        string,
 	position:    Vec3,
 	rotation:    Quat,
@@ -12,7 +12,7 @@ GameObject :: struct {
 	attachment:  Attachment,
 }
 
-deleteGameObject :: proc(object: ^GameObject) {
+deleteGameObject :: proc(object: ^Object) {
 	delete(object.name)
 	delete(object.textureIdxs)
 	deleteObjectAnimation(&object.animation)
@@ -37,6 +37,8 @@ changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
 }
 
 Model :: struct {
+	path:       string,
+	assetPath:  string,
 	name:       string,
 	position:   Vec3,
 	rotation:   Quat,
@@ -44,11 +46,13 @@ Model :: struct {
 	meshes:     []Mesh,
 	skeleton:   []Bone,
 	animations: []Animation,
-	bindpoints: []Bindpoint,
+	bindpoints: [dynamic]Bindpoint,
 	instances:  [dynamic]u32, // Index of game objects using this model
 }
 
 deleteModel :: proc(model: ^Model) {
+	delete(model.path)
+	delete(model.assetPath)
 	delete(model.name)
 
 	for &mesh in model.meshes {
@@ -85,7 +89,6 @@ deleteMesh :: proc(mesh: ^Mesh) {
 
 addInstance :: proc(scene: ^Scene, model: ^Model, objectIdx: u32) -> u32 {
 	append(&model.instances, objectIdx)
-	scene.instanceCount += 1
 	scene.boneCount += len(model.skeleton)
 	for &mesh in model.meshes {
 		scene.vertexCount += mesh.vertexCount
@@ -99,7 +102,6 @@ removeInstance :: proc(scene: ^Scene, model: ^Model, instanceIdx: u32) {
 		// Update the moved instance's index
 		scene.objects[model.instances[instanceIdx]].instanceIdx = instanceIdx
 	}
-	scene.instanceCount -= 1
 	scene.boneCount -= len(model.skeleton)
 	for &mesh in model.meshes {
 		scene.vertexCount -= mesh.vertexCount

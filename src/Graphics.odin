@@ -2563,7 +2563,7 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 
 	updateShadowMapFrameBuffer(graphicsContext, scene)
 
-	instanceBufferSize := size_of(InstanceInfo) * scene.instanceCount
+	instanceBufferSize := size_of(InstanceInfo) * len(scene.objects)
 	boneBufferSize := size_of(Mat4) * scene.boneCount
 	lightBufferSize := size_of(LightData) * len(scene.lights)
 	transformBufferSize := size_of(Mat4) * scene.vertexCount
@@ -2957,7 +2957,7 @@ updateDescriptorSets :: proc(
 
 	instanceBufferInfo: vk.DescriptorBufferInfo = {
 		offset = 0,
-		range  = vk.DeviceSize(size_of(InstanceInfo) * scene.instanceCount),
+		range  = vk.DeviceSize(size_of(InstanceInfo) * len(scene.objects)),
 	}
 
 	boneBufferInfo: vk.DescriptorBufferInfo = {
@@ -4893,7 +4893,7 @@ updateUniformBuffer :: proc(
 @(private = "file")
 updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, delta: f32) {
 	boneTransforms := make([]Mat4, scene.boneCount, allocator = context.temp_allocator)
-	instanceData := make([]InstanceInfo, scene.instanceCount, allocator = context.temp_allocator)
+	instanceData := make([]InstanceInfo, len(scene.objects), allocator = context.temp_allocator)
 
 	boneTransforms[0] = IMAT4
 	boneOffset: u32 = 1
@@ -4950,7 +4950,7 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 	mem.copy(
 		scene.buffers.instanceBuffers[graphicsContext.currentFrame].mapped,
 		raw_data(instanceData),
-		scene.instanceCount * size_of(InstanceInfo),
+		len(scene.objects) * size_of(InstanceInfo),
 	)
 }
 
