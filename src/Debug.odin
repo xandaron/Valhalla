@@ -1,11 +1,10 @@
 package Valhalla
 
 import "base:runtime"
-import "core:fmt"
 import logging "core:log"
 import vk "vendor:vulkan"
 
-VK_DEBUG_MESSENGER_CREATE_INFO :: vk.DebugUtilsMessengerCreateInfoEXT {
+VK_DEBUG_MESSENGER_CREATE_INFO := vk.DebugUtilsMessengerCreateInfoEXT {
 	sType           = vk.StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 	pNext           = nil,
 	messageSeverity = {.ERROR, .WARNING, .INFO},

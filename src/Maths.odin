@@ -40,7 +40,6 @@ dot :: linalg.dot
 lerp :: proc {
 	linalg.lerp,
 	vec3Lerp,
-	vec4Lerp,
 }
 slerp :: linalg.quaternion_slerp_f32
 
@@ -87,10 +86,6 @@ maxVec3 :: proc(a, b: Vec3) -> Vec3 {
 }
 
 vec3Lerp :: proc(a, b: Vec3, t: f32) -> Vec3 {
-	return a + (b - a) * t
-}
-
-vec4Lerp :: proc(a, b: Vec4, t: f32) -> Vec4 {
 	return a + (b - a) * t
 }
 

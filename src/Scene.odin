@@ -28,233 +28,6 @@ Scene :: struct {
 	buffers:      SceneBuffers,
 }
 
-Texture :: struct {
-	path:      string,
-	assetPath: string,
-	name:      string,
-	// I want to transition to having multiple vk.Images and binding them as opposed to how I do it right now.
-	// vkImage: vk.Image,
-	// memory:  vk.DeviceMemory,
-	// view:    vk.ImageView,
-	// format:  vk.Format,
-	// sampler: u32,
-}
-
-deleteTexture :: proc(texture: ^Texture) {
-	delete(texture.path)
-	delete(texture.assetPath)
-	delete(texture.name)
-}
-
-createNewScene :: proc() -> (scene: Scene) {
-	scene.path = ""
-	scene.name = strings.clone("New Scene")
-	scene.boneCount = 1
-
-	modelPaths := [?]string {
-		strings.clone("./assets/cube/cube.fbx"),
-		strings.clone("./assets/knight/Knight_Simplified.glb"),
-		strings.clone("./assets/knight/Knight_Helmet.glb"),
-		strings.clone("./assets/knight/Knight_Sword.glb"),
-	}
-	modelComponentsPaths := [?]string {
-		strings.clone("./scene_components/models/cube.model"),
-		strings.clone("./scene_components/models/Knight.model"),
-		strings.clone("./scene_components/models/Knight_Helmet.model"),
-		"./scene_components/models/Knight_Sword.model",
-	}
-
-	texturePaths := [?]string {
-		strings.clone("./assets/cube/white.jpg"),
-		strings.clone("./assets/blank_normal.jpg"),
-		strings.clone("./assets/knight/texture.png"),
-	}
-	textureComponentsPaths := [?]string {
-		strings.clone("./scene_components/textures/cube.texture"),
-		strings.clone("./scene_components/textures/blank_normal.texture"),
-		strings.clone("./scene_components/textures/knight.texture"),
-	}
-	texNames := [?]string{"Cube Texture", "Blank Normal Texture", "Knight Texture"}
-
-	scene.models = make([dynamic]Model, len(modelPaths))
-	scene.textures = make([dynamic]Texture, len(texturePaths))
-
-	for path, idx in modelPaths {
-		scene.models[idx].path = modelComponentsPaths[idx]
-		scene.models[idx].assetPath = path
-		loadModel(&scene, &scene.models[idx])
-	}
-
-	for path, idx in texturePaths {
-		scene.textures[idx].path = textureComponentsPaths[idx]
-		scene.textures[idx].assetPath = path
-		scene.textures[idx].name = texNames[idx]
-	}
-
-	err := loadImages(&globals.graphicsContext, &scene, texturePaths[:])
-	if err != nil {
-		logf(.Error, "Could not load textures: %v", err)
-		return {}
-	}
-
-	scene.models[0].name = strings.clone("Meter Cube")
-	scene.models[0].scale = {0.5, 0.5, 0.5}
-
-	scene.models[1].name = strings.clone("Knight Model")
-	scene.models[1].scale = {0.165, 0.165, 0.165}
-
-	scene.models[2].name = strings.clone("Knight Helmet")
-	scene.models[2].scale = {0.165, 0.165, 0.165}
-
-	scene.models[3].name = strings.clone("Knight Sword")
-	scene.models[3].scale = {0.165, 0.165, 0.165}
-
-	scene.models[1].bindpoints = make([dynamic]Bindpoint, 3)
-	for &bone, boneIdx in scene.models[1].skeleton {
-		if bone.name == "head" {
-			scene.models[1].bindpoints[0] = {
-				name         = "head",
-				boneIdx      = u32(boneIdx),
-				offsetMatrix = IMAT4,
-			}
-		} else if bone.name == "hand.l" {
-			scene.models[1].bindpoints[1] = {
-				name         = "left hand",
-				boneIdx      = u32(boneIdx),
-				offsetMatrix = IMAT4,
-			}
-		} else if bone.name == "hand.r" {
-			scene.models[1].bindpoints[2] = {
-				name         = "right hand",
-				boneIdx      = u32(boneIdx),
-				offsetMatrix = IMAT4,
-			}
-		}
-	}
-
-	scene.clearColour = {0.5, 0.5, 0.5, 1.0}
-	scene.ambientLight = 0.25
-
-	modelIdx: u32 = 0
-	objectIdx: u32 = 0
-	append(
-		&scene.objects,
-		Object {
-			name = strings.clone("Floor"),
-			position = {0, -0.05, 0},
-			rotation = IQUAT,
-			scale = {10, 0.1, 10},
-			modelIdx = modelIdx,
-			instanceIdx = addInstance(&scene, &scene.models[modelIdx], objectIdx),
-			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
-			animation = {idx = -1},
-			attachment = {targetIdx = -1},
-		},
-	)
-
-	for i in 0 ..< len(scene.models[scene.objects[0].modelIdx].meshes) {
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.ALBEDO] = 0
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
-	}
-
-	modelIdx = 1
-	objectIdx = u32(len(scene.objects))
-	append(
-		&scene.objects,
-		Object {
-			name = strings.clone("Knight"),
-			position = {0, 0, 0},
-			rotation = IQUAT,
-			scale = {1, 1, 1},
-			modelIdx = modelIdx,
-			instanceIdx = addInstance(&scene, &scene.models[modelIdx], objectIdx),
-			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
-			animation = {
-				idx = 0,
-				timer = 0,
-				state = make([]Mat4, len(scene.models[modelIdx].skeleton)),
-				cache = make([]ObjectAnimationCache, len(scene.models[modelIdx].skeleton)),
-				playing = true,
-				end = ObjectAnimationEnd{behavior = .Loop, transition = {}, nextIdx = -1},
-			},
-			attachment = {targetIdx = -1},
-		},
-	)
-
-	for i in 0 ..< len(scene.models[scene.objects[objectIdx].modelIdx].meshes) {
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.ALBEDO] = 2
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
-	}
-
-	modelIdx = 2
-	objectIdx = u32(len(scene.objects))
-	append(
-		&scene.objects,
-		Object {
-			name = strings.clone("Knight_Helmet"),
-			position = {0, 0, 0},
-			rotation = IQUAT,
-			scale = {1, 1, 1},
-			modelIdx = modelIdx,
-			instanceIdx = addInstance(&scene, &scene.models[modelIdx], objectIdx),
-			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
-			animation = {idx = -1},
-			attachment = {targetIdx = 1, bindpointIdx = 0},
-		},
-	)
-
-	for i in 0 ..< len(scene.models[scene.objects[objectIdx].modelIdx].meshes) {
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.ALBEDO] = 2
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
-	}
-
-	modelIdx = 3
-	objectIdx = u32(len(scene.objects))
-	append(
-		&scene.objects,
-		Object {
-			name = strings.clone("Knight_Sword"),
-			position = {0, 0, 0},
-			rotation = IQUAT,
-			scale = {1, 1, 1},
-			modelIdx = modelIdx,
-			instanceIdx = addInstance(&scene, &scene.models[modelIdx], objectIdx),
-			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
-			animation = {idx = -1},
-			attachment = {targetIdx = 1, bindpointIdx = 2},
-		},
-	)
-
-	for i in 0 ..< len(scene.models[scene.objects[objectIdx].modelIdx].meshes) {
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.ALBEDO] = 2
-		scene.objects[objectIdx].textureIdxs[i][TextureIndex.NORMAL_MAP] = 1
-	}
-
-	scene.lights = make([dynamic]PointLight, 1)
-	scene.lights[0] = {
-		name       = strings.clone("light"),
-		position   = {0, 1.5, -0.5},
-		colour     = {1, 1, 1},
-		brightness = 1,
-		dropoff    = 5,
-	}
-
-	scene.cameras = make([dynamic]Camera, 1)
-	scene.cameras[0] = {
-		name   = strings.clone("main"),
-		mode   = .PERSPECTIVE,
-		eye    = {0.0, 2.0, -4.0},
-		center = {0.0, 0.0, 0.0},
-		up     = {0.0, 1.0, 0.0},
-		fov    = 45.0,
-		near   = 0.1,
-		far    = 100.0,
-	}
-	scene.activeCamera = 0
-
-	return
-}
-
 deleteScene :: proc(scene: ^Scene) {
 	delete(scene.name)
 
@@ -287,6 +60,24 @@ deleteScene :: proc(scene: ^Scene) {
 	delete(scene.indices)
 
 	deleteSceneBuffers(&globals.graphicsContext, &scene.buffers)
+}
+
+Texture :: struct {
+	path:      string,
+	assetPath: string,
+	name:      string,
+	// I want to transition to having multiple vk.Images and binding them as opposed to how I do it right now.
+	// vkImage: vk.Image,
+	// memory:  vk.DeviceMemory,
+	// view:    vk.ImageView,
+	// format:  vk.Format,
+	// sampler: u32,
+}
+
+deleteTexture :: proc(texture: ^Texture) {
+	delete(texture.name)
+	delete(texture.path)
+	delete(texture.assetPath)
 }
 
 SceneData :: struct {
@@ -496,13 +287,12 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 		modelPath := make([]byte, pathLength)
 		os2.read(file, modelPath)
 
-		lerr: LoadError
-		model, lerr = loadModelComponent(string(modelPath))
+		model.path = string(modelPath)
+		lerr := loadModelComponent(&model)
 		if lerr != .None {
 			logf(.Error, "Failed to load model \"%s\": %v", modelPath, lerr)
 			return lerr
 		}
-		model.path = string(modelPath)
 
 		lerr = loadModel(scene, &model)
 		if lerr != .None {
@@ -519,13 +309,12 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 		texturePath := make([]byte, pathLength)
 		os2.read(file, texturePath)
 
-		lerr: LoadError
-		texture, lerr = loadTextureComponent(string(texturePath))
+		texture.path = string(texturePath)
+		lerr := loadTextureComponent(&texture)
 		if lerr != .None {
 			logf(.Error, "Failed to load texture \"%s\": %v", texturePath, lerr)
 			return lerr
 		}
-		texture.path = string(texturePath)
 
 		texPaths[idx] = texture.assetPath
 	}
@@ -544,6 +333,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			rotation = objectData.rotation,
 			scale = objectData.scale,
 			modelIdx = objectData.modelIdx,
+			instanceIdx = addInstance(scene, &scene.models[objectData.modelIdx], u32(objectIdx)),
 			textureIdxs = make([][len(TextureIndex)]u32, objectData.texturesCount),
 			animation = ObjectAnimation {
 				idx = objectData.animation.idx,
@@ -561,7 +351,6 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			raw_data(object.textureIdxs),
 			int(objectData.texturesCount) * size_of([len(TextureIndex)]u32),
 		)
-		object.instanceIdx = addInstance(scene, &scene.models[object.modelIdx], u32(objectIdx))
 	}
 
 	for &light in scene.lights {
@@ -632,27 +421,25 @@ saveModelComponent :: proc(model: ^Model) -> SaveError {
 	return .None
 }
 
-loadModelComponent :: proc(path: string) -> (Model, LoadError) {
-	if path == "" {
-		return {}, .InvalidArgument
+loadModelComponent :: proc(model: ^Model) -> LoadError {
+	if model.path == "" {
+		return .InvalidArgument
 	}
 
-	file, err := os2.open(path, {.Read})
+	file, err := os2.open(model.path, {.Read})
 	if err != nil {
-		return {}, .IO
+		return .IO
 	}
 
 	modelData: ModelComponent
 	os2.read_ptr(file, &modelData, size_of(ModelComponent))
 
-	model := Model {
-		assetPath  = string(make([]byte, modelData.pathLength)),
-		name       = string(make([]byte, modelData.nameLength)),
-		position   = modelData.position,
-		rotation   = modelData.rotation,
-		scale      = modelData.scale,
-		bindpoints = make([dynamic]Bindpoint, modelData.bindpointCount),
-	}
+	model.assetPath = string(make([]byte, modelData.pathLength))
+	model.name = string(make([]byte, modelData.nameLength))
+	model.position = modelData.position
+	model.rotation = modelData.rotation
+	model.scale = modelData.scale
+	model.bindpoints = make([dynamic]Bindpoint, modelData.bindpointCount)
 	os2.read(file, transmute([]byte)model.name)
 	os2.read(file, transmute([]byte)model.assetPath)
 	os2.read_ptr(
@@ -661,7 +448,7 @@ loadModelComponent :: proc(path: string) -> (Model, LoadError) {
 		int(modelData.bindpointCount * size_of(Bindpoint)),
 	)
 
-	return model, .None
+	return .None
 }
 
 loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
@@ -764,7 +551,7 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 		return .InvalidArgument
 	}
 
-	// I'm finding meshes this way as the names of the meshes are rarely correct so we use the node name instead.
+	// I'm finding meshes this way as the names of the meshes are rarely correct so I use the node name instead.
 	findMeshes :: proc(
 		aiScene: ^ai.Scene,
 		node: ^ai.Node,
@@ -795,7 +582,6 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 	}
 
 	model.meshes = make([]Mesh, aiScene.mNumMeshes)
-
 	boneNames := make(map[string]struct{})
 	defer delete(boneNames)
 	findMeshes(aiScene, aiScene.mRootNode, &model.meshes, &boneNames)
@@ -995,16 +781,23 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 							animationNode.mRotationKeys[animationNode.mNumRotationKeys - 1].mInterpolation,
 						),
 					}
+					if node.keyRotations[0].interpolation == .Linear {
+						node.keyRotations[0].interpolation = .SphericalLinear
+					}
 					offset = 1
 				} else {
 					node.keyRotations = make([]KeyValue(Quat), animationNode.mNumRotationKeys)
 				}
 				for keyIdx in 0 ..< animationNode.mNumRotationKeys {
 					rotationKey := &animationNode.mRotationKeys[keyIdx]
-					node.keyRotations[keyIdx + offset] = {
+					key := &node.keyRotations[keyIdx + offset]
+					key^ = {
 						time          = rotationKey.mTime * ticksToSeconds,
 						value         = aiQuaternionToQuat(&rotationKey.mValue),
 						interpolation = translateInterpolation(rotationKey.mInterpolation),
+					}
+					if key.interpolation == .Linear {
+						key.interpolation = .SphericalLinear
 					}
 				}
 
@@ -1070,26 +863,25 @@ saveTextureComponent :: proc(texture: ^Texture) -> SaveError {
 	return .None
 }
 
-loadTextureComponent :: proc(path: string) -> (Texture, LoadError) {
-	if path == "" {
-		return {}, .InvalidArgument
+loadTextureComponent :: proc(texture: ^Texture) -> LoadError {
+	if texture.path == "" {
+		return .InvalidArgument
 	}
 
-	file, err := os2.open(path, {.Read})
+	file, err := os2.open(texture.path, {.Read})
 	if err != nil {
-		return {}, .IO
+		return .IO
 	}
 	defer os2.close(file)
 
 	textureData: TextureComponent
 	os2.read_ptr(file, &textureData, size_of(TextureComponent))
 
-	texture := Texture {
-		assetPath = string(make([]byte, textureData.pathLength)),
-		name      = string(make([]byte, textureData.nameLength)),
-	}
+	texture.assetPath = string(make([]byte, textureData.pathLength))
+	texture.name = string(make([]byte, textureData.nameLength))
+
 	os2.read(file, transmute([]byte)texture.name)
 	os2.read(file, transmute([]byte)texture.assetPath)
 
-	return texture, .None
+	return .None
 }

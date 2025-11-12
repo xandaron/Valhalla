@@ -253,7 +253,7 @@ GraphicsContext :: struct {
 	brightness:                f32,
 	saturation:                f32,
 	exposure:                  f32,
-	tonemapper:                enum u32 {
+	tonemapper:                enum i32 {
 		None          = 0,
 		NarkowiczACES = 1,
 	},
@@ -392,12 +392,6 @@ InitInfo :: struct {
 	mainVert:                   u32,
 	mainFrag:                   u32,
 	postComp:                   u32,
-
-	// Callbacks
-	glfwCallbacks:              GLFWCallbacks,
-
-	// Vulkan debug messenger
-	vkDebugMessengerCreateInfo: vkDebugMessengerCreateInfo,
 }
 
 InitError :: enum {
@@ -408,7 +402,7 @@ InitError :: enum {
 }
 
 @(require_results)
-initVkGraphics :: proc(initInfo: ^InitInfo) -> (graphicsContext: GraphicsContext, err: Error) {
+initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsContext: GraphicsContext, err: Error) {
 	using graphicsContext
 
 	if !glfw.Init() {
@@ -420,18 +414,16 @@ initVkGraphics :: proc(initInfo: ^InitInfo) -> (graphicsContext: GraphicsContext
 
 	createInstance(&graphicsContext, initInfo.appVersion) or_return
 
-	if initInfo.vkDebugMessengerCreateInfo != {} {
-		if res := vk.CreateDebugUtilsMessengerEXT(
-			instance,
-			&initInfo.vkDebugMessengerCreateInfo,
-			nil,
-			&debugMessenger,
-		); res != .SUCCESS {
-			logf(.Warning, "Failed to create vulkan debug callback! vkResult: %v", res)
-		}
+	if res := vk.CreateDebugUtilsMessengerEXT(
+		instance,
+		&VK_DEBUG_MESSENGER_CREATE_INFO,
+		nil,
+		&debugMessenger,
+	); res != .SUCCESS {
+		logf(.Warning, "Failed to create vulkan debug callback! vkResult: %v", res)
 	}
 
-	initWindow(&graphicsContext, initInfo.windowTitle, initInfo.glfwCallbacks) or_return
+	initWindow(&graphicsContext, initInfo.windowTitle) or_return
 	pickPhysicalDevice(&graphicsContext) or_return
 	createLogicalDevice(&graphicsContext) or_return
 	createSwapchain(&graphicsContext) or_return
@@ -602,14 +594,6 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	glfw.Terminate()
 }
 
-setGLFWCallbacks :: proc(window: glfw.WindowHandle, glfwCallbacks: GLFWCallbacks) {
-	glfw.SetErrorCallback(glfwCallbacks.errorCallback)
-	glfw.SetKeyCallback(window, glfwCallbacks.keyCallback)
-	glfw.SetMouseButtonCallback(window, glfwCallbacks.mouseButtonCallback)
-	glfw.SetCursorPosCallback(window, glfwCallbacks.cursorPosCallback)
-	glfw.SetScrollCallback(window, glfwCallbacks.scrollCallback)
-}
-
 setGLFWErrorCallback :: proc(errorCallback: GLFWErrorCallback) {
 	glfw.SetErrorCallback(errorCallback)
 }
@@ -734,18 +718,18 @@ WindowError :: enum {
 
 @(private = "file")
 @(require_results)
-initWindow :: proc(
-	using graphicsContext: ^GraphicsContext,
-	windowTitle: cstring,
-	glfwCallbacks: GLFWCallbacks,
-) -> WindowError {
+initWindow :: proc(using graphicsContext: ^GraphicsContext, windowTitle: cstring) -> WindowError {
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	if window = glfw.CreateWindow(1600, 800, windowTitle, nil, nil); window == nil {
 		log(.Fatal, "Failed to create window.")
 		return .FailedToCreateWindow
 	}
 
-	setGLFWCallbacks(window, glfwCallbacks)
+	glfw.SetErrorCallback(glfwErrorCallback)
+	glfw.SetKeyCallback(window, keyCallback)
+	glfw.SetMouseButtonCallback(window, mouseButtonCallback)
+	glfw.SetCursorPosCallback(window, cursorPosCallback)
+	glfw.SetScrollCallback(window, scrollCallback)
 
 	if res := glfw.CreateWindowSurface(instance, window, nil, &surface); res != .SUCCESS {
 		logf(.Fatal, "Failed to create surface! vkResult: %v", res)
@@ -2069,7 +2053,6 @@ loadImages :: proc(
 	err: Error,
 ) {
 	image := &scene.buffers.textures
-	imageCount := u32(len(imagePaths))
 	image.format = .R8G8B8A8_SRGB
 	if err := createImage(
 		graphicsContext,
@@ -2078,7 +2061,7 @@ loadImages :: proc(
 		.D2,
 		u32(IMAGES_RESOLUTION.x),
 		u32(IMAGES_RESOLUTION.y),
-		imageCount,
+		u32(len(imagePaths)),
 		{._1},
 		.OPTIMAL,
 		{.TRANSFER_DST, .TRANSFER_SRC, .SAMPLED},
@@ -2105,7 +2088,7 @@ loadImages :: proc(
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
 		{.COLOR},
-		imageCount,
+		u32(len(imagePaths)),
 	)
 
 	if err := endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool);
@@ -2242,7 +2225,7 @@ loadImages :: proc(
 		.TRANSFER_DST_OPTIMAL,
 		.SHADER_READ_ONLY_OPTIMAL,
 		{.COLOR},
-		imageCount,
+		u32(len(imagePaths)),
 	)
 
 	err = endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
@@ -2257,7 +2240,7 @@ loadImages :: proc(
 		.D2_ARRAY,
 		image.format,
 		{.COLOR},
-		imageCount,
+		u32(len(imagePaths)),
 	)
 	if err != nil {
 		logf(.Error, "Failed to create image view for textures! Error: %v", err)
@@ -2364,11 +2347,11 @@ addImages :: proc(
 		return err
 	}
 
+	// Crashing if error after this point
 	deleteImage(graphicsContext, image)
 	image^ = newImage
 
-	imageLayers := imageLayers
-	for path in imagePaths {
+	for path, pathIdx in imagePaths {
 		width, height: i32
 		pixels := img.load(
 			strings.clone_to_cstring(path, allocator = context.temp_allocator),
@@ -2484,8 +2467,6 @@ addImages :: proc(
 			logf(.Error, "Failed to end single time commands! Error: %v", err)
 			return err
 		}
-
-		imageLayers += 1
 	}
 
 	commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
@@ -4904,7 +4885,7 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 			value := objectIdx
 			object := &scene.objects[objectIdx]
 
-			modelTransform: Mat4
+			modelTransform: Mat4 = ---
 			if object.attachment.targetIdx >= 0 {
 				attachmentObject := &scene.objects[object.attachment.targetIdx]
 				attachmentModel := &scene.models[attachmentObject.modelIdx]
@@ -4914,8 +4895,7 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 					object.position + model.position + attachmentObject.position,
 					object.rotation * model.rotation * attachmentObject.rotation,
 					object.scale * model.scale * attachmentObject.scale,
-				)
-				modelTransform *= attachmentObject.animation.state[bindpoint.boneIdx]
+				) * attachmentObject.animation.state[bindpoint.boneIdx]
 			} else {
 				modelTransform = transform(
 					object.position + model.position,

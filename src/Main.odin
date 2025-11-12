@@ -1,63 +1,78 @@
 package Valhalla
 
+import "core:path/filepath"
 import "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:os"
-import "core:path/filepath"
 import "core:time"
-import "core:strings"
 
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
+APP_NAME :: "Valhalla Demo"
+
+SCENE_PATH :: "./scenes/"
+MODELS_PATH :: "./scene_components/models/"
+TEXTURES_PATH :: "./scene_components/textures/"
+SHADERS_PATH :: "./shaders/"
+ASSETS_PATH :: "./assets/"
 
 LOG_TO_FILE :: false
 
 frameCount: u32 = 0
-fpsTimer := time.now()
+fpsTimer: time.Time
 
-delta: f64 = 0.0
-lastFrameTime := time.now()
+delta: f64 = 0
+lastFrameTime: time.Time
 
 mouseMode := false
 mousePos: Vec2 = {0, 0}
 mouseDelta: Vec3 = {0, 0, 0}
-mouseSensitivity: f32 = 1.0
+mouseSensitivity: f32 = 1
 
 cameraRotationSpeed: f32 = 1
 cameraMoveSpeed: f32 = 1
 cameraMove: Vec3 = {0, 0, 0}
 
-MoveAction :: struct {
-	destination: Vec3,
-}
-
-Action :: union {
-	MoveAction,
-}
-
 globals: struct {
-	runtimeContext:  runtime.Context,
+	runtimeContext:      runtime.Context,
+	projectDir:          string,
 
 	// Graphics Engine Data
-	graphicsContext: GraphicsContext,
+	graphicsContext:     GraphicsContext,
 
 	// Scene Data
-	scenes:          [dynamic]Scene,
-	activeScene:     u32,
+	scenes:              [dynamic]Scene,
+	activeScene:         u32,
+	reloadBuffers:       bool,
+	rerecordCommands:    bool,
+
+	// UI Data
+	lockInput:           bool,
+	createComponentInfo: CreateComponentData,
 
 	// Debugging
-	showDemo:        bool,
-	showMetrics:     bool,
-	baseDir:         string,
-	fps:             f64,
-	paused:          bool,
-	inputLock:       bool,
+	showDemo:            bool,
+	showMetrics:         bool,
+	baseDir:             string,
+	fps:                 f64,
+	paused:              bool,
 }
 
 @(private = "package")
 main :: proc() {
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
+
+	if len(os.args) < 2 {
+		logf(.Error, "Usage: %v <path_to_project_file>", os.args[0])
+		os.exit(1)
+	} else if !os.exists(os.args[1]) {
+		logf(.Error, "%v: Dir not found!", os.args[1])
+		os.exit(1)
+	}
+
+	globals.projectDir, _ = filepath.abs(os.args[1])
+	os.set_current_directory(os.args[1])
 
 	when ODIN_DEBUG {
 		tracker: mem.Tracking_Allocator
@@ -83,65 +98,43 @@ main :: proc() {
 	free_all(context.temp_allocator)
 	globals.runtimeContext = context
 
-	os.set_current_directory(
-		filepath.dir(filepath.dir(os.args[0], context.temp_allocator), context.temp_allocator),
-	)
-
-	valhallaInitInfo := InitInfo {
-		appVersion = 0,
-		windowTitle = "Valhalla Demo",
-		shaderFiles = {
-			{file = "./shaders/Pre.slang", entryPoint = "comp"},
-			{file = "./shaders/Shadow.slang", entryPoint = "vert"},
-			{file = "./shaders/Shadow.slang", entryPoint = "frag"},
-			{file = "./shaders/Main.slang", entryPoint = "vert"},
-			{file = "./shaders/Main.slang", entryPoint = "frag"},
-			{file = "./shaders/Post.slang", entryPoint = "comp"},
-		},
-		preComp = 0,
-		lightVert = 1,
-		lightFrag = 2,
-		mainVert = 3,
-		mainFrag = 4,
-		postComp = 5,
-
-		// Callbacks
-		glfwCallbacks = {
-			keyCallback = keyCallback,
-			mouseButtonCallback = mouseButtonCallback,
-			cursorPosCallback = cursorPosCallback,
-			scrollCallback = scrollCallback,
-		},
-
-		// Vulkan debug messenger
-		vkDebugMessengerCreateInfo = VK_DEBUG_MESSENGER_CREATE_INFO,
-	}
-
 	err: Error
-	globals.graphicsContext, err = initVkGraphics(&valhallaInitInfo)
+	globals.graphicsContext, err = initVkGraphics(
+		InitInfo {
+			appVersion = APP_VERSION,
+			windowTitle = APP_NAME,
+			shaderFiles = {
+				{file = "./shaders/Pre.slang", entryPoint = "comp"},
+				{file = "./shaders/Shadow.slang", entryPoint = "vert"},
+				{file = "./shaders/Shadow.slang", entryPoint = "frag"},
+				{file = "./shaders/Main.slang", entryPoint = "vert"},
+				{file = "./shaders/Main.slang", entryPoint = "frag"},
+				{file = "./shaders/Post.slang", entryPoint = "comp"},
+			},
+			preComp = 0,
+			lightVert = 1,
+			lightFrag = 2,
+			mainVert = 3,
+			mainFrag = 4,
+			postComp = 5,
+		},
+	)
 	defer cleanupVkGraphics(&globals.graphicsContext)
 
-	// {
-	// 	scene := createNewScene()
-	// 	scene.path = "./scene/knight.scene"
-	// 	saveScene(&scene)
-	// }
-
-	append(&globals.scenes, Scene {
-		path = "./scene/knight.scene",
-	})
-	lerr := loadScene(&globals.scenes[0])
-	if lerr != nil {
-		panic("Failed to load scene")
-	}
-	defer deleteScene(&globals.scenes[0])
-	defer delete(globals.scenes)
-	
-	if updateSceneBuffers(&globals.graphicsContext, &globals.scenes[0]) != nil {
-		panic("Failed to update scene")
+	append(&globals.scenes, Scene{path = "./scenes/knight.scene"})
+	assert(loadScene(&globals.scenes[0]) == nil)
+	defer {
+		for &scene in globals.scenes {
+			deleteScene(&scene)
+		}
+		delete(globals.scenes)
 	}
 
+	assert(updateSceneBuffers(&globals.graphicsContext, &globals.scenes[0]) == nil)
 	free_all(context.temp_allocator)
+
+	fpsTimer = time.now()
+	lastFrameTime = time.now()
 	for updateWindow(&globals.graphicsContext) {
 		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
 		lastFrameTime = time.now()
@@ -191,6 +184,22 @@ main :: proc() {
 			delta = 0
 		}
 
+		if globals.reloadBuffers {
+			if err := updateSceneBuffers(&globals.graphicsContext, scene); err != nil {
+				logf(.Error, "Failed to update scene buffers: %v", err)
+				panic("Failed to update scene buffers")
+			}
+			globals.reloadBuffers = false
+		}
+		if globals.rerecordCommands {
+			if err := updateCommandBuffers(&globals.graphicsContext, scene);
+			   err != nil {
+				logf(.Error, "Failed to update command buffers: %v", err)
+				panic("Failed to update command buffers")
+			}
+			globals.rerecordCommands = false
+		}
+		
 		update(delta)
 		if err = drawFrame(&globals.graphicsContext); err != nil {
 			logf(.Error, "Failed to draw frame: {}", err)
@@ -250,13 +259,7 @@ screenPositionToWorldRay :: proc(pos: Vec2) -> (origin: Vec3, direction: Vec3) {
 	return
 }
 
-castRay :: proc(
-	rayOrigin, rayDirection: Vec3,
-	scene: ^Scene,
-) -> (
-	object: ^Object,
-	distance: f32,
-) {
+castRay :: proc(rayOrigin, rayDirection: Vec3, scene: ^Scene) -> (object: ^Object, distance: f32) {
 	rayIntersects :: proc(
 		rayOrigin, rayDirection: Vec3,
 		boundingBox: ^AABB,
