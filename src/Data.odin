@@ -25,15 +25,14 @@ Attachment :: struct {
 
 changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
 	object := &scene.objects[objectIdx]
+	model := &scene.models[object.modelIdx]
 
 	// Remove from old model's instance list
-	model := &scene.models[object.modelIdx]
 	removeInstance(scene, model, object.instanceIdx)
 
 	// Add to new model's instance list
-	model = &scene.models[modelIdx]
-	object.instanceIdx = addInstance(scene, model, objectIdx)
 	object.modelIdx = modelIdx
+	object.instanceIdx = addInstance(scene, &scene.models[modelIdx], objectIdx)
 }
 
 Model :: struct {
@@ -51,9 +50,9 @@ Model :: struct {
 }
 
 deleteModel :: proc(model: ^Model) {
+	delete(model.name)
 	delete(model.path)
 	delete(model.assetPath)
-	delete(model.name)
 
 	for &mesh in model.meshes {
 		deleteMesh(&mesh)
@@ -89,6 +88,7 @@ deleteMesh :: proc(mesh: ^Mesh) {
 
 addInstance :: proc(scene: ^Scene, model: ^Model, objectIdx: u32) -> u32 {
 	append(&model.instances, objectIdx)
+
 	scene.boneCount += len(model.skeleton)
 	for &mesh in model.meshes {
 		scene.vertexCount += mesh.vertexCount
@@ -98,10 +98,11 @@ addInstance :: proc(scene: ^Scene, model: ^Model, objectIdx: u32) -> u32 {
 
 removeInstance :: proc(scene: ^Scene, model: ^Model, instanceIdx: u32) {
 	unordered_remove(&model.instances, instanceIdx) // Replace with last
-	if u32(len(model.instances)) >= instanceIdx {
+	if u32(len(model.instances)) > instanceIdx {
 		// Update the moved instance's index
 		scene.objects[model.instances[instanceIdx]].instanceIdx = instanceIdx
 	}
+
 	scene.boneCount -= len(model.skeleton)
 	for &mesh in model.meshes {
 		scene.vertexCount -= mesh.vertexCount

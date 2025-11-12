@@ -87,7 +87,7 @@ AnimationTransition :: struct {
 
 updateAnimations :: proc(scene: ^Scene, delta: f32) {
 	boneTransform :: proc(values: []KeyValue($T), cachedIdx: ^u32, time: f64) -> T {
-		assert(len(values) != 0, "No keyframes in animation node!")
+		assert(len(values) > 0, "No keyframes in animation node!")
 		if len(values) == 1 {
 			return values[0].value
 		}
@@ -149,17 +149,9 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 				fallthrough
 			}
 		case .Linear:
-			when T == Quat {
-				t1 := values[cachedIdx^].time
-				t2 := values[cachedIdx^ + 1].time
-				dt := (time - t1) / (t2 - t1)
-				return slerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
-			} else {
-				t1 := values[cachedIdx^].time
-				t2 := values[cachedIdx^ + 1].time
-				dt := (time - t1) / (t2 - t1)
-				return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
-			}
+			t1 := values[cachedIdx^].time
+			t2 := values[cachedIdx^ + 1].time
+			return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32((time - t1) / (t2 - t1)))
 		case .Step:
 			return values[cachedIdx^].value
 		}
