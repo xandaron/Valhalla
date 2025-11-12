@@ -4904,22 +4904,23 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 			value := objectIdx
 			object := &scene.objects[objectIdx]
 
-			modelTransform := transform(
-				object.position + model.position,
-				object.rotation * model.rotation,
-				object.scale * model.scale,
-			)
-
+			modelTransform: Mat4
 			if object.attachment.targetIdx >= 0 {
 				attachmentObject := &scene.objects[object.attachment.targetIdx]
 				attachmentModel := &scene.models[attachmentObject.modelIdx]
 				bindpoint := &attachmentModel.bindpoints[object.attachment.bindpointIdx]
 
+				modelTransform = transform(
+					object.position + model.position + attachmentObject.position,
+					object.rotation * model.rotation * attachmentObject.rotation,
+					object.scale * model.scale * attachmentObject.scale,
+				)
 				modelTransform *= attachmentObject.animation.state[bindpoint.boneIdx]
-				modelTransform *= transform(
-					attachmentObject.position,
-					attachmentObject.rotation,
-					attachmentObject.scale,
+			} else {
+				modelTransform = transform(
+					object.position + model.position,
+					object.rotation * model.rotation,
+					object.scale * model.scale,
 				)
 			}
 
