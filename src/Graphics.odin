@@ -4892,14 +4892,16 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 
 				modelTransform =
 					transform(
-						attachmentObject.position,
-						attachmentObject.rotation,
-						attachmentObject.scale,
+						attachmentObject.position + attachmentModel.position,
+						attachmentObject.rotation * attachmentModel.rotation,
+						attachmentObject.scale * attachmentModel.scale,
 					) *
-					translate(object.position + model.position) *
-					scale(object.scale * model.scale) *
 					attachmentObject.animation.state[bindpoint.boneIdx] *
-					quatToMat4(object.rotation * model.rotation)
+					transform(
+						object.position + model.position,
+						object.rotation * model.rotation,
+						object.scale * model.scale,
+					)
 			} else {
 				modelTransform = transform(
 					object.position + model.position,
@@ -4918,12 +4920,11 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 				continue
 			}
 
-			skeleton := &model.skeleton
-			animationData := &object.animation
-			for &transform, idx in animationData.state {
-				boneTransforms[boneOffset + u32(idx)] = transform * skeleton[idx].offsetMatrix
+			for &transform, idx in object.animation.state {
+				boneTransforms[boneOffset + u32(idx)] =
+					transform * model.skeleton[idx].offsetMatrix
 			}
-			boneOffset += u32(len(skeleton))
+			boneOffset += u32(len(model.skeleton))
 		}
 	}
 
