@@ -6,7 +6,6 @@ import imguiVulkan "../imgui/imgui_impl_vulkan"
 import "../slang"
 import "core:fmt"
 import "core:mem"
-import "core:path/filepath"
 import "core:strings"
 import "vendor:glfw"
 import img "vendor:stb/image"
@@ -381,17 +380,17 @@ Image :: struct {
 }
 
 InitInfo :: struct {
-	appVersion:                 u32,
-	windowTitle:                cstring,
+	appVersion:  u32,
+	windowTitle: cstring,
 
 	// Shaders
-	shaderFiles:                []Shader,
-	preComp:                    u32,
-	lightVert:                  u32,
-	lightFrag:                  u32,
-	mainVert:                   u32,
-	mainFrag:                   u32,
-	postComp:                   u32,
+	shaderFiles: []Shader,
+	preComp:     u32,
+	lightVert:   u32,
+	lightFrag:   u32,
+	mainVert:    u32,
+	mainFrag:    u32,
+	postComp:    u32,
 }
 
 InitError :: enum {
@@ -4891,11 +4890,16 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 				attachmentModel := &scene.models[attachmentObject.modelIdx]
 				bindpoint := &attachmentModel.bindpoints[object.attachment.bindpointIdx]
 
-				modelTransform = transform(
-					object.position + model.position + attachmentObject.position,
-					object.rotation * model.rotation * attachmentObject.rotation,
-					object.scale * model.scale * attachmentObject.scale,
-				) * attachmentObject.animation.state[bindpoint.boneIdx]
+				modelTransform =
+					transform(
+						attachmentObject.position,
+						attachmentObject.rotation,
+						attachmentObject.scale,
+					) *
+					translate(object.position + model.position) *
+					scale(object.scale * model.scale) *
+					attachmentObject.animation.state[bindpoint.boneIdx] *
+					quatToMat4(object.rotation * model.rotation)
 			} else {
 				modelTransform = transform(
 					object.position + model.position,
@@ -6025,3 +6029,4 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 	currentFrame = (currentFrame + 1) % 2
 	return nil
 }
+
