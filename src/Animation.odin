@@ -186,21 +186,17 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 			for &node, nodeIdx in animation.nodes {
 				objectAnimation.state[nodeIdx] =
 					objectAnimation.state[model.skeleton[nodeIdx].parentIdx] *
-					translate(
+					transform(
 						interpolateNodes(
 							node.keyPositions,
 							&objectAnimation.cache[nodeIdx].positionIdx,
 							objectAnimation.timer,
 						),
-					) *
-					quatToMat4(
 						interpolateNodes(
 							node.keyRotations,
 							&objectAnimation.cache[nodeIdx].rotationIdx,
 							objectAnimation.timer,
 						),
-					) *
-					scale(
 						interpolateNodes(
 							node.keyScales,
 							&objectAnimation.cache[nodeIdx].scaleIdx,
