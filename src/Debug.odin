@@ -95,3 +95,4 @@ imguiCheckVkResult :: proc "c" (err: vk.Result) {
 	}
 	logf(.Error, "[Imgui-Vulkan] Error: VkResult = %v", err)
 }
+

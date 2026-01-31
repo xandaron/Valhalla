@@ -1,7 +1,7 @@
 package Valhalla
 
 Bone :: struct {
-  name:         string,
+	name:         string,
 	parentIdx:    u32,
 	offsetMatrix: Mat4,
 }
@@ -86,7 +86,7 @@ AnimationTransition :: struct {
 }
 
 updateAnimations :: proc(scene: ^Scene, delta: f32) {
-	boneTransform :: proc(values: []KeyValue($T), cachedIdx: ^u32, time: f64) -> T {
+	interpolateNodes :: proc(values: []KeyValue($T), cachedIdx: ^u32, time: f64) -> T {
 		assert(len(values) > 0, "No keyframes in animation node!")
 		if len(values) == 1 {
 			return values[0].value
@@ -151,7 +151,11 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 		case .Linear:
 			t1 := values[cachedIdx^].time
 			t2 := values[cachedIdx^ + 1].time
-			return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32((time - t1) / (t2 - t1)))
+			return lerp(
+				values[cachedIdx^].value,
+				values[cachedIdx^ + 1].value,
+				f32((time - t1) / (t2 - t1)),
+			)
 		case .Step:
 			return values[cachedIdx^].value
 		}
@@ -165,15 +169,15 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 		}
 
 		objectAnimation := &object.animation
-		if objectAnimation.playing {
-			objectAnimation.timer += f64(delta)
-		}
-
 		if objectAnimation.idx >= 0 {
 			animation := scene.models[object.modelIdx].animations[objectAnimation.idx]
+
 			if animation.duration == 0 {
 				objectAnimation.timer = 0
 			} else {
+				if objectAnimation.playing {
+					objectAnimation.timer += f64(delta)
+				}
 				objectAnimation.timer -=
 					floor(objectAnimation.timer / animation.duration) * animation.duration
 			}
@@ -183,21 +187,21 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 				objectAnimation.state[nodeIdx] =
 					objectAnimation.state[model.skeleton[nodeIdx].parentIdx] *
 					translate(
-						boneTransform(
+						interpolateNodes(
 							node.keyPositions,
 							&objectAnimation.cache[nodeIdx].positionIdx,
 							objectAnimation.timer,
 						),
 					) *
 					quatToMat4(
-						boneTransform(
+						interpolateNodes(
 							node.keyRotations,
 							&objectAnimation.cache[nodeIdx].rotationIdx,
 							objectAnimation.timer,
 						),
 					) *
 					scale(
-						boneTransform(
+						interpolateNodes(
 							node.keyScales,
 							&objectAnimation.cache[nodeIdx].scaleIdx,
 							objectAnimation.timer,
@@ -211,3 +215,4 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 		}
 	}
 }
+

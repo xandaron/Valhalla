@@ -16,6 +16,14 @@ Vec2 :: linalg.Vector2f32
 Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 
+ZeroVec2 :: Vec2{0, 0}
+ZeroVec3 :: Vec3{0, 0, 0}
+ZeroVec4 :: Vec4{0, 0, 0, 0}
+
+OneVec2 :: Vec2{1, 1}
+OneVec3 :: Vec3{1, 1, 1}
+OneVec4 :: Vec4{1, 1, 1, 1}
+
 Quat :: linalg.Quaternionf32
 
 Mat3 :: linalg.Matrix3f32
@@ -141,3 +149,4 @@ orthographic :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
 	m[3, 3] = 1
 	return
 }
+

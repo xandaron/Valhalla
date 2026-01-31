@@ -4,19 +4,17 @@ import "Light.slang";
 [[vk::binding(0, 0)]]
 StructuredBuffer<Vertex> vertexBuffer;
 
-struct UniformData
-{
-    float4x4 viewProjection;
-    uint lightCount;
+struct UniformData {
+	float4x4 viewProjection;
+	uint lightCount;
 };
 
 [[vk::binding(1, 0)]]
 ConstantBuffer<UniformData> uniformBuffer;
 
-struct InstanceInfo
-{
-    float4x4 model;
-    uint boneOffset;
+struct InstanceInfo {
+	float4x4 model;
+	uint boneOffset;
 };
 
 [[vk::binding(2, 0)]]
@@ -34,14 +32,13 @@ RWStructuredBuffer<float4x4> transformBufferRW;
 [[vk::binding(6, 0)]]
 StructuredBuffer<Light> lightBuffer;
 
-enum TextureIndex
-{
-    ALBEDO,
-    NORMAL,
-    // METALLIC,
-    // ROUGHNESS,
+enum TextureIndex {
+	ALBEDO,
+	NORMAL,
+	// METALLIC,
+	// ROUGHNESS,
 
-    COUNT,
+	COUNT,
 };
 
 [[vk::binding(7, 0)]]

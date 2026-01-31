@@ -282,6 +282,16 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 		}
 
 		if imgui.CollapsingHeader("Objects##header") {
+			if imgui.Button("New Object##objects") {
+				addObject(scene, 0)
+				if err := updateSceneBuffers(&globals.graphicsContext, scene); err != nil {
+					panic("Failed to update scene buffers after adding object")
+				}
+				if err := updateCommandBuffers(&globals.graphicsContext, scene); err != nil {
+					panic("Failed to update command buffers after adding object")
+				}
+			}
+
 			for &object, objectIdx in scene.objects {
 				suffix := fmt.tprintf("##object%v", objectIdx)
 				if imgui.TreeNode(toCstring(object.name)) {
@@ -333,6 +343,11 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 								if imgui.Selectable(toCstring(animation.name)) {
 									animationData.idx = i32(animationIdx)
 									animationData.timer = 0
+									for &node in animationData.cache {
+										node.positionIdx = 0
+										node.rotationIdx = 0
+										node.scaleIdx = 0
+									}
 								}
 							}
 							imgui.EndCombo()
@@ -611,52 +626,57 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 
 				append(
 					&scene.models,
-					Model {
-						path = strings.clone("scene_components/models/cube.model"),
-					},
+					Model{path = strings.clone("scene_components/models/cube.model")},
 				)
 				loadModelComponent(&scene.models[0])
 				loadModel(scene, &scene.models[0])
 
 				append(
 					&scene.textures,
-					Texture {
-						path = strings.clone("scene_components/textures/cube.texture"),
-					},
+					Texture{path = strings.clone("scene_components/textures/cube.texture")},
 				)
 				loadTextureComponent(&scene.textures[0])
-				
-				append(&scene.cameras, Camera {
-					name = strings.clone("Main"),
-					mode = .PERSPECTIVE,
-					eye = Vec3{0, 0, -5},
-					center = Vec3{0, 0, 0},
-					up = Vec3{0, 1, 0},
-					fov = 45,
-					near = 0.1,
-					far = 100,
-				})
-				
-				append(&scene.lights, PointLight {
-					name = strings.clone("Light"),
-					position = Vec3{0, 5, 0},
-					colour = Vec3{1, 1, 1},
-					brightness = 1,
-					dropoff = 1,
-				})
-				
+
+				append(
+					&scene.cameras,
+					Camera {
+						name = strings.clone("Main"),
+						mode = .PERSPECTIVE,
+						eye = Vec3{0, 0, -5},
+						center = Vec3{0, 0, 0},
+						up = Vec3{0, 1, 0},
+						fov = 45,
+						near = 0.1,
+						far = 100,
+					},
+				)
+
+				append(
+					&scene.lights,
+					PointLight {
+						name = strings.clone("Light"),
+						position = Vec3{0, 5, 0},
+						colour = Vec3{1, 1, 1},
+						brightness = 1,
+						dropoff = 1,
+					},
+				)
+
 				scene.boneCount = 1
-				append(&scene.objects, Object {
-					name = strings.clone("Cube"),
-					position = Vec3{0, 0, 0},
-					rotation = IQUAT,
-					scale = Vec3{1, 1, 1},
-					modelIdx = 0,
-					instanceIdx = 0,
-					textureIdxs = make([][len(TextureIndex)]u32, 1),
-					animation = ObjectAnimation{idx = -1},
-					attachment = Attachment{targetIdx = -1},
-				})
+				append(
+					&scene.objects,
+					Object {
+						name = strings.clone("Cube"),
+						position = Vec3{0, 0, 0},
+						rotation = IQUAT,
+						scale = Vec3{1, 1, 1},
+						modelIdx = 0,
+						instanceIdx = 0,
+						textureIdxs = make([][len(TextureIndex)]u32, 1),
+						animation = ObjectAnimation{idx = -1},
+						attachment = Attachment{targetIdx = -1},
+					},
+				)
 				addInstance(scene, &scene.models[0], 0)
 
 				clearComponentData(createComponentInfo)
@@ -997,3 +1017,4 @@ keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods:
 		}
 	}
 }
+

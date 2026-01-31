@@ -1,10 +1,10 @@
 package Valhalla
 
-import "core:path/filepath"
 import "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:os"
+import "core:path/filepath"
 import "core:time"
 
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
@@ -192,14 +192,13 @@ main :: proc() {
 			globals.reloadBuffers = false
 		}
 		if globals.rerecordCommands {
-			if err := updateCommandBuffers(&globals.graphicsContext, scene);
-			   err != nil {
+			if err := updateCommandBuffers(&globals.graphicsContext, scene); err != nil {
 				logf(.Error, "Failed to update command buffers: %v", err)
 				panic("Failed to update command buffers")
 			}
 			globals.rerecordCommands = false
 		}
-		
+
 		update(delta)
 		if err = drawFrame(&globals.graphicsContext); err != nil {
 			logf(.Error, "Failed to draw frame: {}", err)
@@ -322,3 +321,4 @@ castRay :: proc(rayOrigin, rayDirection: Vec3, scene: ^Scene) -> (object: ^Objec
 
 	return
 }
+
