@@ -3,31 +3,31 @@ package Valhalla
 import "core:math"
 import "core:math/linalg"
 
-// Constants
 PI :: math.PI
 
-IQUAT :: linalg.QUATERNIONF32_IDENTITY
-
-IMAT3 :: linalg.MATRIX3F32_IDENTITY
-IMAT4 :: linalg.MATRIX4F32_IDENTITY
-
-// Types
 Vec2 :: linalg.Vector2f32
 Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 
-ZeroVec2 :: Vec2{0, 0}
-ZeroVec3 :: Vec3{0, 0, 0}
-ZeroVec4 :: Vec4{0, 0, 0, 0}
+ZEROVEC2 :: Vec2{0, 0}
+ZEROVEC3 :: Vec3{0, 0, 0}
+ZEROVEC4 :: Vec4{0, 0, 0, 0}
 
-OneVec2 :: Vec2{1, 1}
-OneVec3 :: Vec3{1, 1, 1}
-OneVec4 :: Vec4{1, 1, 1, 1}
+ONEVEC2 :: Vec2{1, 1}
+ONEVEC3 :: Vec3{1, 1, 1}
+ONEVEC4 :: Vec4{1, 1, 1, 1}
 
 Quat :: linalg.Quaternionf32
 
+IQUAT :: linalg.QUATERNIONF32_IDENTITY
+
+Mat2 :: linalg.Matrix2f32
 Mat3 :: linalg.Matrix3f32
 Mat4 :: linalg.Matrix4f32
+
+IMAT2 :: linalg.MATRIX2F32_IDENTITY
+IMAT3 :: linalg.MATRIX3F32_IDENTITY
+IMAT4 :: linalg.MATRIX4F32_IDENTITY
 
 // Functions
 degrees :: linalg.to_degrees
