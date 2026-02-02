@@ -57,7 +57,7 @@ deleteScene :: proc(scene: ^Scene) {
 	delete(scene.vertices)
 	delete(scene.indices)
 
-	deleteSceneBuffers(&globals.graphicsContext, &scene.buffers)
+	deleteSceneBuffers(&globals.graphicsData, &scene.buffers)
 }
 
 addObject :: proc(scene: ^Scene, modelIdx: u32) {

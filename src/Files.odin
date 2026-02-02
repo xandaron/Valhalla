@@ -242,7 +242,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 
 		texPaths[idx] = texture.assetPath
 	}
-	lerr := loadImages(&globals.graphicsContext, scene, texPaths)
+	lerr := loadImages(&globals.graphicsData, scene, texPaths)
 	if lerr != nil {
 		logf(.Error, "Failed to load images: %v", lerr)
 		return .Asset

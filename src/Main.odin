@@ -38,7 +38,7 @@ globals: struct {
 	projectDir:          string,
 
 	// Graphics Engine Data
-	graphicsContext:     GraphicsContext,
+	graphicsData:     GraphicsData,
 
 	// Scene Data
 	scenes:              [dynamic]Scene,
@@ -58,7 +58,6 @@ globals: struct {
 	paused:              bool,
 }
 
-@(private = "package")
 main :: proc() {
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
@@ -99,7 +98,7 @@ main :: proc() {
 	globals.runtimeContext = context
 
 	err: Error
-	globals.graphicsContext, err = initVkGraphics(
+	globals.graphicsData, err = initVkGraphics(
 		InitInfo {
 			appVersion = APP_VERSION,
 			windowTitle = APP_NAME,
@@ -119,7 +118,7 @@ main :: proc() {
 			postComp = 5,
 		},
 	)
-	defer cleanupVkGraphics(&globals.graphicsContext)
+	defer cleanupVkGraphics(&globals.graphicsData)
 
 	append(&globals.scenes, Scene{path = "./scenes/knight.scene"})
 	assert(loadScene(&globals.scenes[0]) == nil)
@@ -130,12 +129,12 @@ main :: proc() {
 		delete(globals.scenes)
 	}
 
-	assert(updateSceneBuffers(&globals.graphicsContext, &globals.scenes[0]) == nil)
+	assert(updateSceneBuffers(&globals.graphicsData, &globals.scenes[0]) == nil)
 	free_all(context.temp_allocator)
 
 	fpsTimer = time.now()
 	lastFrameTime = time.now()
-	for updateWindow(&globals.graphicsContext) {
+	for updateWindow(&globals.graphicsData) {
 		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
 		lastFrameTime = time.now()
 
@@ -168,7 +167,7 @@ main :: proc() {
 			distance := length(camera.center - camera.eye) * (1 - mouseDelta.z * 0.1)
 
 			// Clamp the pitch to prevent flipping
-			MAX_Y :: 0.9396926208 // approximately sin(70 degrees)
+			MAX_Y :: 0.9396926208 // approx sin(70 degrees)
 			signY := sign(forward.y)
 			absY := signY * forward.y
 			if absY > MAX_Y {
@@ -185,14 +184,14 @@ main :: proc() {
 		}
 
 		if globals.reloadBuffers {
-			if err := updateSceneBuffers(&globals.graphicsContext, scene); err != nil {
+			if err := updateSceneBuffers(&globals.graphicsData, scene); err != nil {
 				logf(.Error, "Failed to update scene buffers: %v", err)
 				panic("Failed to update scene buffers")
 			}
 			globals.reloadBuffers = false
 		}
 		if globals.rerecordCommands {
-			if err := updateCommandBuffers(&globals.graphicsContext, scene); err != nil {
+			if err := updateCommandBuffers(&globals.graphicsData, scene); err != nil {
 				logf(.Error, "Failed to update command buffers: %v", err)
 				panic("Failed to update command buffers")
 			}
@@ -200,7 +199,7 @@ main :: proc() {
 		}
 
 		update(delta)
-		if err = drawFrame(&globals.graphicsContext); err != nil {
+		if err = drawFrame(&globals.graphicsData); err != nil {
 			logf(.Error, "Failed to draw frame: {}", err)
 			break
 		}
@@ -214,7 +213,7 @@ update :: proc(delta: f32) {
 	scene := &globals.scenes[globals.activeScene]
 	updateAnimations(scene, delta)
 	updateSceneData(
-		&globals.graphicsContext,
+		&globals.graphicsData,
 		scene,
 		viewProjection(scene.cameras[scene.activeCamera]),
 		delta,
@@ -234,7 +233,7 @@ screenPositionToWorldRay :: proc(pos: Vec2) -> (origin: Vec3, direction: Vec3) {
 	scene := &globals.scenes[globals.activeScene]
 	camera := &scene.cameras[scene.activeCamera]
 
-	width, height := windowSize(&globals.graphicsContext)
+	width, height := windowSize(&globals.graphicsData)
 
 	vpPos := pos / Vec2{f32(width), f32(height)}
 	vpPos = vpPos * 2 - 1

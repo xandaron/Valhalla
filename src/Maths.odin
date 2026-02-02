@@ -126,7 +126,7 @@ lookAt :: proc(eye, center, up: Vec3) -> Mat4 {
 	}
 }
 
-perspective :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
+perspective :: proc(fov, aspect, near, far: f32) -> (m: Mat4) #no_bounds_check {
 	assert(aspect != 0, "Aspect ratio can't be zero!")
 	tanHalfFov := tan(0.5 * fov)
 	m[0, 0] = 1 / (aspect * tanHalfFov)
@@ -137,7 +137,7 @@ perspective :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
 	return
 }
 
-orthographic :: proc(fov, aspect, near, far: f32) -> (m: Mat4) {
+orthographic :: proc(fov, aspect, near, far: f32) -> (m: Mat4) #no_bounds_check {
 	assert(aspect != 0, "Aspect ratio can't be zero!")
 	top := near * tan(0.5 * fov)
 	right := top * aspect

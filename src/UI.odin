@@ -67,7 +67,7 @@ saveAs :: proc(scene: ^Scene) {
 	}
 }
 
-drawImgui :: proc(graphicsContext: ^GraphicsContext) {
+drawImgui :: proc(graphicsData: ^GraphicsData) {
 	toCstring :: #force_inline proc(str: string, allocator := context.temp_allocator) -> cstring {
 		return strings.clone_to_cstring(str, allocator = allocator)
 	}
@@ -209,7 +209,7 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 								unordered_remove(&scene.textures, len(scene.textures) - 1)
 							} else {
 								err := addImages(
-									&globals.graphicsContext,
+									&globals.graphicsData,
 									&scene.buffers.textures,
 									u32(len(scene.textures)) - 1,
 									{texture.path},
@@ -248,26 +248,26 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 				imgui.EndCombo()
 			}
 
-			if imgui.DragFloat("Contrast", &graphicsContext.contrast, 0.01) {
+			if imgui.DragFloat("Contrast", &graphicsData.contrast, 0.01) {
 				globals.reloadBuffers = true
 			}
-			if imgui.DragFloat("Brightness", &graphicsContext.brightness, 0.01) {
+			if imgui.DragFloat("Brightness", &graphicsData.brightness, 0.01) {
 				globals.reloadBuffers = true
 			}
-			if imgui.DragFloat("Saturation", &graphicsContext.saturation, 0.01) {
+			if imgui.DragFloat("Saturation", &graphicsData.saturation, 0.01) {
 				globals.reloadBuffers = true
 			}
-			if imgui.DragFloat("Exposure", &graphicsContext.exposure, 0.01) {
+			if imgui.DragFloat("Exposure", &graphicsData.exposure, 0.01) {
 				globals.reloadBuffers = true
 			}
 			if imgui.Combo(
 				"Tonemapper",
-				transmute(^i32)(&graphicsContext.tonemapper),
+				transmute(^i32)(&graphicsData.tonemapper),
 				"None\000Narkowicz ACES\000",
 			) {
 				globals.reloadBuffers = true
 			}
-			if imgui.DragFloat("Gamma", &graphicsContext.gamma, 0.01) {
+			if imgui.DragFloat("Gamma", &graphicsData.gamma, 0.01) {
 				globals.reloadBuffers = true
 			}
 		}
@@ -284,10 +284,10 @@ drawImgui :: proc(graphicsContext: ^GraphicsContext) {
 		if imgui.CollapsingHeader("Objects##header") {
 			if imgui.Button("New Object##objects") {
 				addObject(scene, 0)
-				if err := updateSceneBuffers(&globals.graphicsContext, scene); err != nil {
+				if err := updateSceneBuffers(&globals.graphicsData, scene); err != nil {
 					panic("Failed to update scene buffers after adding object")
 				}
-				if err := updateCommandBuffers(&globals.graphicsContext, scene); err != nil {
+				if err := updateCommandBuffers(&globals.graphicsData, scene); err != nil {
 					panic("Failed to update command buffers after adding object")
 				}
 			}
