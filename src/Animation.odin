@@ -151,11 +151,8 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 		case .Linear:
 			t1 := values[cachedIdx^].time
 			t2 := values[cachedIdx^ + 1].time
-			return lerp(
-				values[cachedIdx^].value,
-				values[cachedIdx^ + 1].value,
-				f32((time - t1) / (t2 - t1)),
-			)
+			dt := (time - t1) / (t2 - t1)
+			return lerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
 		case .Step:
 			return values[cachedIdx^].value
 		}

@@ -231,22 +231,22 @@ SceneBuffers :: struct {
 	textureIndexBuffer: Buffer,
 }
 
-deleteSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, buffers: ^SceneBuffers) {
-	deleteBuffer(graphicsContext, &buffers.indexBuffer)
-	deleteBuffer(graphicsContext, &buffers.vertexBuffer)
+deleteSceneBuffers :: proc(using graphicsData: ^GraphicsData, buffers: ^SceneBuffers) {
+	deleteBuffer(graphicsData, &buffers.indexBuffer)
+	deleteBuffer(graphicsData, &buffers.vertexBuffer)
 
 	for idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		deleteBuffer(graphicsContext, &buffers.instanceBuffers[idx])
-		deleteBuffer(graphicsContext, &buffers.boneBuffers[idx])
-		deleteBuffer(graphicsContext, &buffers.lightBuffers[idx])
-		deleteBuffer(graphicsContext, &buffers.transformBuffers[idx])
+		deleteBuffer(graphicsData, &buffers.instanceBuffers[idx])
+		deleteBuffer(graphicsData, &buffers.boneBuffers[idx])
+		deleteBuffer(graphicsData, &buffers.lightBuffers[idx])
+		deleteBuffer(graphicsData, &buffers.transformBuffers[idx])
 	}
-	deleteBuffer(graphicsContext, &buffers.textureIndexBuffer)
+	deleteBuffer(graphicsData, &buffers.textureIndexBuffer)
 
-	deleteImage(graphicsContext, &buffers.textures)
+	deleteImage(graphicsData, &buffers.textures)
 }
 
-GraphicsContext :: struct {
+GraphicsData :: struct {
 	// Rendering push constants
 	contrast:                  f32,
 	brightness:                f32,
@@ -401,17 +401,17 @@ InitError :: enum {
 }
 
 @(require_results)
-initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsContext: GraphicsContext, err: Error) {
-	using graphicsContext
+initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: Error) {
+	using graphicsData
 
 	if !glfw.Init() {
 		log(.Fatal, "Failed to initialize GLFW!")
-		return graphicsContext, .GLFWError
+		return graphicsData, .GLFWError
 	}
 
 	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
 
-	createInstance(&graphicsContext, initInfo.appVersion) or_return
+	createInstance(&graphicsData, initInfo.appVersion) or_return
 
 	if res := vk.CreateDebugUtilsMessengerEXT(
 		instance,
@@ -422,18 +422,18 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsContext: GraphicsContext,
 		logf(.Warning, "Failed to create vulkan debug callback! vkResult: %v", res)
 	}
 
-	initWindow(&graphicsContext, initInfo.windowTitle) or_return
-	pickPhysicalDevice(&graphicsContext) or_return
-	createLogicalDevice(&graphicsContext) or_return
-	createSwapchain(&graphicsContext) or_return
-	createCommandBuffers(&graphicsContext) or_return
+	initWindow(&graphicsData, initInfo.windowTitle) or_return
+	pickPhysicalDevice(&graphicsData) or_return
+	createLogicalDevice(&graphicsData) or_return
+	createSwapchain(&graphicsData) or_return
+	createCommandBuffers(&graphicsData) or_return
 
 	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
 
 	bufferSize := size_of(UniformBuffer)
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		if err := createBuffer(
-			&graphicsContext,
+			&graphicsData,
 			bufferSize,
 			{.UNIFORM_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
@@ -441,7 +441,7 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsContext: GraphicsContext,
 			&uniformBuffers[index].memory,
 		); err != nil {
 			log(.Fatal, "Failed to create uniform buffer!")
-			return graphicsContext, err
+			return graphicsData, err
 		}
 		vk.MapMemory(
 			device,
@@ -454,36 +454,36 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsContext: GraphicsContext,
 	}
 
 	depthFormat = findSupportedDepthFormat(
-		&graphicsContext,
+		&graphicsData,
 		{.D16_UNORM, .D32_SFLOAT, .D32_SFLOAT_S8_UINT, .D24_UNORM_S8_UINT},
 		.OPTIMAL,
 		{.DEPTH_STENCIL_ATTACHMENT},
 	)
 	if depthFormat == .UNDEFINED {
 		log(.Fatal, "Failed to find a supported depth format!")
-		return graphicsContext, .DepthFormatError
+		return graphicsData, .DepthFormatError
 	}
 
-	createSyncObjects(&graphicsContext) or_return
-	createSamplers(&graphicsContext) or_return
-	createRenderPass(&graphicsContext) or_return
-	createMainFrameBuffers(&graphicsContext) or_return
-	createBuffersDescriptorSets(&graphicsContext) or_return
-	createTexturesDescriptorSets(&graphicsContext) or_return
+	createSyncObjects(&graphicsData) or_return
+	createSamplers(&graphicsData) or_return
+	createRenderPass(&graphicsData) or_return
+	createMainFrameBuffers(&graphicsData) or_return
+	createBuffersDescriptorSets(&graphicsData) or_return
+	createTexturesDescriptorSets(&graphicsData) or_return
 
 	append(&shaderFiles, ..initInfo.shaderFiles)
 
 	createGraphicsPipelines(
-		&graphicsContext,
+		&graphicsData,
 		{initInfo.lightVert, initInfo.lightFrag},
 		{initInfo.mainVert, initInfo.mainFrag},
 	) or_return
 
-	createComputePipelines(&graphicsContext, initInfo.preComp, initInfo.postComp) or_return
+	createComputePipelines(&graphicsData, initInfo.preComp, initInfo.postComp) or_return
 
 	when IMGUI_ENABLED {
-		initImgui(&graphicsContext) or_return
-		updateImgui(&graphicsContext) or_return
+		initImgui(&graphicsData) or_return
+		updateImgui(&graphicsData) or_return
 	}
 
 	currentFrame = 0
@@ -500,17 +500,17 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsContext: GraphicsContext,
 		gamma = 2.2
 	}
 
-	return graphicsContext, nil
+	return graphicsData, nil
 }
 
-cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
-	graphicsContext := graphicsContext
+cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
+	graphicsData := graphicsData
 	if vk.DeviceWaitIdle(device) != .SUCCESS {
 		panic("Failed to wait for device idle!")
 	}
 
 	when IMGUI_ENABLED {
-		cleanupImgui(graphicsContext)
+		cleanupImgui(graphicsData)
 		vk.DestroyDescriptorPool(device, imguiData.descriptorPool, nil)
 	}
 
@@ -548,7 +548,7 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		deleteBuffer(graphicsContext, &uniformBuffers[index])
+		deleteBuffer(graphicsData, &uniformBuffers[index])
 	}
 
 	for index in 0 ..< len(swapchainImages) {
@@ -560,23 +560,23 @@ cleanupVkGraphics :: proc(using graphicsContext: ^GraphicsContext) {
 
 	delete(shaderFiles)
 
-	cleanupSwapchain(graphicsContext)
-	cleanupPipelines(graphicsContext)
+	cleanupSwapchain(graphicsData)
+	cleanupPipelines(graphicsData)
 
 	vk.DestroyRenderPass(device, pipelines[PipelineIndex.MAIN].renderPass, nil)
 	vk.DestroyRenderPass(device, pipelines[PipelineIndex.LIGHT].renderPass, nil)
 
-	deleteImage(graphicsContext, &pipelines[PipelineIndex.MAIN].colour)
-	deleteImage(graphicsContext, &pipelines[PipelineIndex.MAIN].depth)
-	deleteImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].colour)
-	deleteImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].depth)
+	deleteImage(graphicsData, &pipelines[PipelineIndex.MAIN].colour)
+	deleteImage(graphicsData, &pipelines[PipelineIndex.MAIN].depth)
+	deleteImage(graphicsData, &pipelines[PipelineIndex.LIGHT].colour)
+	deleteImage(graphicsData, &pipelines[PipelineIndex.LIGHT].depth)
 
 	for &descriptorSet in descriptorSets {
 		vk.DestroyDescriptorPool(device, descriptorSet.pool, nil)
 		vk.DestroyDescriptorSetLayout(device, descriptorSet.layout, nil)
 	}
 
-	cleanupSamplers(graphicsContext)
+	cleanupSamplers(graphicsData)
 
 	vk.DestroyDevice(device, nil)
 	vk.DestroySurfaceKHR(instance, surface, nil)
@@ -626,7 +626,7 @@ InstanceError :: enum {
 
 @(private = "file")
 @(require_results)
-createInstance :: proc(using graphicsContext: ^GraphicsContext, version: u32) -> InstanceError {
+createInstance :: proc(using graphicsData: ^GraphicsData, version: u32) -> InstanceError {
 	appInfo: vk.ApplicationInfo = {
 		sType              = .APPLICATION_INFO,
 		pNext              = nil,
@@ -717,7 +717,7 @@ WindowError :: enum {
 
 @(private = "file")
 @(require_results)
-initWindow :: proc(using graphicsContext: ^GraphicsContext, windowTitle: cstring) -> WindowError {
+initWindow :: proc(using graphicsData: ^GraphicsData, windowTitle: cstring) -> WindowError {
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	if window = glfw.CreateWindow(1600, 800, windowTitle, nil, nil); window == nil {
 		log(.Fatal, "Failed to create window.")
@@ -741,7 +741,7 @@ initWindow :: proc(using graphicsContext: ^GraphicsContext, windowTitle: cstring
 @(private = "file")
 findQueueFamilies :: proc(
 	physicalDevice: vk.PhysicalDevice,
-	graphicsContext: ^GraphicsContext,
+	graphicsData: ^GraphicsData,
 ) -> (
 	indices: QueueFamilyIndices,
 	err: b32 = false,
@@ -774,7 +774,7 @@ findQueueFamilies :: proc(
 		if vk.GetPhysicalDeviceSurfaceSupportKHR(
 			   physicalDevice,
 			   (u32)(index),
-			   graphicsContext.surface,
+			   graphicsData.surface,
 			   &presentSupport,
 		   ); presentSupport {
 			indices.presentFamily = u32(index)
@@ -797,20 +797,20 @@ SwapchainSupportDetails :: struct {
 @(private = "file")
 querySwapchainSupport :: proc(
 	physicalDevice: vk.PhysicalDevice,
-	graphicsContext: ^GraphicsContext,
+	graphicsData: ^GraphicsData,
 ) -> (
 	swapchainSupport: SwapchainSupportDetails,
 ) {
 	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
 		physicalDevice,
-		graphicsContext.surface,
+		graphicsData.surface,
 		&swapchainSupport.capabilities,
 	)
 
 	formatCount: u32
 	vk.GetPhysicalDeviceSurfaceFormatsKHR(
 		physicalDevice,
-		graphicsContext.surface,
+		graphicsData.surface,
 		&formatCount,
 		nil,
 	)
@@ -822,7 +822,7 @@ querySwapchainSupport :: proc(
 		)
 		vk.GetPhysicalDeviceSurfaceFormatsKHR(
 			physicalDevice,
-			graphicsContext.surface,
+			graphicsData.surface,
 			&formatCount,
 			raw_data(swapchainSupport.formats),
 		)
@@ -831,7 +831,7 @@ querySwapchainSupport :: proc(
 	modeCount: u32
 	vk.GetPhysicalDeviceSurfacePresentModesKHR(
 		physicalDevice,
-		graphicsContext.surface,
+		graphicsData.surface,
 		&modeCount,
 		nil,
 	)
@@ -843,7 +843,7 @@ querySwapchainSupport :: proc(
 		)
 		vk.GetPhysicalDeviceSurfacePresentModesKHR(
 			physicalDevice,
-			graphicsContext.surface,
+			graphicsData.surface,
 			&modeCount,
 			raw_data(swapchainSupport.modes),
 		)
@@ -859,10 +859,10 @@ DeviceError :: enum {
 
 @(private = "file")
 @(require_results)
-pickPhysicalDevice :: proc(using graphicsContext: ^GraphicsContext) -> DeviceError {
+pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	scorePhysicalDevice :: proc(
 		physicalDevice: vk.PhysicalDevice,
-		graphicsContext: ^GraphicsContext,
+		graphicsData: ^GraphicsData,
 	) -> (
 		score: u32 = 0,
 	) {
@@ -872,11 +872,11 @@ pickPhysicalDevice :: proc(using graphicsContext: ^GraphicsContext) -> DeviceErr
 		vk.GetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties)
 		vk.GetPhysicalDeviceFeatures(physicalDevice, &physicalDeviceFeatures)
 
-		indices, err := findQueueFamilies(physicalDevice, graphicsContext)
+		indices, err := findQueueFamilies(physicalDevice, graphicsData)
 		if err ||
 		   !physicalDeviceFeatures.samplerAnisotropy ||
 		   !checkDeviceExtensionSupport(physicalDevice) ||
-		   !swapchainAdequate(physicalDevice, graphicsContext) {
+		   !swapchainAdequate(physicalDevice, graphicsData) {
 			return
 		}
 
@@ -925,9 +925,9 @@ pickPhysicalDevice :: proc(using graphicsContext: ^GraphicsContext) -> DeviceErr
 
 	swapchainAdequate :: proc(
 		physicalDevice: vk.PhysicalDevice,
-		graphicsContext: ^GraphicsContext,
+		graphicsData: ^GraphicsData,
 	) -> b32 {
-		support := querySwapchainSupport(physicalDevice, graphicsContext)
+		support := querySwapchainSupport(physicalDevice, graphicsData)
 		return len(support.formats) != 0 && len(support.modes) != 0
 	}
 
@@ -960,7 +960,7 @@ pickPhysicalDevice :: proc(using graphicsContext: ^GraphicsContext) -> DeviceErr
 
 	physicalDeviceMap := make(map[vk.PhysicalDevice]u32, allocator = context.temp_allocator)
 	for &physicalDevice in physicalDevices {
-		physicalDeviceMap[physicalDevice] = scorePhysicalDevice(physicalDevice, graphicsContext)
+		physicalDeviceMap[physicalDevice] = scorePhysicalDevice(physicalDevice, graphicsData)
 	}
 
 	bestScore: u32
@@ -981,8 +981,8 @@ pickPhysicalDevice :: proc(using graphicsContext: ^GraphicsContext) -> DeviceErr
 
 @(private = "file")
 @(require_results)
-createLogicalDevice :: proc(using graphicsContext: ^GraphicsContext) -> DeviceError {
-	queueFamilies, _ = findQueueFamilies(physicalDevice, graphicsContext)
+createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
+	queueFamilies, _ = findQueueFamilies(physicalDevice, graphicsData)
 
 	queuePriority: f32 = 1.0
 	queueCreateInfos := make([dynamic]vk.DeviceQueueCreateInfo, allocator = context.temp_allocator)
@@ -1138,7 +1138,7 @@ SwapchainError :: enum {
 
 @(private = "file")
 @(require_results)
-createSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> SwapchainError {
+createSwapchain :: proc(using graphicsData: ^GraphicsData) -> SwapchainError {
 	chooseFormat :: proc(formats: []vk.SurfaceFormatKHR) -> (fmt: vk.SurfaceFormatKHR) {
 		fmt = formats[0]
 		for format in formats {
@@ -1170,7 +1170,7 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> SwapchainErr
 	}
 
 	chooseExtent :: proc(
-		using graphicsContext: ^GraphicsContext,
+		using graphicsData: ^GraphicsData,
 		capabilities: vk.SurfaceCapabilitiesKHR,
 	) -> (
 		extent: vk.Extent2D,
@@ -1192,7 +1192,7 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> SwapchainErr
 		return
 	}
 
-	swapchainSupport := querySwapchainSupport(physicalDevice, graphicsContext)
+	swapchainSupport := querySwapchainSupport(physicalDevice, graphicsData)
 
 	max := swapchainSupport.capabilities.maxImageCount
 	min := swapchainSupport.capabilities.minImageCount
@@ -1201,7 +1201,7 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> SwapchainErr
 
 	swapchainFormat = chooseFormat(swapchainSupport.formats)
 	swapchainMode = choosePresentMode(swapchainSupport.modes)
-	swapchainExtent = chooseExtent(graphicsContext, swapchainSupport.capabilities)
+	swapchainExtent = chooseExtent(graphicsData, swapchainSupport.capabilities)
 
 	oneQueueFamily :=
 		queueFamilies.graphicsFamily == queueFamilies.presentFamily &&
@@ -1239,7 +1239,7 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> SwapchainErr
 	for index in 0 ..< swapchainImageCount {
 		err: ImageError
 		swapchainImageViews[index], err = createImageView(
-			graphicsContext,
+			graphicsData,
 			swapchainImages[index],
 			.D2,
 			swapchainFormat.format,
@@ -1257,7 +1257,7 @@ createSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> SwapchainErr
 
 @(private = "file")
 @(require_results)
-recreateSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
+recreateSwapchain :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 	width, height := glfw.GetFramebufferSize(window)
 	for width == 0 && height == 0 {
 		glfw.WaitEvents()
@@ -1269,23 +1269,23 @@ recreateSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> (err: Erro
 		return .FailedToRecreateSwapchain
 	}
 
-	cleanupSwapchain(graphicsContext)
+	cleanupSwapchain(graphicsData)
 
-	err = createSwapchain(graphicsContext)
+	err = createSwapchain(graphicsData)
 	if err != nil {
 		log(.Error, "Failed to recreate swapchain!")
 		return err
 	}
 
-	err = updateComputeDescriptorSets(graphicsContext)
+	err = updateComputeDescriptorSets(graphicsData)
 	if err != nil {
 		log(.Error, "Failed to update compute descriptor sets!")
 		return err
 	}
 
 	when IMGUI_ENABLED {
-		cleanupImgui(graphicsContext)
-		err = updateImgui(graphicsContext)
+		cleanupImgui(graphicsData)
+		err = updateImgui(graphicsData)
 		if err != nil {
 			log(.Fatal, "Failed to update Imgui!")
 			return err
@@ -1296,7 +1296,7 @@ recreateSwapchain :: proc(using graphicsContext: ^GraphicsContext) -> (err: Erro
 }
 
 @(private = "file")
-cleanupSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
+cleanupSwapchain :: proc(using graphicsData: ^GraphicsData) {
 	for imageView in swapchainImageViews {
 		vk.DestroyImageView(device, imageView, nil)
 	}
@@ -1304,8 +1304,8 @@ cleanupSwapchain :: proc(using graphicsContext: ^GraphicsContext) {
 	delete(swapchainImageViews)
 
 	vk.DestroySwapchainKHR(device, swapchain, nil)
-	deleteImage(graphicsContext, &renderedImage)
-	deleteImage(graphicsContext, &processedImage)
+	deleteImage(graphicsData, &renderedImage)
+	deleteImage(graphicsData, &processedImage)
 }
 
 CommandBufferError :: enum {
@@ -1318,7 +1318,7 @@ CommandBufferError :: enum {
 
 @(private = "file")
 @(require_results)
-createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> CommandBufferError {
+createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBufferError {
 	poolInfo: vk.CommandPoolCreateInfo = {
 		sType            = .COMMAND_POOL_CREATE_INFO,
 		pNext            = nil,
@@ -1441,7 +1441,7 @@ createCommandBuffers :: proc(using graphicsContext: ^GraphicsContext) -> Command
 
 @(private = "file")
 beginSingleTimeCommands :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	commandPool: vk.CommandPool,
 ) -> (
 	commandBuffer: vk.CommandBuffer,
@@ -1478,7 +1478,7 @@ beginSingleTimeCommands :: proc(
 @(private = "file")
 @(require_results)
 endSingleTimeCommands :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	commandBuffer: vk.CommandBuffer,
 	commandPool: vk.CommandPool,
 ) -> CommandBufferError {
@@ -1525,7 +1525,7 @@ BufferError :: enum {
 @(private = "file")
 @(require_results)
 createBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	size: int,
 	usage: vk.BufferUsageFlags,
 	properties: vk.MemoryPropertyFlags,
@@ -1542,7 +1542,7 @@ createBuffer :: proc(
 		queueFamilyIndexCount = 0,
 		pQueueFamilyIndices   = nil,
 	}
-	vkDevice := graphicsContext.device
+	vkDevice := graphicsData.device
 	if res := vk.CreateBuffer(vkDevice, &bufferInfo, nil, buffer); res != .SUCCESS {
 		logf(.Error, "Failed to create buffer! vkResult: %d", res)
 		return .FailedToCreateBuffer
@@ -1555,7 +1555,7 @@ createBuffer :: proc(
 		pNext           = nil,
 		allocationSize  = memRequirements.size,
 		memoryTypeIndex = findMemoryType(
-			graphicsContext,
+			graphicsData,
 			memRequirements.memoryTypeBits,
 			properties,
 		),
@@ -1576,7 +1576,7 @@ createBuffer :: proc(
 @(private = "file")
 @(require_results)
 loadBufferToGPU :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	bufferSize: int,
 	srcData: rawptr,
 	dstBuffer: ^Buffer,
@@ -1584,7 +1584,7 @@ loadBufferToGPU :: proc(
 ) -> Error {
 	stagingBuffer: Buffer
 	if err := createBuffer(
-		graphicsContext,
+		graphicsData,
 		bufferSize,
 		{.TRANSFER_SRC},
 		{.HOST_VISIBLE, .HOST_COHERENT},
@@ -1594,7 +1594,7 @@ loadBufferToGPU :: proc(
 		logf(.Error, "Failed to create staging buffer! Error: %d", err)
 		return .FailedToCreateBuffer
 	}
-	defer deleteBuffer(graphicsContext, &stagingBuffer)
+	defer deleteBuffer(graphicsData, &stagingBuffer)
 
 	data: rawptr
 	vk.MapMemory(device, stagingBuffer.memory, 0, vk.DeviceSize(bufferSize), {}, &data)
@@ -1602,7 +1602,7 @@ loadBufferToGPU :: proc(
 	vk.UnmapMemory(device, stagingBuffer.memory)
 
 	if err := createBuffer(
-		graphicsContext,
+		graphicsData,
 		bufferSize,
 		{.TRANSFER_DST, .STORAGE_BUFFER, bufferType},
 		{.DEVICE_LOCAL},
@@ -1613,7 +1613,7 @@ loadBufferToGPU :: proc(
 		return .FailedToCreateBuffer
 	}
 
-	commandBuffer, err := beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+	commandBuffer, err := beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to begin single time command buffer! Error: %d", err)
 		return .FailedToCreateBuffer
@@ -1626,7 +1626,7 @@ loadBufferToGPU :: proc(
 	}
 
 	vk.CmdCopyBuffer(commandBuffer, stagingBuffer.buffer, dstBuffer.buffer, 1, &copyRegion)
-	if err := endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool);
+	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool);
 	   err != nil {
 		logf(.Error, "Failed to end single time command buffer! Error: %d", err)
 		return .FailedToCreateBuffer
@@ -1636,14 +1636,14 @@ loadBufferToGPU :: proc(
 }
 
 @(private = "file")
-deleteBuffer :: proc(using graphicsContext: ^GraphicsContext, buffer: ^Buffer) {
+deleteBuffer :: proc(using graphicsData: ^GraphicsData, buffer: ^Buffer) {
 	vk.DestroyBuffer(device, buffer.buffer, nil)
 	vk.FreeMemory(device, buffer.memory, nil)
 }
 
 @(private = "file")
 findMemoryType :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	typeFilter: u32,
 	properties: vk.MemoryPropertyFlags,
 ) -> u32 {
@@ -1672,7 +1672,7 @@ ImageError :: enum {
 @(private = "file")
 @(require_results)
 createImage :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	image: ^Image,
 	flags: vk.ImageCreateFlags,
 	imageType: vk.ImageType,
@@ -1715,7 +1715,7 @@ createImage :: proc(
 		pNext           = nil,
 		allocationSize  = memRequirements.size,
 		memoryTypeIndex = findMemoryType(
-			graphicsContext,
+			graphicsData,
 			memRequirements.memoryTypeBits,
 			properties,
 		),
@@ -1735,7 +1735,7 @@ createImage :: proc(
 
 @(private = "file")
 createImageView :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	image: vk.Image,
 	viewType: vk.ImageViewType,
 	format: vk.Format,
@@ -1771,7 +1771,7 @@ createImageView :: proc(
 
 @(private = "file")
 transitionImageLayout :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	commandBuffer: vk.CommandBuffer,
 	image: vk.Image,
 	oldLayout, newLayout: vk.ImageLayout,
@@ -1865,7 +1865,7 @@ transitionImageLayout :: proc(
 
 @(private = "file")
 copyBufferToImage :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	commandBuffer: vk.CommandBuffer,
 	buffer: vk.Buffer,
 	image: vk.Image,
@@ -1889,7 +1889,7 @@ copyBufferToImage :: proc(
 
 @(private = "file")
 copyBufferToTextureArray :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	commandBuffer: vk.CommandBuffer,
 	buffer: vk.Buffer,
 	image: vk.Image,
@@ -1990,7 +1990,7 @@ SamplerError :: enum {
 
 @(private = "file")
 @(require_results)
-createSamplers :: proc(using graphicsContext: ^GraphicsContext) -> SamplerError {
+createSamplers :: proc(using graphicsData: ^GraphicsData) -> SamplerError {
 	samplers = make([]vk.Sampler, 2)
 	samplerInfo: vk.SamplerCreateInfo = {
 		sType                   = .SAMPLER_CREATE_INFO,
@@ -2030,7 +2030,7 @@ createSamplers :: proc(using graphicsContext: ^GraphicsContext) -> SamplerError 
 }
 
 @(private = "file")
-cleanupSamplers :: proc(using graphicsContext: ^GraphicsContext) {
+cleanupSamplers :: proc(using graphicsData: ^GraphicsData) {
 	for &sampler in samplers {
 		vk.DestroySampler(device, sampler, nil)
 	}
@@ -2045,7 +2045,7 @@ LoaderError :: enum {
 
 @(require_results)
 loadImages :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	scene: ^Scene,
 	imagePaths: []string,
 ) -> (
@@ -2054,7 +2054,7 @@ loadImages :: proc(
 	image := &scene.buffers.textures
 	image.format = .R8G8B8A8_SRGB
 	if err := createImage(
-		graphicsContext,
+		graphicsData,
 		image,
 		{},
 		.D2,
@@ -2074,14 +2074,14 @@ loadImages :: proc(
 	}
 
 	commandBuffer: vk.CommandBuffer
-	commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to begin single time commands! Error: %v", err)
 		return err
 	}
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		commandBuffer,
 		image.vkImage,
 		.UNDEFINED,
@@ -2090,7 +2090,7 @@ loadImages :: proc(
 		u32(len(imagePaths)),
 	)
 
-	if err := endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool);
+	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool);
 	   err != nil {
 		logf(.Error, "Failed to end single time commands! Error: %v", err)
 		return err
@@ -2114,7 +2114,7 @@ loadImages :: proc(
 
 		stagingBuffer: Buffer
 		err = createBuffer(
-			graphicsContext,
+			graphicsData,
 			textureSize,
 			{.TRANSFER_SRC},
 			{.HOST_VISIBLE, .HOST_COHERENT},
@@ -2126,7 +2126,7 @@ loadImages :: proc(
 			return err
 		}
 		defer {
-			deleteBuffer(graphicsContext, &stagingBuffer)
+			deleteBuffer(graphicsData, &stagingBuffer)
 		}
 
 		data: rawptr
@@ -2137,7 +2137,7 @@ loadImages :: proc(
 		stagingImage: Image
 		stagingImage.format = .R8G8B8A8_SRGB
 		if err := createImage(
-			graphicsContext,
+			graphicsData,
 			&stagingImage,
 			{},
 			.D2,
@@ -2161,13 +2161,13 @@ loadImages :: proc(
 			vk.FreeMemory(device, stagingImage.memory, nil)
 		}
 
-		commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+		commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 		if err != nil {
 			logf(.Error, "Failed to begin single time commands! Error: %v", err)
 			return err
 		}
 		transitionImageLayout(
-			graphicsContext,
+			graphicsData,
 			commandBuffer,
 			stagingImage.vkImage,
 			.UNDEFINED,
@@ -2177,7 +2177,7 @@ loadImages :: proc(
 		)
 
 		copyBufferToImage(
-			graphicsContext,
+			graphicsData,
 			commandBuffer,
 			stagingBuffer.buffer,
 			stagingImage.vkImage,
@@ -2186,7 +2186,7 @@ loadImages :: proc(
 		)
 
 		transitionImageLayout(
-			graphicsContext,
+			graphicsData,
 			commandBuffer,
 			stagingImage.vkImage,
 			.TRANSFER_DST_OPTIMAL,
@@ -2204,21 +2204,21 @@ loadImages :: proc(
 			0,
 			u32(index),
 		)
-		err = endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
+		err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
 		if err != nil {
 			logf(.Error, "Failed to end single time commands! Error: %v", err)
 			return err
 		}
 	}
 
-	commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to begin single time commands! Error: %v", err)
 		return err
 	}
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		commandBuffer,
 		image.vkImage,
 		.TRANSFER_DST_OPTIMAL,
@@ -2227,14 +2227,14 @@ loadImages :: proc(
 		u32(len(imagePaths)),
 	)
 
-	err = endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
+	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to end single time commands! Error: %v", err)
 		return err
 	}
 
 	image.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		image.vkImage,
 		.D2_ARRAY,
 		image.format,
@@ -2252,7 +2252,7 @@ loadImages :: proc(
 
 @(require_results)
 addImages :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	image: ^Image,
 	imageLayers: u32,
 	imagePaths: []string,
@@ -2267,7 +2267,7 @@ addImages :: proc(
 	}
 
 	err = createImage(
-		graphicsContext,
+		graphicsData,
 		&newImage,
 		{},
 		.D2,
@@ -2288,14 +2288,14 @@ addImages :: proc(
 	}
 
 	commandBuffer: vk.CommandBuffer
-	commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to begin single time commands! Error: %v", err)
 		return err
 	}
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		commandBuffer,
 		newImage.vkImage,
 		.UNDEFINED,
@@ -2305,7 +2305,7 @@ addImages :: proc(
 	)
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		commandBuffer,
 		image.vkImage,
 		.SHADER_READ_ONLY_OPTIMAL,
@@ -2340,14 +2340,14 @@ addImages :: proc(
 		1,
 		&copyInfo,
 	)
-	err = endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
+	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to end single time commands! Error: %v", err)
 		return err
 	}
 
 	// Crashing if error after this point
-	deleteImage(graphicsContext, image)
+	deleteImage(graphicsData, image)
 	image^ = newImage
 
 	for path, pathIdx in imagePaths {
@@ -2368,7 +2368,7 @@ addImages :: proc(
 
 		stagingBuffer: Buffer
 		err = createBuffer(
-			graphicsContext,
+			graphicsData,
 			textureSize,
 			{.TRANSFER_SRC},
 			{.HOST_VISIBLE, .HOST_COHERENT},
@@ -2380,7 +2380,7 @@ addImages :: proc(
 			return err
 		}
 		defer {
-			deleteBuffer(graphicsContext, &stagingBuffer)
+			deleteBuffer(graphicsData, &stagingBuffer)
 		}
 
 		data: rawptr
@@ -2391,7 +2391,7 @@ addImages :: proc(
 		stagingImage: Image
 		stagingImage.format = .R8G8B8A8_SRGB
 		err = createImage(
-			graphicsContext,
+			graphicsData,
 			&stagingImage,
 			{},
 			.D2,
@@ -2416,14 +2416,14 @@ addImages :: proc(
 			vk.FreeMemory(device, stagingImage.memory, nil)
 		}
 
-		commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+		commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 		if err != nil {
 			logf(.Error, "Failed to begin single time commands! Error: %v", err)
 			return err
 		}
 
 		transitionImageLayout(
-			graphicsContext,
+			graphicsData,
 			commandBuffer,
 			stagingImage.vkImage,
 			.UNDEFINED,
@@ -2433,7 +2433,7 @@ addImages :: proc(
 		)
 
 		copyBufferToImage(
-			graphicsContext,
+			graphicsData,
 			commandBuffer,
 			stagingBuffer.buffer,
 			stagingImage.vkImage,
@@ -2442,7 +2442,7 @@ addImages :: proc(
 		)
 
 		transitionImageLayout(
-			graphicsContext,
+			graphicsData,
 			commandBuffer,
 			stagingImage.vkImage,
 			.TRANSFER_DST_OPTIMAL,
@@ -2461,21 +2461,21 @@ addImages :: proc(
 			imageLayers,
 		)
 
-		err = endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
+		err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
 		if err != nil {
 			logf(.Error, "Failed to end single time commands! Error: %v", err)
 			return err
 		}
 	}
 
-	commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to begin single time commands! Error: %v", err)
 		return err
 	}
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		commandBuffer,
 		image.vkImage,
 		.TRANSFER_DST_OPTIMAL,
@@ -2483,14 +2483,14 @@ addImages :: proc(
 		{.COLOR},
 		imageLayers,
 	)
-	err = endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
+	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
 	if err != nil {
 		logf(.Error, "Failed to end single time commands! Error: %v", err)
 		return err
 	}
 
 	image.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		image.vkImage,
 		.D2_ARRAY,
 		image.format,
@@ -2506,21 +2506,21 @@ addImages :: proc(
 }
 
 @(private = "file")
-deleteImage :: proc(using graphicsContext: ^GraphicsContext, image: ^Image) {
+deleteImage :: proc(using graphicsData: ^GraphicsData, image: ^Image) {
 	vk.DestroyImageView(device, image.view, nil)
 	vk.DestroyImage(device, image.vkImage, nil)
 	vk.FreeMemory(device, image.memory, nil)
 }
 
 @(require_results)
-updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scene) -> Error {
+updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) -> Error {
 	buffers := &scene.buffers
 	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
 		panic("Failed to wait for device idle!")
 	}
 
 	if err := loadBufferToGPU(
-		graphicsContext,
+		graphicsData,
 		size_of(Vertex) * len(scene.vertices),
 		raw_data(scene.vertices),
 		&buffers.vertexBuffer,
@@ -2531,7 +2531,7 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 	}
 
 	if err := loadBufferToGPU(
-		graphicsContext,
+		graphicsData,
 		size_of(u32) * len(scene.indices),
 		raw_data(scene.indices),
 		&buffers.indexBuffer,
@@ -2541,7 +2541,7 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 		return err
 	}
 
-	updateShadowMapFrameBuffer(graphicsContext, scene)
+	updateShadowMapFrameBuffer(graphicsData, scene)
 
 	instanceBufferSize := size_of(InstanceInfo) * len(scene.objects)
 	boneBufferSize := size_of(Mat4) * scene.boneCount
@@ -2554,9 +2554,9 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 	textureIndexSize *= len(TextureIndex) * size_of(u32)
 
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		deleteBuffer(graphicsContext, &buffers.instanceBuffers[i])
+		deleteBuffer(graphicsData, &buffers.instanceBuffers[i])
 		if err := createBuffer(
-			graphicsContext,
+			graphicsData,
 			instanceBufferSize,
 			{.STORAGE_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
@@ -2567,7 +2567,7 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 			return err
 		}
 		vk.MapMemory(
-			graphicsContext.device,
+			graphicsData.device,
 			buffers.instanceBuffers[i].memory,
 			0,
 			vk.DeviceSize(instanceBufferSize),
@@ -2575,9 +2575,9 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 			&buffers.instanceBuffers[i].mapped,
 		)
 
-		deleteBuffer(graphicsContext, &buffers.boneBuffers[i])
+		deleteBuffer(graphicsData, &buffers.boneBuffers[i])
 		if err := createBuffer(
-			graphicsContext,
+			graphicsData,
 			boneBufferSize,
 			{.STORAGE_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
@@ -2588,7 +2588,7 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 			return err
 		}
 		vk.MapMemory(
-			graphicsContext.device,
+			graphicsData.device,
 			buffers.boneBuffers[i].memory,
 			0,
 			vk.DeviceSize(boneBufferSize),
@@ -2596,9 +2596,9 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 			&buffers.boneBuffers[i].mapped,
 		)
 
-		deleteBuffer(graphicsContext, &buffers.lightBuffers[i])
+		deleteBuffer(graphicsData, &buffers.lightBuffers[i])
 		if err := createBuffer(
-			graphicsContext,
+			graphicsData,
 			lightBufferSize,
 			{.STORAGE_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
@@ -2609,7 +2609,7 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 			return err
 		}
 		vk.MapMemory(
-			graphicsContext.device,
+			graphicsData.device,
 			buffers.lightBuffers[i].memory,
 			0,
 			vk.DeviceSize(lightBufferSize),
@@ -2617,9 +2617,9 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 			&buffers.lightBuffers[i].mapped,
 		)
 
-		deleteBuffer(graphicsContext, &buffers.transformBuffers[i])
+		deleteBuffer(graphicsData, &buffers.transformBuffers[i])
 		if err := createBuffer(
-			graphicsContext,
+			graphicsData,
 			int(transformBufferSize),
 			{.STORAGE_BUFFER},
 			{.DEVICE_LOCAL},
@@ -2631,9 +2631,9 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 		}
 
 	}
-	deleteBuffer(graphicsContext, &buffers.textureIndexBuffer)
+	deleteBuffer(graphicsData, &buffers.textureIndexBuffer)
 	if err := createBuffer(
-		graphicsContext,
+		graphicsData,
 		textureIndexSize,
 		{.STORAGE_BUFFER},
 		{.HOST_VISIBLE, .HOST_COHERENT},
@@ -2644,21 +2644,21 @@ updateSceneBuffers :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scen
 		return err
 	}
 	vk.MapMemory(
-		graphicsContext.device,
+		graphicsData.device,
 		buffers.textureIndexBuffer.memory,
 		0,
 		vk.DeviceSize(textureIndexSize),
 		{},
 		&buffers.textureIndexBuffer.mapped,
 	)
-	updateTextureIndexBuffer(graphicsContext, scene)
+	updateTextureIndexBuffer(graphicsData, scene)
 
-	if err := updateDescriptorSets(graphicsContext, scene); err != nil {
+	if err := updateDescriptorSets(graphicsData, scene); err != nil {
 		logf(.Error, "Failed to update descriptor sets! Error: %v", err)
 		return err
 	}
 
-	if err := updateCommandBuffers(graphicsContext, scene); err != nil {
+	if err := updateCommandBuffers(graphicsData, scene); err != nil {
 		logf(.Error, "Failed to update command buffers! Error: %v", err)
 		return err
 	}
@@ -2677,7 +2677,7 @@ DescriptorSetError :: enum {
 @(private = "file")
 @(require_results)
 createBuffersDescriptorSets :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 ) -> DescriptorSetError {
 	layoutBindings: []vk.DescriptorSetLayoutBinding = {
 		{
@@ -2808,7 +2808,7 @@ createBuffersDescriptorSets :: proc(
 @(private = "file")
 @(require_results)
 createTexturesDescriptorSets :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 ) -> DescriptorSetError {
 	layoutBindings: []vk.DescriptorSetLayoutBinding = {
 		{
@@ -2918,7 +2918,7 @@ createTexturesDescriptorSets :: proc(
 @(private = "file")
 @(require_results)
 updateDescriptorSets :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	scene: ^Scene,
 ) -> (
 	err: ImageError,
@@ -2984,13 +2984,13 @@ updateDescriptorSets :: proc(
 	}
 
 	if renderedImage.vkImage != 0 {
-		deleteImage(graphicsContext, &renderedImage)
-		deleteImage(graphicsContext, &processedImage)
+		deleteImage(graphicsData, &renderedImage)
+		deleteImage(graphicsData, &processedImage)
 	}
 
 	renderedImage.format = .R16G16B16A16_SFLOAT
 	err = createImage(
-		graphicsContext,
+		graphicsData,
 		&renderedImage,
 		{},
 		.D2,
@@ -3011,7 +3011,7 @@ updateDescriptorSets :: proc(
 	}
 
 	renderedImage.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		renderedImage.vkImage,
 		.D2,
 		renderedImage.format,
@@ -3025,7 +3025,7 @@ updateDescriptorSets :: proc(
 
 	processedImage.format = .R16G16B16A16_SFLOAT
 	err = createImage(
-		graphicsContext,
+		graphicsData,
 		&processedImage,
 		{},
 		.D2,
@@ -3046,7 +3046,7 @@ updateDescriptorSets :: proc(
 	}
 
 	processedImage.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		processedImage.vkImage,
 		.D2,
 		processedImage.format,
@@ -3248,10 +3248,10 @@ updateDescriptorSets :: proc(
 
 @(private = "file")
 @(require_results)
-updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> ImageError {
+updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) -> ImageError {
 	renderedImage.format = .R16G16B16A16_SFLOAT
 	err := createImage(
-		graphicsContext,
+		graphicsData,
 		&renderedImage,
 		{},
 		.D2,
@@ -3272,7 +3272,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> 
 	}
 
 	renderedImage.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		renderedImage.vkImage,
 		.D2,
 		renderedImage.format,
@@ -3286,7 +3286,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> 
 
 	processedImage.format = .R16G16B16A16_SFLOAT
 	err = createImage(
-		graphicsContext,
+		graphicsData,
 		&processedImage,
 		{},
 		.D2,
@@ -3307,7 +3307,7 @@ updateComputeDescriptorSets :: proc(using graphicsContext: ^GraphicsContext) -> 
 	}
 
 	processedImage.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		processedImage.vkImage,
 		.D2,
 		processedImage.format,
@@ -3395,7 +3395,7 @@ SyncError :: enum {
 
 @(private = "file")
 @(require_results)
-createSyncObjects :: proc(using graphicsContext: ^GraphicsContext) -> SyncError {
+createSyncObjects :: proc(using graphicsData: ^GraphicsData) -> SyncError {
 	fenceInfo: vk.FenceCreateInfo = {
 		sType = .FENCE_CREATE_INFO,
 		pNext = nil,
@@ -3451,7 +3451,7 @@ createSyncObjects :: proc(using graphicsContext: ^GraphicsContext) -> SyncError 
 
 @(private = "file")
 findSupportedDepthFormat :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	candidates: []vk.Format,
 	tiling: vk.ImageTiling,
 	features: vk.FormatFeatureFlags,
@@ -3485,7 +3485,7 @@ RenderPass :: struct {
 
 @(private = "file")
 @(require_results)
-createRenderPass :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
+createRenderPass :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 	// SHADOW
 	{
 		colourAttachment: vk.AttachmentDescription = {
@@ -3565,7 +3565,7 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error
 		pipelines[PipelineIndex.MAIN].colour.format = .R16G16B16A16_SFLOAT
 
 		err = createImage(
-			graphicsContext,
+			graphicsData,
 			&pipelines[PipelineIndex.MAIN].colour,
 			{},
 			.D2,
@@ -3586,7 +3586,7 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error
 		}
 
 		pipelines[PipelineIndex.MAIN].colour.view, err = createImageView(
-			graphicsContext,
+			graphicsData,
 			pipelines[PipelineIndex.MAIN].colour.vkImage,
 			.D2,
 			pipelines[PipelineIndex.MAIN].colour.format,
@@ -3601,7 +3601,7 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error
 		pipelines[PipelineIndex.MAIN].depth.format = depthFormat
 
 		err = createImage(
-			graphicsContext,
+			graphicsData,
 			&pipelines[PipelineIndex.MAIN].depth,
 			{},
 			.D2,
@@ -3622,7 +3622,7 @@ createRenderPass :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error
 		}
 
 		pipelines[PipelineIndex.MAIN].depth.view, err = createImageView(
-			graphicsContext,
+			graphicsData,
 			pipelines[PipelineIndex.MAIN].depth.vkImage,
 			.D2,
 			pipelines[PipelineIndex.MAIN].depth.format,
@@ -3717,7 +3717,7 @@ FrameBufferError :: enum {
 
 @(private = "file")
 @(require_results)
-createMainFrameBuffers :: proc(using graphicsContext: ^GraphicsContext) -> FrameBufferError {
+createMainFrameBuffers :: proc(using graphicsData: ^GraphicsData) -> FrameBufferError {
 	frameBufferInfo: vk.FramebufferCreateInfo = {
 		sType           = .FRAMEBUFFER_CREATE_INFO,
 		pNext           = nil,
@@ -3753,7 +3753,7 @@ createMainFrameBuffers :: proc(using graphicsContext: ^GraphicsContext) -> Frame
 
 @(private = "file")
 createShadowMapFrameBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	scene: ^Scene,
 ) -> (
 	err: Error,
@@ -3762,7 +3762,7 @@ createShadowMapFrameBuffer :: proc(
 
 	layerCount := u32(len(scene.lights)) * 6
 	err = createImage(
-		graphicsContext,
+		graphicsData,
 		&pipelines[PipelineIndex.LIGHT].colour,
 		{.CUBE_COMPATIBLE},
 		.D2,
@@ -3783,7 +3783,7 @@ createShadowMapFrameBuffer :: proc(
 	}
 
 	pipelines[PipelineIndex.LIGHT].colour.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		pipelines[PipelineIndex.LIGHT].colour.vkImage,
 		.CUBE_ARRAY,
 		pipelines[PipelineIndex.LIGHT].colour.format,
@@ -3796,14 +3796,14 @@ createShadowMapFrameBuffer :: proc(
 	}
 
 	commandBuffer: vk.CommandBuffer
-	commandBuffer, err = beginSingleTimeCommands(graphicsContext, graphicsCommandPool)
+	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
 		log(.Error, "Failed to begin single time commands!")
 		return err
 	}
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		commandBuffer,
 		pipelines[PipelineIndex.LIGHT].colour.vkImage,
 		.UNDEFINED,
@@ -3811,7 +3811,7 @@ createShadowMapFrameBuffer :: proc(
 		{.COLOR},
 		layerCount,
 	)
-	err = endSingleTimeCommands(graphicsContext, commandBuffer, graphicsCommandPool)
+	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
 	if err != nil {
 		log(.Error, "Failed to end single time commands!")
 		return err
@@ -3820,7 +3820,7 @@ createShadowMapFrameBuffer :: proc(
 	pipelines[PipelineIndex.LIGHT].depth.format = depthFormat
 
 	err = createImage(
-		graphicsContext,
+		graphicsData,
 		&pipelines[PipelineIndex.LIGHT].depth,
 		{.CUBE_COMPATIBLE},
 		.D2,
@@ -3841,7 +3841,7 @@ createShadowMapFrameBuffer :: proc(
 	}
 
 	pipelines[PipelineIndex.LIGHT].depth.view, err = createImageView(
-		graphicsContext,
+		graphicsData,
 		pipelines[PipelineIndex.LIGHT].depth.vkImage,
 		.CUBE_ARRAY,
 		pipelines[PipelineIndex.LIGHT].depth.format,
@@ -3886,16 +3886,16 @@ createShadowMapFrameBuffer :: proc(
 }
 
 @(private = "file")
-updateShadowMapFrameBuffer :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scene) {
+updateShadowMapFrameBuffer :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	if pipelines[PipelineIndex.LIGHT].colour != {} {
 		for index in 0 ..< len(swapchainImages) {
 			vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
 		}
-		deleteImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].colour)
-		deleteImage(graphicsContext, &pipelines[PipelineIndex.LIGHT].depth)
+		deleteImage(graphicsData, &pipelines[PipelineIndex.LIGHT].colour)
+		deleteImage(graphicsData, &pipelines[PipelineIndex.LIGHT].depth)
 	}
 
-	createShadowMapFrameBuffer(graphicsContext, scene)
+	createShadowMapFrameBuffer(graphicsData, scene)
 }
 
 PipelineError :: enum {
@@ -3909,7 +3909,7 @@ PipelineError :: enum {
 @(private = "file")
 @(require_results)
 createShaderModules :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	shaderIdx: u32,
 	stage: slang.Stage,
 ) -> (
@@ -4044,7 +4044,7 @@ createShaderModules :: proc(
 @(private = "file")
 @(require_results)
 createGraphicsPipelines :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	shadowShaderIndices, mainShaderIndices: [2]u32,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> PipelineError {
@@ -4088,7 +4088,7 @@ createGraphicsPipelines :: proc(
 	shadowShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
 	for &info, index in shadowShaderStagesInfo {
 		module, err := createShaderModules(
-			graphicsContext,
+			graphicsData,
 			shadowShaderIndices[index],
 			index == 0 ? .VERTEX : .FRAGMENT,
 		)
@@ -4259,7 +4259,7 @@ createGraphicsPipelines :: proc(
 	mainShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
 	for &info, index in mainShaderStagesInfo {
 		module, err := createShaderModules(
-			graphicsContext,
+			graphicsData,
 			mainShaderIndices[index],
 			index == 0 ? .VERTEX : .FRAGMENT,
 		)
@@ -4417,7 +4417,7 @@ createGraphicsPipelines :: proc(
 @(private = "file")
 @(require_results)
 createComputePipelines :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	preShaderIndices, postShaderIndices: u32,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> PipelineError {
@@ -4456,7 +4456,7 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shaderModule, err := createShaderModules(graphicsContext, preShaderIndices, .COMPUTE)
+	shaderModule, err := createShaderModules(graphicsData, preShaderIndices, .COMPUTE)
 	if err != nil {
 		logf(.Fatal, "Failed to create precompute shader module! Error: %d", err)
 		return err
@@ -4509,7 +4509,7 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shaderModule, err = createShaderModules(graphicsContext, postShaderIndices, .COMPUTE)
+	shaderModule, err = createShaderModules(graphicsData, postShaderIndices, .COMPUTE)
 	if err != nil {
 		logf(.Fatal, "Failed to create precompute shader module! Error: %d", err)
 		return err
@@ -4559,7 +4559,7 @@ createComputePipelines :: proc(
 }
 
 @(private = "file")
-cleanupPipelines :: proc(using graphicsContext: ^GraphicsContext) {
+cleanupPipelines :: proc(using graphicsData: ^GraphicsData) {
 	vk.DestroyPipeline(device, pipelines[PipelineIndex.PRECOMPUTE].pipeline, nil)
 	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.PRECOMPUTE].layout, nil)
 
@@ -4574,26 +4574,26 @@ cleanupPipelines :: proc(using graphicsContext: ^GraphicsContext) {
 }
 
 @(require_results)
-reloadShaders :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scene) -> (err: Error) {
-	cleanupPipelines(graphicsContext)
+reloadShaders :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) -> (err: Error) {
+	cleanupPipelines(graphicsData)
 	createGraphicsPipelines(
-		graphicsContext,
+		graphicsData,
 		pipelines[PipelineIndex.LIGHT].shaderIdxs,
 		pipelines[PipelineIndex.MAIN].shaderIdxs,
 	) or_return
 
 	createComputePipelines(
-		graphicsContext,
+		graphicsData,
 		pipelines[PipelineIndex.PRECOMPUTE].shaderIdxs[0],
 		pipelines[PipelineIndex.POSTPROCESS].shaderIdxs[0],
 	) or_return
 
-	updateDescriptorSets(graphicsContext, scene) or_return
+	updateDescriptorSets(graphicsData, scene) or_return
 	return nil
 }
 
 changePipelineShader :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	pipeline: PipelineIndex,
 	indices: u32,
 ) {
@@ -4603,7 +4603,7 @@ changePipelineShader :: proc(
 
 @(private = "file")
 @(require_results)
-initImgui :: proc(using graphicsContext: ^GraphicsContext) -> DescriptorSetError {
+initImgui :: proc(using graphicsData: ^GraphicsData) -> DescriptorSetError {
 	imgui.CHECKVERSION()
 
 	poolSizes: []vk.DescriptorPoolSize = {
@@ -4649,7 +4649,7 @@ ImguiError :: enum {
 
 @(private = "file")
 @(require_results)
-updateImgui :: proc(using graphicsContext: ^GraphicsContext) -> Error {
+updateImgui :: proc(using graphicsData: ^GraphicsData) -> Error {
 	imguiData.imguiContext = imgui.CreateContext()
 	io := imgui.GetIO()
 	imgui.StyleColorsClassic()
@@ -4671,7 +4671,7 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) -> Error {
 		imguiData.colour.format = .R16G16B16A16_SFLOAT
 
 		err := createImage(
-			graphicsContext,
+			graphicsData,
 			&imguiData.colour,
 			{},
 			.D2,
@@ -4691,7 +4691,7 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) -> Error {
 		}
 
 		imguiData.colour.view, err = createImageView(
-			graphicsContext,
+			graphicsData,
 			imguiData.colour.vkImage,
 			.D2,
 			imguiData.colour.format,
@@ -4820,7 +4820,7 @@ updateImgui :: proc(using graphicsContext: ^GraphicsContext) -> Error {
 }
 
 @(private = "file")
-cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
+cleanupImgui :: proc(using graphicsData: ^GraphicsData) {
 	imguiVulkan.Shutdown()
 	imguiGLFW.Shutdown()
 	imgui.DestroyContext(imguiData.imguiContext)
@@ -4830,13 +4830,13 @@ cleanupImgui :: proc(using graphicsContext: ^GraphicsContext) {
 	}
 	delete(imguiData.frameBuffers)
 
-	deleteImage(graphicsContext, &imguiData.colour)
+	deleteImage(graphicsData, &imguiData.colour)
 
 	vk.DestroyRenderPass(device, imguiData.renderPass, nil)
 }
 
 @(private = "file")
-updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scene, delta: f32) {
+updateLightBuffer :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, delta: f32) {
 	buffers := &scene.buffers
 	lightData := make([]LightData, len(scene.lights), allocator = context.temp_allocator)
 	for &light, i in scene.lights {
@@ -4859,7 +4859,7 @@ updateLightBuffer :: proc(using graphicsContext: ^GraphicsContext, scene: ^Scene
 
 @(private = "file")
 updateUniformBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	scene: ^Scene,
 	viewProjection: Mat4,
 ) {
@@ -4871,7 +4871,7 @@ updateUniformBuffer :: proc(
 }
 
 @(private = "file")
-updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, delta: f32) {
+updateInstanceBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene, delta: f32) {
 	boneTransforms := make([]Mat4, scene.boneCount, allocator = context.temp_allocator)
 	instanceData := make([]InstanceInfo, len(scene.objects), allocator = context.temp_allocator)
 
@@ -4929,19 +4929,19 @@ updateInstanceBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, d
 	}
 
 	mem.copy(
-		scene.buffers.boneBuffers[graphicsContext.currentFrame].mapped,
+		scene.buffers.boneBuffers[graphicsData.currentFrame].mapped,
 		raw_data(boneTransforms),
 		scene.boneCount * size_of(Mat4),
 	)
 	mem.copy(
-		scene.buffers.instanceBuffers[graphicsContext.currentFrame].mapped,
+		scene.buffers.instanceBuffers[graphicsData.currentFrame].mapped,
 		raw_data(instanceData),
 		len(scene.objects) * size_of(InstanceInfo),
 	)
 }
 
 @(private = "file")
-updateTextureIndexBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene) {
+updateTextureIndexBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
 	textureIndicesLength := 0
 	for &model in scene.models {
 		textureIndicesLength += len(model.instances) * len(model.meshes)
@@ -4971,7 +4971,7 @@ updateTextureIndexBuffer :: proc(graphicsContext: ^GraphicsContext, scene: ^Scen
 
 @(require_results)
 updateCommandBuffers :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	scene: ^Scene,
 ) -> RecordCommandBufferError {
 	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
@@ -4985,21 +4985,21 @@ updateCommandBuffers :: proc(
 		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
 		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
 
-		recordPreComputeBuffer(graphicsContext, bufferIndex, scene) or_return
-		recordShadowMapBuffer(graphicsContext, bufferIndex, scene) or_return
-		recordSceneBuffers(graphicsContext, bufferIndex, scene) or_return
-		recordMainGraphicsBuffer(graphicsContext, bufferIndex, scene) or_return
+		recordPreComputeBuffer(graphicsData, bufferIndex, scene) or_return
+		recordShadowMapBuffer(graphicsData, bufferIndex, scene) or_return
+		recordSceneBuffers(graphicsData, bufferIndex, scene) or_return
+		recordMainGraphicsBuffer(graphicsData, bufferIndex, scene) or_return
 
 		when IMGUI_ENABLED {
 			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-			recordPostComputeBuffer(graphicsContext, bufferIndex) or_return
+			recordPostComputeBuffer(graphicsData, bufferIndex) or_return
 		}
 	}
 
 	when !IMGUI_ENABLED {
 		for bufferIndex in 0 ..< u32(len(swapchainImages)) {
 			vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
-			recordPostComputeBuffer(graphicsContext, bufferIndex) or_return
+			recordPostComputeBuffer(graphicsData, bufferIndex) or_return
 		}
 	}
 
@@ -5014,7 +5014,7 @@ RecordCommandBufferError :: enum {
 @(private = "file")
 @(require_results)
 recordPreComputeBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	index: u32,
 	scene: ^Scene,
 ) -> RecordCommandBufferError {
@@ -5094,7 +5094,7 @@ recordPreComputeBuffer :: proc(
 @(private = "file")
 @(require_results)
 recordMainGraphicsBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	index: u32,
 	scene: ^Scene,
 ) -> RecordCommandBufferError {
@@ -5193,7 +5193,7 @@ recordMainGraphicsBuffer :: proc(
 @(private = "file")
 @(require_results)
 recordShadowMapBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	index: u32,
 	scene: ^Scene,
 ) -> RecordCommandBufferError {
@@ -5301,7 +5301,7 @@ recordShadowMapBuffer :: proc(
 @(private = "file")
 @(require_results)
 recordSceneBuffers :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	index: u32,
 	scene: ^Scene,
 ) -> RecordCommandBufferError {
@@ -5400,7 +5400,7 @@ recordSceneBuffers :: proc(
 @(private = "file")
 @(require_results)
 recordPostComputeBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	index: u32,
 ) -> RecordCommandBufferError {
 	beginInfo: vk.CommandBufferBeginInfo = {
@@ -5417,7 +5417,7 @@ recordPostComputeBuffer :: proc(
 	}
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		postComputeCommandBuffers[index],
 		renderedImage.vkImage,
 		.UNDEFINED,
@@ -5437,7 +5437,7 @@ recordPostComputeBuffer :: proc(
 	)
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		postComputeCommandBuffers[index],
 		renderedImage.vkImage,
 		.TRANSFER_DST_OPTIMAL,
@@ -5447,7 +5447,7 @@ recordPostComputeBuffer :: proc(
 	)
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		postComputeCommandBuffers[index],
 		processedImage.vkImage,
 		.UNDEFINED,
@@ -5521,7 +5521,7 @@ recordPostComputeBuffer :: proc(
 	)
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		postComputeCommandBuffers[index],
 		processedImage.vkImage,
 		.UNDEFINED,
@@ -5532,7 +5532,7 @@ recordPostComputeBuffer :: proc(
 
 	when IMGUI_ENABLED {
 		transitionImageLayout(
-			graphicsContext,
+			graphicsData,
 			postComputeCommandBuffers[index],
 			imguiData.colour.vkImage,
 			.UNDEFINED,
@@ -5551,7 +5551,7 @@ recordPostComputeBuffer :: proc(
 		)
 	} else {
 		transitionImageLayout(
-			graphicsContext,
+			graphicsData,
 			postComputeCommandBuffers[index],
 			swapchainImages[index],
 			.UNDEFINED,
@@ -5593,7 +5593,7 @@ recordPostComputeBuffer :: proc(
 		)
 
 		transitionImageLayout(
-			graphicsContext,
+			graphicsData,
 			postComputeCommandBuffers[index],
 			swapchainImages[index],
 			.TRANSFER_DST_OPTIMAL,
@@ -5613,7 +5613,7 @@ recordPostComputeBuffer :: proc(
 @(private = "file")
 @(require_results)
 recordImguiBuffer :: proc(
-	using graphicsContext: ^GraphicsContext,
+	using graphicsData: ^GraphicsData,
 	index: u32,
 ) -> RecordCommandBufferError {
 	beginInfo: vk.CommandBufferBeginInfo = {
@@ -5643,7 +5643,7 @@ recordImguiBuffer :: proc(
 	vk.CmdEndRenderPass(imguiCommandBuffers[index])
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		imguiCommandBuffers[index],
 		swapchainImages[index],
 		.UNDEFINED,
@@ -5685,7 +5685,7 @@ recordImguiBuffer :: proc(
 	)
 
 	transitionImageLayout(
-		graphicsContext,
+		graphicsData,
 		imguiCommandBuffers[index],
 		swapchainImages[index],
 		.TRANSFER_DST_OPTIMAL,
@@ -5701,20 +5701,20 @@ recordImguiBuffer :: proc(
 	return .None
 }
 
-windowSize :: proc(using graphicsContext: ^GraphicsContext) -> (width: i32, height: i32) {
+windowSize :: proc(using graphicsData: ^GraphicsData) -> (width: i32, height: i32) {
 	return glfw.GetWindowSize(window)
 }
 
-updateWindow :: proc(using graphicsContext: ^GraphicsContext) -> (ret: bool) {
+updateWindow :: proc(using graphicsData: ^GraphicsData) -> (ret: bool) {
 	ret = !glfw.WindowShouldClose(window)
 	glfw.PollEvents()
 	return
 }
 
-updateSceneData :: proc(graphicsContext: ^GraphicsContext, scene: ^Scene, vp: Mat4, delta: f32) {
-	updateUniformBuffer(graphicsContext, scene, vp)
-	updateLightBuffer(graphicsContext, scene, delta)
-	updateInstanceBuffer(graphicsContext, scene, delta)
+updateSceneData :: proc(graphicsData: ^GraphicsData, scene: ^Scene, vp: Mat4, delta: f32) {
+	updateUniformBuffer(graphicsData, scene, vp)
+	updateLightBuffer(graphicsData, scene, delta)
+	updateInstanceBuffer(graphicsData, scene, delta)
 }
 
 DrawError :: enum {
@@ -5729,7 +5729,7 @@ DrawError :: enum {
 }
 
 @(require_results)
-drawFrame :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
+drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 	vk.WaitForFences(device, 1, &inFlightFrames[currentFrame], true, max(u64))
 
 	imageIndex: u32
@@ -5741,7 +5741,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 		{},
 		&imageIndex,
 	); res == .ERROR_OUT_OF_DATE_KHR {
-		if err = recreateSwapchain(graphicsContext); err != nil {
+		if err = recreateSwapchain(graphicsData); err != nil {
 			return err
 		}
 		return DrawError.UpdateCommandBuffers
@@ -5756,12 +5756,12 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 		imguiGLFW.NewFrame()
 		imgui.NewFrame()
 
-		drawImgui(graphicsContext)
+		drawImgui(graphicsData)
 
 		imgui.EndFrame()
 
 		vk.ResetCommandBuffer(imguiCommandBuffers[imageIndex], {})
-		if err := recordImguiBuffer(graphicsContext, imageIndex); err != nil {
+		if err := recordImguiBuffer(graphicsData, imageIndex); err != nil {
 			logf(.Error, "Failed to record ui command buffer! Error: %v", err)
 			return err
 		}
@@ -6016,7 +6016,7 @@ drawFrame :: proc(using graphicsContext: ^GraphicsContext) -> (err: Error) {
 	case .SUCCESS:
 		break
 	case .ERROR_OUT_OF_DATE_KHR, .SUBOPTIMAL_KHR:
-		err = recreateSwapchain(graphicsContext)
+		err = recreateSwapchain(graphicsData)
 		if err != nil {
 			logf(.Error, "Failed to recreate swapchain! Error: %v", err)
 			return err
