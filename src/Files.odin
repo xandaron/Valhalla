@@ -760,8 +760,8 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 TextureComponent :: struct {
 	nameLength: u32,
 	pathLength: u32,
-	// In the future I should generate bitmaps from the image at path
-	// and save the bitmap in a file so I can load it later
+	// In the future I should generate mips from the image at path
+	// and save the mips in a file so I can load it later
 	// width, height: u32,
 	// miplevels: u32,
 	// data: []byte,
