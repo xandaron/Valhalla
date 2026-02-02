@@ -8,6 +8,13 @@ import "core:path/filepath"
 import "core:strings"
 import "vendor:glfw"
 
+UIData :: struct {
+	lockInput:           bool,
+	createComponentInfo: CreateComponentData,
+	showDemo:            bool,
+	showMetrics:         bool,
+}
+
 CreateComponentData :: struct {
 	name:      [100]byte,
 	savePath:  [100]byte,
@@ -72,12 +79,13 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		return strings.clone_to_cstring(str, allocator = allocator)
 	}
 
-	if globals.showMetrics {
+	uiData := &globals.uiData
+	if uiData.showMetrics {
 		imgui.SetNextWindowBgAlpha(1.0)
 		imgui.ShowMetricsWindow()
 	}
 
-	if globals.showDemo {
+	if uiData.showDemo {
 		imgui.SetNextWindowBgAlpha(1.0)
 		imgui.ShowDemoWindow()
 	}
@@ -209,7 +217,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								unordered_remove(&scene.textures, len(scene.textures) - 1)
 							} else {
 								err := addImages(
-									&globals.graphicsData,
+									graphicsData,
 									&scene.buffers.textures,
 									u32(len(scene.textures)) - 1,
 									{texture.path},
@@ -229,7 +237,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 		if imgui.CollapsingHeader("Settings##header") {
 			if imgui.Button("New Scene") {
-				globals.lockInput = true
+				uiData.lockInput = true
 				imgui.OpenPopup("New Scene")
 			}
 
@@ -241,53 +249,54 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					}
 					if imgui.Selectable(toCstring(scene.name)) {
 						globals.activeScene = u32(sceneIdx)
-						globals.reloadBuffers = true
-						globals.rerecordCommands = true
+
+						graphicsData.reloadBuffers = true
+						graphicsData.rerecordCommands = true
 					}
 				}
 				imgui.EndCombo()
 			}
 
 			if imgui.DragFloat("Contrast", &graphicsData.contrast, 0.01) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 			if imgui.DragFloat("Brightness", &graphicsData.brightness, 0.01) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 			if imgui.DragFloat("Saturation", &graphicsData.saturation, 0.01) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 			if imgui.DragFloat("Exposure", &graphicsData.exposure, 0.01) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 			if imgui.Combo(
 				"Tonemapper",
 				transmute(^i32)(&graphicsData.tonemapper),
 				"None\000Narkowicz ACES\000",
 			) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 			if imgui.DragFloat("Gamma", &graphicsData.gamma, 0.01) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 		}
 
 		if imgui.CollapsingHeader("Scene##header") {
 			if imgui.DragFloat("Ambient light##scene", &scene.ambientLight, 0.01, 0, 1) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 			if imgui.DragFloat4("Clear colour##scene", &scene.clearColour, 0.01, 0, 1) {
-				globals.reloadBuffers = true
+				graphicsData.reloadBuffers = true
 			}
 		}
 
 		if imgui.CollapsingHeader("Objects##header") {
 			if imgui.Button("New Object##objects") {
 				addObject(scene, 0)
-				if err := updateSceneBuffers(&globals.graphicsData, scene); err != nil {
+				if err := updateSceneBuffers(graphicsData, scene); err != nil {
 					panic("Failed to update scene buffers after adding object")
 				}
-				if err := updateCommandBuffers(&globals.graphicsData, scene); err != nil {
+				if err := updateCommandBuffers(graphicsData, scene); err != nil {
 					panic("Failed to update command buffers after adding object")
 				}
 			}
@@ -404,8 +413,8 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 									len(model.skeleton),
 								)
 
-								globals.reloadBuffers = true
-								globals.rerecordCommands = true
+								graphicsData.reloadBuffers = true
+								graphicsData.rerecordCommands = true
 							}
 						}
 						imgui.EndCombo()
@@ -430,7 +439,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 										object.textureIdxs[meshIdx][TextureIndex.ALBEDO] = u32(
 											textureIdx,
 										)
-										globals.reloadBuffers = true
+										graphicsData.reloadBuffers = true
 									}
 								}
 								imgui.EndCombo()
@@ -451,7 +460,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 										object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP] = u32(
 											textureIdx,
 										)
-										globals.reloadBuffers = true
+										graphicsData.reloadBuffers = true
 									}
 								}
 								imgui.EndCombo()
@@ -513,7 +522,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 		if imgui.CollapsingHeader("Models##header") {
 			if imgui.Button("Add New Model") {
-				globals.lockInput = true
+				uiData.lockInput = true
 				imgui.OpenPopup("New Model")
 			}
 
@@ -541,7 +550,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 		if imgui.CollapsingHeader("Textures##header") {
 			if imgui.Button("Add New Texture") {
-				globals.lockInput = true
+				uiData.lockInput = true
 				imgui.OpenPopup("New Texture")
 			}
 
@@ -558,7 +567,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 	}
 
 	if imgui.BeginPopupModal("New Scene") {
-		createComponentInfo := &globals.createComponentInfo
+		createComponentInfo := &uiData.createComponentInfo
 		imgui.Text("Name:")
 		imgui.SameLine()
 		imgui.InputText(
@@ -680,7 +689,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				addInstance(scene, &scene.models[0], 0)
 
 				clearComponentData(createComponentInfo)
-				globals.lockInput = false
+				uiData.lockInput = false
 				imgui.CloseCurrentPopup()
 			}
 		}
@@ -688,14 +697,14 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.SameLine()
 		if imgui.Button("Cancel") {
 			imgui.CloseCurrentPopup()
-			globals.lockInput = false
+			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
 		imgui.End()
 	}
 
 	if imgui.BeginPopupModal("New Model") {
-		createComponentInfo := &globals.createComponentInfo
+		createComponentInfo := &uiData.createComponentInfo
 		imgui.Text("Name:")
 		imgui.SameLine()
 		imgui.InputText("##texturename", cstring(&createComponentInfo.name[0]), 100)
@@ -794,7 +803,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 				saveModelComponent(model)
 				clearComponentData(createComponentInfo)
-				globals.lockInput = false
+				uiData.lockInput = false
 				imgui.CloseCurrentPopup()
 			}
 		}
@@ -802,14 +811,14 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.SameLine()
 		if imgui.Button("Cancel") {
 			imgui.CloseCurrentPopup()
-			globals.lockInput = false
+			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
 		imgui.End()
 	}
 
 	if imgui.BeginPopupModal("New Texture") {
-		createComponentInfo := &globals.createComponentInfo
+		createComponentInfo := &uiData.createComponentInfo
 		imgui.Text("Name:")
 		imgui.SameLine()
 		imgui.InputText("##texturename", cstring(&createComponentInfo.name[0]), 100)
@@ -905,7 +914,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 				saveTextureComponent(texture)
 				clearComponentData(createComponentInfo)
-				globals.lockInput = false
+				uiData.lockInput = false
 				imgui.CloseCurrentPopup()
 			}
 		}
@@ -913,7 +922,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.SameLine()
 		if imgui.Button("Cancel") {
 			imgui.CloseCurrentPopup()
-			globals.lockInput = false
+			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
 		imgui.End()
@@ -923,7 +932,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 }
 
 mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
-	if globals.lockInput {
+	if globals.uiData.lockInput {
 		return
 	}
 
@@ -942,7 +951,7 @@ mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods
 }
 
 cursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
-	if globals.lockInput {
+	if globals.uiData.lockInput {
 		return
 	}
 
@@ -952,7 +961,7 @@ cursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 }
 
 scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
-	if globals.lockInput {
+	if globals.uiData.lockInput {
 		return
 	}
 
@@ -960,7 +969,7 @@ scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
 }
 
 keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
-	if globals.lockInput {
+	if globals.uiData.lockInput {
 		return
 	}
 
@@ -1009,11 +1018,11 @@ keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods:
 		}
 	case glfw.KEY_H:
 		if action == glfw.PRESS {
-			globals.showDemo = !globals.showDemo
+			globals.uiData.showDemo = !globals.uiData.showDemo
 		}
 	case glfw.KEY_M:
 		if action == glfw.PRESS {
-			globals.showMetrics = !globals.showMetrics
+			globals.uiData.showMetrics = !globals.uiData.showMetrics
 		}
 	}
 }

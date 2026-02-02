@@ -38,21 +38,15 @@ globals: struct {
 	projectDir:          string,
 
 	// Graphics Engine Data
-	graphicsData:     GraphicsData,
+	graphicsData:        GraphicsData,
 
 	// Scene Data
 	scenes:              [dynamic]Scene,
 	activeScene:         u32,
-	reloadBuffers:       bool,
-	rerecordCommands:    bool,
 
-	// UI Data
-	lockInput:           bool,
-	createComponentInfo: CreateComponentData,
-
+	uiData: UIData,
+	
 	// Debugging
-	showDemo:            bool,
-	showMetrics:         bool,
 	baseDir:             string,
 	fps:                 f64,
 	paused:              bool,
@@ -94,7 +88,6 @@ main :: proc() {
 			mem.tracking_allocator_destroy(&tracker)
 		}
 	}
-	free_all(context.temp_allocator)
 	globals.runtimeContext = context
 
 	err: Error
@@ -183,24 +176,9 @@ main :: proc() {
 			delta = 0
 		}
 
-		if globals.reloadBuffers {
-			if err := updateSceneBuffers(&globals.graphicsData, scene); err != nil {
-				logf(.Error, "Failed to update scene buffers: %v", err)
-				panic("Failed to update scene buffers")
-			}
-			globals.reloadBuffers = false
-		}
-		if globals.rerecordCommands {
-			if err := updateCommandBuffers(&globals.graphicsData, scene); err != nil {
-				logf(.Error, "Failed to update command buffers: %v", err)
-				panic("Failed to update command buffers")
-			}
-			globals.rerecordCommands = false
-		}
-
 		update(delta)
 		if err = drawFrame(&globals.graphicsData); err != nil {
-			logf(.Error, "Failed to draw frame: {}", err)
+			logf(.Error, "Failed to draw frame: %v", err)
 			break
 		}
 		calcFrameRate()
