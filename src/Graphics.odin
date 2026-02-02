@@ -319,6 +319,8 @@ GraphicsData :: struct {
 	// Util
 	currentFrame:              u32,
 	drawLights:                bool,
+	reloadBuffers:             bool,
+	rerecordCommands:          bool,
 }
 
 @(private = "file")
@@ -808,12 +810,7 @@ querySwapchainSupport :: proc(
 	)
 
 	formatCount: u32
-	vk.GetPhysicalDeviceSurfaceFormatsKHR(
-		physicalDevice,
-		graphicsData.surface,
-		&formatCount,
-		nil,
-	)
+	vk.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, graphicsData.surface, &formatCount, nil)
 	if formatCount != 0 {
 		swapchainSupport.formats = make(
 			[]vk.SurfaceFormatKHR,
@@ -1554,11 +1551,7 @@ createBuffer :: proc(
 		sType           = .MEMORY_ALLOCATE_INFO,
 		pNext           = nil,
 		allocationSize  = memRequirements.size,
-		memoryTypeIndex = findMemoryType(
-			graphicsData,
-			memRequirements.memoryTypeBits,
-			properties,
-		),
+		memoryTypeIndex = findMemoryType(graphicsData, memRequirements.memoryTypeBits, properties),
 	}
 	if res := vk.AllocateMemory(device, &allocInfo, nil, bufferMemory); res != .SUCCESS {
 		logf(.Error, "Failed to allocate buffer memory! vkResult: %d", res)
@@ -1626,8 +1619,7 @@ loadBufferToGPU :: proc(
 	}
 
 	vk.CmdCopyBuffer(commandBuffer, stagingBuffer.buffer, dstBuffer.buffer, 1, &copyRegion)
-	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool);
-	   err != nil {
+	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool); err != nil {
 		logf(.Error, "Failed to end single time command buffer! Error: %d", err)
 		return .FailedToCreateBuffer
 	}
@@ -1714,11 +1706,7 @@ createImage :: proc(
 		sType           = .MEMORY_ALLOCATE_INFO,
 		pNext           = nil,
 		allocationSize  = memRequirements.size,
-		memoryTypeIndex = findMemoryType(
-			graphicsData,
-			memRequirements.memoryTypeBits,
-			properties,
-		),
+		memoryTypeIndex = findMemoryType(graphicsData, memRequirements.memoryTypeBits, properties),
 	}
 	if res := vk.AllocateMemory(device, &allocInfo, nil, &image.memory); res != .SUCCESS {
 		logf(.Error, "Failed to allocate image memory! vkResult: %d", res)
@@ -2090,8 +2078,7 @@ loadImages :: proc(
 		u32(len(imagePaths)),
 	)
 
-	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool);
-	   err != nil {
+	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool); err != nil {
 		logf(.Error, "Failed to end single time commands! Error: %v", err)
 		return err
 	}
@@ -2676,9 +2663,7 @@ DescriptorSetError :: enum {
 
 @(private = "file")
 @(require_results)
-createBuffersDescriptorSets :: proc(
-	using graphicsData: ^GraphicsData,
-) -> DescriptorSetError {
+createBuffersDescriptorSets :: proc(using graphicsData: ^GraphicsData) -> DescriptorSetError {
 	layoutBindings: []vk.DescriptorSetLayoutBinding = {
 		{
 			binding = 0,
@@ -2807,9 +2792,7 @@ createBuffersDescriptorSets :: proc(
 
 @(private = "file")
 @(require_results)
-createTexturesDescriptorSets :: proc(
-	using graphicsData: ^GraphicsData,
-) -> DescriptorSetError {
+createTexturesDescriptorSets :: proc(using graphicsData: ^GraphicsData) -> DescriptorSetError {
 	layoutBindings: []vk.DescriptorSetLayoutBinding = {
 		{
 			binding = 0,
@@ -5715,6 +5698,22 @@ updateSceneData :: proc(graphicsData: ^GraphicsData, scene: ^Scene, vp: Mat4, de
 	updateUniformBuffer(graphicsData, scene, vp)
 	updateLightBuffer(graphicsData, scene, delta)
 	updateInstanceBuffer(graphicsData, scene, delta)
+
+	if graphicsData.reloadBuffers {
+		if err := updateSceneBuffers(graphicsData, scene); err != nil {
+			logf(.Error, "Failed to update scene buffers: %v", err)
+			panic("Failed to update scene buffers")
+		}
+		graphicsData.reloadBuffers = false
+	}
+
+	if graphicsData.rerecordCommands {
+		if err := updateCommandBuffers(graphicsData, scene); err != nil {
+			logf(.Error, "Failed to update command buffers: %v", err)
+			panic("Failed to update command buffers")
+		}
+		graphicsData.rerecordCommands = false
+	}
 }
 
 DrawError :: enum {
