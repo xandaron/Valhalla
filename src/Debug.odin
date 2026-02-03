@@ -18,7 +18,7 @@ logf :: logging.logf
 
 // GLFW
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
-	context = runtime.default_context()
+	context = globals.runtimeContext
 	logf(.Error, "GLFW Error: Code %d, Description: %s", code, string(desc))
 }
 
@@ -29,7 +29,7 @@ vkDebugCallback :: proc "system" (
 	pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
 	pUserData: rawptr,
 ) -> b32 {
-	context = runtime.default_context()
+	context = globals.runtimeContext
 	logf(
 		.Error,
 		"[%s] Vulkan validation layer (%s):\n%s",
@@ -87,7 +87,7 @@ vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -
 
 // Imgui Vulkan
 imguiCheckVkResult :: proc "c" (err: vk.Result) {
-	context = runtime.default_context()
+	context = globals.runtimeContext
 	if int(err) == 0 {return}
 	if int(err) < 0 {
 		logf(.Error, "[Imgui-Vulkan] Fatal: VkResult = %v", err)
