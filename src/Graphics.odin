@@ -260,7 +260,7 @@ GraphicsData :: struct {
 	gamma:                     f32,
 
 	// GLFW + IMGUI
-	window:                    glfw.WindowHandle,
+	window:                    WindowHandle,
 	imguiData:                 ImguiData,
 
 	// Vulkan Data
@@ -599,25 +599,22 @@ setGLFWErrorCallback :: proc(errorCallback: GLFWErrorCallback) {
 	glfw.SetErrorCallback(errorCallback)
 }
 
-setGLFWKeyCallback :: proc(window: glfw.WindowHandle, keyCallback: GLFWKeyCallback) {
+setGLFWKeyCallback :: proc(window: WindowHandle, keyCallback: GLFWKeyCallback) {
 	glfw.SetKeyCallback(window, keyCallback)
 }
 
 setGLFWMouseButtonCallback :: proc(
-	window: glfw.WindowHandle,
+	window: WindowHandle,
 	mouseButtonCallback: GLFWMouseButtonCallback,
 ) {
 	glfw.SetMouseButtonCallback(window, mouseButtonCallback)
 }
 
-setGLFWCursorPosCallback :: proc(
-	window: glfw.WindowHandle,
-	cursorPosCallback: GLFWCursorPosCallback,
-) {
+setGLFWCursorPosCallback :: proc(window: WindowHandle, cursorPosCallback: GLFWCursorPosCallback) {
 	glfw.SetCursorPosCallback(window, cursorPosCallback)
 }
 
-setGLFWScrollCallback :: proc(window: glfw.WindowHandle, scrollCallback: GLFWScrollCallback) {
+setGLFWScrollCallback :: proc(window: WindowHandle, scrollCallback: GLFWScrollCallback) {
 	glfw.SetScrollCallback(window, scrollCallback)
 }
 
