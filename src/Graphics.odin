@@ -27,10 +27,16 @@ REQUESTED_LAYERS: []cstring : {"VK_LAYER_KHRONOS_validation"}
 
 @(private = "file")
 DEVICE_EXTENSIONS: []cstring : {
-	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
-	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
-	vk.EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
+	// 1.1
 	vk.KHR_MULTIVIEW_EXTENSION_NAME,
+	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
+	// 1.2
+	vk.EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
+	// 1.3
+	vk.EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
+	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+	// MISC
+	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	vk.KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
 }
 
@@ -717,6 +723,16 @@ createInstance :: proc(using graphicsData: ^GraphicsData, version: u32) -> Insta
 		logf(.Warning, "Couldn't find layer: %s", name)
 	}
 
+	features := [?]vk.ValidationFeatureEnableEXT{.GPU_ASSISTED, .SYNCHRONIZATION_VALIDATION}
+	validationFeatures: vk.ValidationFeaturesEXT = {
+		sType                          = .VALIDATION_FEATURES_EXT,
+		pNext                          = nil,
+		enabledValidationFeatureCount  = u32(len(features)),
+		pEnabledValidationFeatures     = &features[0],
+		disabledValidationFeatureCount = 0,
+		pDisabledValidationFeatures    = nil,
+	}
+
 	instanceInfo: vk.InstanceCreateInfo = {
 		sType                   = .INSTANCE_CREATE_INFO,
 		pNext                   = nil,
@@ -1045,89 +1061,44 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		append(&queueCreateInfos, queueCreateInfo)
 	}
 
-	deviceFeatures: vk.PhysicalDeviceFeatures = {
-		robustBufferAccess                      = false,
-		fullDrawIndexUint32                     = false,
-		imageCubeArray                          = true,
-		independentBlend                        = false,
-		geometryShader                          = false,
-		tessellationShader                      = false,
-		sampleRateShading                       = false,
-		dualSrcBlend                            = false,
-		logicOp                                 = false,
-		multiDrawIndirect                       = false,
-		drawIndirectFirstInstance               = false,
-		depthClamp                              = false,
-		depthBiasClamp                          = false,
-		fillModeNonSolid                        = false,
-		depthBounds                             = false,
-		wideLines                               = false,
-		largePoints                             = false,
-		alphaToOne                              = false,
-		multiViewport                           = false,
-		samplerAnisotropy                       = true,
-		textureCompressionETC2                  = false,
-		textureCompressionASTC_LDR              = false,
-		textureCompressionBC                    = false,
-		occlusionQueryPrecise                   = false,
-		pipelineStatisticsQuery                 = false,
-		vertexPipelineStoresAndAtomics          = false,
-		fragmentStoresAndAtomics                = false,
-		shaderTessellationAndGeometryPointSize  = false,
-		shaderImageGatherExtended               = false,
-		shaderStorageImageExtendedFormats       = false,
-		shaderStorageImageMultisample           = false,
-		shaderStorageImageReadWithoutFormat     = false,
-		shaderStorageImageWriteWithoutFormat    = false,
-		shaderUniformBufferArrayDynamicIndexing = false,
-		shaderSampledImageArrayDynamicIndexing  = false,
-		shaderStorageBufferArrayDynamicIndexing = false,
-		shaderStorageImageArrayDynamicIndexing  = false,
-		shaderClipDistance                      = false,
-		shaderCullDistance                      = false,
-		shaderFloat64                           = false,
-		shaderInt64                             = false,
-		shaderInt16                             = false,
-		shaderResourceResidency                 = false,
-		shaderResourceMinLod                    = false,
-		sparseBinding                           = false,
-		sparseResidencyBuffer                   = false,
-		sparseResidencyImage2D                  = false,
-		sparseResidencyImage3D                  = false,
-		sparseResidency2Samples                 = false,
-		sparseResidency4Samples                 = false,
-		sparseResidency8Samples                 = false,
-		sparseResidency16Samples                = false,
-		sparseResidencyAliased                  = false,
-		variableMultisampleRate                 = false,
-		inheritedQueries                        = false,
-	}
-
-	multiview: vk.PhysicalDeviceMultiviewFeatures = {
-		sType                       = .PHYSICAL_DEVICE_MULTIVIEW_FEATURES,
-		pNext                       = nil,
-		multiview                   = true,
-		multiviewGeometryShader     = false,
-		multiviewTessellationShader = false,
-	}
-
-	sync2: vk.PhysicalDeviceSynchronization2Features = {
-		sType            = .PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
-		pNext            = &multiview,
-		synchronization2 = true,
-	}
-
-	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesNV = {
+	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR = {
 		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV,
-		pNext                        = &sync2,
+		pNext                        = nil,
 		computeDerivativeGroupQuads  = true,
 		computeDerivativeGroupLinear = false,
+	}
+
+	features13: vk.PhysicalDeviceVulkan13Features = {
+		sType                          = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		pNext                          = &computeShaderDerivatives,
+		shaderDemoteToHelperInvocation = true,
+		synchronization2               = true,
+	}
+
+	features12: vk.PhysicalDeviceVulkan12Features = {
+		sType                     = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+		pNext                     = &features13,
+		shaderOutputViewportIndex = true,
+		shaderOutputLayer         = true,
+	}
+
+	features11: vk.PhysicalDeviceVulkan11Features = {
+		sType                = .PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+		pNext                = &features12,
+		multiview            = true,
+		shaderDrawParameters = true,
+	}
+
+	features: vk.PhysicalDeviceFeatures2 = {
+		sType = .PHYSICAL_DEVICE_FEATURES_2,
+		pNext = &features11,
+		features = {imageCubeArray = true, samplerAnisotropy = true},
 	}
 
 	requiredDeviceExtensions := DEVICE_EXTENSIONS
 	createInfo: vk.DeviceCreateInfo = {
 		sType                   = .DEVICE_CREATE_INFO,
-		pNext                   = &computeShaderDerivatives,
+		pNext                   = &features,
 		flags                   = {},
 		queueCreateInfoCount    = u32(len(queueCreateInfos)),
 		pQueueCreateInfos       = raw_data(queueCreateInfos),
@@ -1135,7 +1106,7 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		ppEnabledLayerNames     = raw_data(REQUESTED_LAYERS),
 		enabledExtensionCount   = u32(len(requiredDeviceExtensions)),
 		ppEnabledExtensionNames = raw_data(requiredDeviceExtensions),
-		pEnabledFeatures        = &deviceFeatures,
+		pEnabledFeatures        = nil,
 	}
 
 	if res := vk.CreateDevice(physicalDevice, &createInfo, nil, &device); res != .SUCCESS {
