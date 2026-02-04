@@ -160,6 +160,22 @@ Scene_PushConstants :: struct {
 	instanceOffset: u32,
 }
 
+@(private = "file")
+Post_PushConstants :: struct {
+	contrast:   f32,
+	brightness: f32,
+	saturation: f32,
+	exposure:   f32,
+	tonemapper: ToneMapper,
+	gamma:      f32,
+	drawLights: b32,
+}
+
+ToneMapper :: enum u32 {
+	None          = 0,
+	NarkowiczACES = 1,
+}
+
 Vertex :: struct #align (16) {
 	position:  Vec3,
 	_:         u32,
@@ -284,10 +300,7 @@ GraphicsData :: struct {
 	brightness:                f32,
 	saturation:                f32,
 	exposure:                  f32,
-	tonemapper:                enum i32 {
-		None          = 0,
-		NarkowiczACES = 1,
-	},
+	tonemapper:                ToneMapper,
 	gamma:                     f32,
 
 	// GLFW + IMGUI
@@ -4494,7 +4507,7 @@ createComputePipelines :: proc(
 	postPushConstants: vk.PushConstantRange = {
 		stageFlags = {.COMPUTE},
 		offset     = 0,
-		size       = 7 * size_of(f32),
+		size       = size_of(Post_PushConstants),
 	}
 
 	postPipelineLayoutInfo: vk.PipelineLayoutCreateInfo = {
@@ -5492,6 +5505,15 @@ recordPostCommands :: proc(
 		nil,
 	)
 
+	pushConstants: Post_PushConstants = {
+		contrast   = contrast,
+		brightness = brightness,
+		saturation = saturation,
+		exposure   = pow(f32(2.0), exposure),
+		tonemapper = tonemapper,
+		gamma      = gamma,
+		drawLights = b32(drawLights),
+	}
 	vk.CmdPushConstants2(
 		postComputeCommandBuffers[index],
 		&vk.PushConstantsInfo {
@@ -5500,31 +5522,8 @@ recordPostCommands :: proc(
 			layout = pipelines[PipelineIndex.POSTPROCESS].layout,
 			stageFlags = {.COMPUTE},
 			offset = 0,
-			size = 6 * size_of(f32),
-			pValues = raw_data(
-				[]f32 {
-					contrast,
-					brightness,
-					saturation,
-					pow(f32(2.0), exposure),
-					transmute(f32)tonemapper,
-					gamma,
-				},
-			),
-		},
-	)
-
-	boolean := b32(drawLights)
-	vk.CmdPushConstants2(
-		postComputeCommandBuffers[index],
-		&vk.PushConstantsInfo {
-			sType = .PUSH_CONSTANTS_INFO,
-			pNext = nil,
-			layout = pipelines[PipelineIndex.POSTPROCESS].layout,
-			stageFlags = {.COMPUTE},
-			offset = 6 * size_of(f32),
-			size = size_of(b32),
-			pValues = &boolean,
+			size = size_of(Post_PushConstants),
+			pValues = &pushConstants,
 		},
 	)
 
