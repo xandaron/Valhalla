@@ -4303,10 +4303,7 @@ createGraphicsPipelines :: proc(
 				maxDepth = 1,
 			},
 			scissorCount = 1,
-			pScissors = &vk.Rect2D {
-				offset = {0, 0},
-				extent = {RENDER_SIZE.x, RENDER_SIZE.y},
-			},
+			pScissors = &vk.Rect2D{offset = {0, 0}, extent = {RENDER_SIZE.x, RENDER_SIZE.y}},
 		},
 		pRasterizationState = &{
 			sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -5694,26 +5691,33 @@ updateWindow :: proc(using graphicsData: ^GraphicsData) -> (ret: bool) {
 	return
 }
 
-updateSceneData :: proc(graphicsData: ^GraphicsData, scene: ^Scene, vp: Mat4, delta: f32) {
+@(require_results)
+updateSceneData :: proc(
+	graphicsData: ^GraphicsData,
+	scene: ^Scene,
+	vp: Mat4,
+	delta: f32,
+) -> Error {
+	if graphicsData.reloadBuffers {
+		if err := updateSceneBuffers(graphicsData, scene); err != nil {
+			logf(.Error, "Failed to update scene buffers: %v", err)
+			return err
+		}
+		graphicsData.reloadBuffers = false
+		graphicsData.rerecordCommands = false
+	} else if graphicsData.rerecordCommands {
+		if err := updateCommandBuffers(graphicsData, scene); err != nil {
+			logf(.Error, "Failed to update command buffers: %v", err)
+			return err
+		}
+		graphicsData.rerecordCommands = false
+	}
+
 	updateUniformBuffer(graphicsData, scene, vp)
 	updateLightBuffer(graphicsData, scene, delta)
 	updateInstanceBuffer(graphicsData, scene, delta)
 
-	if graphicsData.reloadBuffers {
-		if err := updateSceneBuffers(graphicsData, scene); err != nil {
-			logf(.Error, "Failed to update scene buffers: %v", err)
-			panic("Failed to update scene buffers")
-		}
-		graphicsData.reloadBuffers = false
-	}
-
-	if graphicsData.rerecordCommands {
-		if err := updateCommandBuffers(graphicsData, scene); err != nil {
-			logf(.Error, "Failed to update command buffers: %v", err)
-			panic("Failed to update command buffers")
-		}
-		graphicsData.rerecordCommands = false
-	}
+	return nil
 }
 
 DrawError :: enum {

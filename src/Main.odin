@@ -189,12 +189,14 @@ main :: proc() {
 update :: proc(delta: f32) {
 	scene := &globals.scenes[globals.activeScene]
 	updateAnimations(scene, delta)
-	updateSceneData(
+	if err := updateSceneData(
 		&globals.graphicsData,
 		scene,
 		viewProjection(scene.cameras[scene.activeCamera]),
 		delta,
-	)
+	); err != nil {
+		panic("Failed to update scene data!")
+	}
 }
 
 calcFrameRate :: proc() {
