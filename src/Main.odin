@@ -95,7 +95,7 @@ main :: proc() {
 			appVersion = APP_VERSION,
 			windowTitle = APP_NAME,
 			shaderFiles = {
-				{file = "./shaders/Pre.slang", entryPoint = "comp"},
+				{file = "./shaders/Transform.slang", entryPoint = "comp"},
 				{file = "./shaders/Shadow.slang", entryPoint = "vert"},
 				{file = "./shaders/Shadow.slang", entryPoint = "frag"},
 				{file = "./shaders/Scene.slang", entryPoint = "vert"},
@@ -192,7 +192,8 @@ update :: proc(delta: f32) {
 	if err := updateSceneData(
 		&globals.graphicsData,
 		scene,
-		viewProjection(scene.cameras[scene.activeCamera]),
+		view(scene.cameras[scene.activeCamera]),
+		projection(scene.cameras[scene.activeCamera]),
 		delta,
 	); err != nil {
 		panic("Failed to update scene data!")

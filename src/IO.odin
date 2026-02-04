@@ -95,7 +95,10 @@ castRay :: proc(rayOrigin, rayDirection: Vec3, scene: ^Scene) -> (object: ^Objec
 	return
 }
 
-mouseButtonCallback :: proc "c" (window: WindowHandle, button, action, mods: i32) {
+mouseButtonCallback: GLFWMouseButtonCallback : proc "c" (
+	window: WindowHandle,
+	button, action, mods: i32,
+) {
 	if globals.uiData.lockInput {
 		return
 	}
@@ -114,7 +117,7 @@ mouseButtonCallback :: proc "c" (window: WindowHandle, button, action, mods: i32
 	}
 }
 
-cursorPosCallback :: proc "c" (window: WindowHandle, xpos, ypos: f64) {
+cursorPosCallback: GLFWCursorPosCallback : proc "c" (window: WindowHandle, xpos, ypos: f64) {
 	if globals.uiData.lockInput {
 		return
 	}
@@ -124,7 +127,7 @@ cursorPosCallback :: proc "c" (window: WindowHandle, xpos, ypos: f64) {
 	mousePos = newPos
 }
 
-scrollCallback :: proc "c" (window: WindowHandle, xoffset, yoffset: f64) {
+scrollCallback: GLFWScrollCallback : proc "c" (window: WindowHandle, xoffset, yoffset: f64) {
 	if globals.uiData.lockInput {
 		return
 	}
@@ -132,7 +135,7 @@ scrollCallback :: proc "c" (window: WindowHandle, xoffset, yoffset: f64) {
 	mouseDelta.z = f32(yoffset)
 }
 
-keyCallback :: proc "c" (window: WindowHandle, key, scancode, action, mods: i32) {
+keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, action, mods: i32) {
 	if globals.uiData.lockInput {
 		return
 	}
