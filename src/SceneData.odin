@@ -167,7 +167,7 @@ viewProjection :: proc(camera: Camera) -> Mat4 {
 		return(
 			perspective(
 				radians(camera.fov),
-				RENDER_SIZE.x / RENDER_SIZE.y,
+				f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
 				camera.near,
 				camera.far,
 			) *
@@ -177,7 +177,7 @@ viewProjection :: proc(camera: Camera) -> Mat4 {
 		return(
 			orthographic(
 				radians(camera.fov),
-				RENDER_SIZE.x / RENDER_SIZE.y,
+				f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
 				camera.near,
 				camera.far,
 			) *

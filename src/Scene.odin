@@ -57,6 +57,11 @@ deleteScene :: proc(scene: ^Scene) {
 	delete(scene.vertices)
 	delete(scene.indices)
 
+	if &globals.scenes[globals.activeScene] == scene {
+		if res := waitDeviceIdle(&globals.graphicsData); res != nil {
+			panic("Failed to wait for device idle?")
+		}
+	}
 	deleteSceneBuffers(&globals.graphicsData, &scene.buffers)
 }
 

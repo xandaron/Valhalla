@@ -507,7 +507,6 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: 
 }
 
 cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
-	graphicsData := graphicsData
 	if vk.DeviceWaitIdle(device) != .SUCCESS {
 		panic("Failed to wait for device idle!")
 	}
@@ -6029,5 +6028,10 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 
 	currentFrame = (currentFrame + 1) % 2
 	return nil
+}
+
+@(require_results)
+waitDeviceIdle :: proc(using graphicsData: ^GraphicsData) -> vk.Result {
+	return vk.DeviceWaitIdle(device)
 }
 
