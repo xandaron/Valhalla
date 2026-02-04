@@ -1,3 +1,4 @@
+#+feature using-stmt
 package Valhalla
 
 import "../imgui"
@@ -97,13 +98,13 @@ VERTEX_ATTRIBUTE_DESCRIPTION: []vk.VertexInputAttributeDescription : {
 @(private = "file")
 MAX_FRAMES_IN_FLIGHT: u32 : 2
 
-RENDER_SIZE: Vec2 : {1980, 1080}
+RENDER_SIZE: [2]u32 : {1980, 1080}
 
 @(private = "file")
-SHADOW_RESOLUTION: Vec2 : {512, 512}
+SHADOW_RESOLUTION: [2]u32 : {512, 512}
 
 @(private = "file")
-IMAGES_RESOLUTION: Vec2 : {2048, 2048}
+IMAGES_RESOLUTION: [2]u32 : {2048, 2048}
 
 @(private = "file")
 DEPTH_BIAS_CONSTANT: f32 : 1.25
@@ -2046,8 +2047,8 @@ loadImages :: proc(
 		image,
 		{},
 		.D2,
-		u32(IMAGES_RESOLUTION.x),
-		u32(IMAGES_RESOLUTION.y),
+		IMAGES_RESOLUTION.x,
+		IMAGES_RESOLUTION.y,
 		u32(len(imagePaths)),
 		{._1},
 		.OPTIMAL,
@@ -2187,7 +2188,7 @@ loadImages :: proc(
 			stagingImage.vkImage,
 			image.vkImage,
 			{u32(width), u32(height)},
-			{u32(IMAGES_RESOLUTION.x), u32(IMAGES_RESOLUTION.y)},
+			{IMAGES_RESOLUTION.x, IMAGES_RESOLUTION.y},
 			0,
 			u32(index),
 		)
@@ -2258,8 +2259,8 @@ addImages :: proc(
 		&newImage,
 		{},
 		.D2,
-		u32(IMAGES_RESOLUTION.x),
-		u32(IMAGES_RESOLUTION.y),
+		IMAGES_RESOLUTION.x,
+		IMAGES_RESOLUTION.y,
 		imageLayers + imageCount,
 		{._1},
 		.OPTIMAL,
@@ -2316,7 +2317,7 @@ addImages :: proc(
 			layerCount = imageLayers,
 		},
 		dstOffset = {0, 0, 0},
-		extent = {u32(IMAGES_RESOLUTION.x), u32(IMAGES_RESOLUTION.y), 1},
+		extent = {IMAGES_RESOLUTION.x, IMAGES_RESOLUTION.y, 1},
 	}
 	vk.CmdCopyImage(
 		commandBuffer,
@@ -2443,7 +2444,7 @@ addImages :: proc(
 			stagingImage.vkImage,
 			image.vkImage,
 			{u32(width), u32(height)},
-			{u32(IMAGES_RESOLUTION.x), u32(IMAGES_RESOLUTION.y)},
+			{IMAGES_RESOLUTION.x, IMAGES_RESOLUTION.y},
 			0,
 			imageLayers,
 		)
@@ -3552,8 +3553,8 @@ createRenderPass :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 			&pipelines[PipelineIndex.MAIN].colour,
 			{},
 			.D2,
-			u32(RENDER_SIZE.x),
-			u32(RENDER_SIZE.y),
+			RENDER_SIZE.x,
+			RENDER_SIZE.y,
 			1,
 			{._1},
 			.OPTIMAL,
@@ -3588,8 +3589,8 @@ createRenderPass :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 			&pipelines[PipelineIndex.MAIN].depth,
 			{},
 			.D2,
-			u32(RENDER_SIZE.x),
-			u32(RENDER_SIZE.y),
+			RENDER_SIZE.x,
+			RENDER_SIZE.y,
 			1,
 			{._1},
 			.OPTIMAL,
@@ -3713,8 +3714,8 @@ createMainFrameBuffers :: proc(using graphicsData: ^GraphicsData) -> FrameBuffer
 				pipelines[PipelineIndex.MAIN].depth.view,
 			},
 		),
-		width           = u32(RENDER_SIZE.x),
-		height          = u32(RENDER_SIZE.y),
+		width           = RENDER_SIZE.x,
+		height          = RENDER_SIZE.y,
 		layers          = 1,
 	}
 
@@ -3749,8 +3750,8 @@ createShadowMapFrameBuffer :: proc(
 		&pipelines[PipelineIndex.LIGHT].colour,
 		{.CUBE_COMPATIBLE},
 		.D2,
-		u32(SHADOW_RESOLUTION.x),
-		u32(SHADOW_RESOLUTION.y),
+		SHADOW_RESOLUTION.x,
+		SHADOW_RESOLUTION.y,
 		layerCount,
 		{._1},
 		.OPTIMAL,
@@ -3807,8 +3808,8 @@ createShadowMapFrameBuffer :: proc(
 		&pipelines[PipelineIndex.LIGHT].depth,
 		{.CUBE_COMPATIBLE},
 		.D2,
-		u32(SHADOW_RESOLUTION.x),
-		u32(SHADOW_RESOLUTION.y),
+		SHADOW_RESOLUTION.x,
+		SHADOW_RESOLUTION.y,
 		layerCount,
 		{._1},
 		.OPTIMAL,
@@ -3848,8 +3849,8 @@ createShadowMapFrameBuffer :: proc(
 				pipelines[PipelineIndex.LIGHT].depth.view,
 			},
 		),
-		width           = u32(SHADOW_RESOLUTION.x),
-		height          = u32(SHADOW_RESOLUTION.y),
+		width           = SHADOW_RESOLUTION.x,
+		height          = SHADOW_RESOLUTION.y,
 		layers          = layerCount,
 	}
 
@@ -4126,15 +4127,15 @@ createGraphicsPipelines :: proc(
 			pViewports = &vk.Viewport {
 				x = 0,
 				y = 0,
-				width = SHADOW_RESOLUTION.x,
-				height = SHADOW_RESOLUTION.y,
+				width = f32(SHADOW_RESOLUTION.x),
+				height = f32(SHADOW_RESOLUTION.y),
 				minDepth = 0,
 				maxDepth = 1,
 			},
 			scissorCount = 1,
 			pScissors = &vk.Rect2D {
 				offset = {0, 0},
-				extent = {u32(SHADOW_RESOLUTION.x), u32(SHADOW_RESOLUTION.y)},
+				extent = {SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y},
 			},
 		},
 		pRasterizationState = &{
@@ -4297,15 +4298,15 @@ createGraphicsPipelines :: proc(
 			pViewports = &vk.Viewport {
 				x = 0,
 				y = 0,
-				width = RENDER_SIZE.x,
-				height = RENDER_SIZE.y,
+				width = f32(RENDER_SIZE.x),
+				height = f32(RENDER_SIZE.y),
 				minDepth = 0,
 				maxDepth = 1,
 			},
 			scissorCount = 1,
 			pScissors = &vk.Rect2D {
 				offset = {0, 0},
-				extent = {u32(RENDER_SIZE.x), u32(RENDER_SIZE.y)},
+				extent = {RENDER_SIZE.x, RENDER_SIZE.y},
 			},
 		},
 		pRasterizationState = &{
@@ -5099,7 +5100,7 @@ recordMainGraphicsBuffer :: proc(
 		framebuffer = pipelines[PipelineIndex.LIGHT].frameBuffers[index],
 		renderArea = vk.Rect2D {
 			offset = {0, 0},
-			extent = {u32(SHADOW_RESOLUTION.x), u32(SHADOW_RESOLUTION.y)},
+			extent = {SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y},
 		},
 		clearValueCount = 2,
 		pClearValues = raw_data(
@@ -5153,7 +5154,7 @@ recordMainGraphicsBuffer :: proc(
 		pNext = nil,
 		renderPass = pipelines[PipelineIndex.MAIN].renderPass,
 		framebuffer = pipelines[PipelineIndex.MAIN].frameBuffers[index],
-		renderArea = vk.Rect2D{offset = {0, 0}, extent = {u32(RENDER_SIZE.x), u32(RENDER_SIZE.y)}},
+		renderArea = vk.Rect2D{offset = {0, 0}, extent = {RENDER_SIZE.x, RENDER_SIZE.y}},
 		clearValueCount = 2,
 		pClearValues = raw_data(
 			[]vk.ClearValue {
@@ -5413,7 +5414,7 @@ recordPostComputeBuffer :: proc(
 		postComputeCommandBuffers[index],
 		pipelines[PipelineIndex.MAIN].colour.vkImage,
 		renderedImage.vkImage,
-		{u32(RENDER_SIZE.x), u32(RENDER_SIZE.y)},
+		{RENDER_SIZE.x, RENDER_SIZE.y},
 		{swapchainExtent.width, swapchainExtent.height},
 		0,
 		0,
