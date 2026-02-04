@@ -167,27 +167,25 @@ CameraMode :: enum {
 	ORTHOGRAPHIC,
 }
 
-viewProjection :: proc(camera: Camera) -> Mat4 {
+view :: #force_inline proc(camera: Camera) -> Mat4 {
+	return lookAt(camera.eye, camera.center, camera.up)
+}
+
+projection :: proc(camera: Camera) -> Mat4 {
 	switch camera.mode {
 	case .PERSPECTIVE:
-		return(
-			perspective(
-				radians(camera.fov),
-				f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
-				camera.near,
-				camera.far,
-			) *
-			lookAt(camera.eye, camera.center, camera.up) \
+		return perspective(
+			radians(camera.fov),
+			f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
+			camera.near,
+			camera.far,
 		)
 	case .ORTHOGRAPHIC:
-		return(
-			orthographic(
-				radians(camera.fov),
-				f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
-				camera.near,
-				camera.far,
-			) *
-			lookAt(camera.eye, camera.center, camera.up) \
+		return orthographic(
+			radians(camera.fov),
+			f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
+			camera.near,
+			camera.far,
 		)
 	}
 	panic("Unreachable!")

@@ -5,8 +5,10 @@ import "Light.slang";
 StructuredBuffer<Vertex> vertexBuffer;
 
 struct UniformData {
+	float4x4 projection;
 	float4x4 viewProjection;
 	uint lightCount;
+	float ambientLight;
 };
 
 [[vk::binding(1, 0)]]

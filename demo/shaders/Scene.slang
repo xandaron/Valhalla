@@ -4,7 +4,6 @@ import "Buffers.slang";
 import "Textures.slang";
 
 struct PushConstants {
-	float ambientLight;
 	uint vertexOffset;
 	uint vertexCount;
 	uint instanceOffset;
@@ -139,9 +138,9 @@ FragOut frag(VertOut input) {
 												light.colourIntensity.xyz * scalingFactor;
 	}
 
-	cumulativeColour = max(cumulativeColour, float3(pushConstants.ambientLight,
-																									pushConstants.ambientLight,
-																									pushConstants.ambientLight));
+	cumulativeColour = max(cumulativeColour, float3(uniformBuffer.ambientLight,
+																									uniformBuffer.ambientLight,
+																									uniformBuffer.ambientLight));
 
 	output.colour = float4(albedo * cumulativeColour, 1.0);
 	// output.colour = float4(normal, 1.0);
