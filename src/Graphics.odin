@@ -735,7 +735,7 @@ createInstance :: proc(using graphicsData: ^GraphicsData, version: u32) -> Insta
 
 	instanceInfo: vk.InstanceCreateInfo = {
 		sType                   = .INSTANCE_CREATE_INFO,
-		pNext                   = nil,
+		pNext                   = &validationFeatures,
 		flags                   = nil,
 		pApplicationInfo        = &appInfo,
 		enabledLayerCount       = u32(len(supportedLayers)),
@@ -1068,9 +1068,14 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		computeDerivativeGroupLinear = false,
 	}
 
+	features14: vk.PhysicalDeviceVulkan14Features = {
+		sType = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+		pNext = &computeShaderDerivatives,
+	}
+
 	features13: vk.PhysicalDeviceVulkan13Features = {
 		sType                          = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-		pNext                          = &computeShaderDerivatives,
+		pNext                          = &features14,
 		shaderDemoteToHelperInvocation = true,
 		synchronization2               = true,
 	}
