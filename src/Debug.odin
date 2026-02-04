@@ -31,29 +31,25 @@ vkDebugCallback :: proc "system" (
 ) -> b32 {
 	context = globals.runtimeContext
 	logf(
-		.Error,
-		"[%s] Vulkan validation layer (%s):\n%s",
 		vkDecodeSeverity(messageSeverity),
+		"[Vulkan - %s]:\n%s",
 		vkDecodeMessageTypeFlag(messageType),
 		pCallbackData.pMessage,
 	)
 	return false
 }
 
-vkDecodeSeverity :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT) -> string {
-	if vk.DebugUtilsMessageSeverityFlagEXT.VERBOSE in messageSeverity {
-		return "Info"
+vkDecodeSeverity :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT) -> logging.Level {
+	if .ERROR in messageSeverity {
+		return .Error
+	} else if .WARNING in messageSeverity {
+		return .Warning
+	} else if .INFO in messageSeverity {
+		return .Info
+	} else if .VERBOSE in messageSeverity {
+		return .Debug
 	}
-	if vk.DebugUtilsMessageSeverityFlagEXT.INFO in messageSeverity {
-		return "Debug"
-	}
-	if vk.DebugUtilsMessageSeverityFlagEXT.WARNING in messageSeverity {
-		return "Warning"
-	}
-	if vk.DebugUtilsMessageSeverityFlagEXT.ERROR in messageSeverity {
-		return "Error"
-	}
-	panic("Unknown severity type!")
+	panic("Invalid message severity!")
 }
 
 vkDecodeSeverityString :: proc(messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT) -> string {
@@ -88,7 +84,9 @@ vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -
 // Imgui Vulkan
 imguiCheckVkResult :: proc "c" (err: vk.Result) {
 	context = globals.runtimeContext
-	if int(err) == 0 {return}
+	if int(err) == 0 {
+		return
+	}
 	if int(err) < 0 {
 		logf(.Error, "[Imgui-Vulkan] Fatal: VkResult = %v", err)
 		panic("Imgui error")
