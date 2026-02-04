@@ -5,12 +5,18 @@ Object :: struct {
 	position:    Vec3,
 	rotation:    Quat,
 	scale:       Vec3,
+	flags:       ObjectFlags,
 	modelIdx:    u32,
 	instanceIdx: u32,
 	textureIdxs: [][len(TextureIndex)]u32,
 	animation:   ObjectAnimation,
 	attachment:  Attachment,
 }
+
+ObjectFlag :: enum u64 {
+	Selectable = 0,
+}
+ObjectFlags :: bit_set[ObjectFlag;u64]
 
 deleteGameObject :: proc(object: ^Object) {
 	delete(object.name)

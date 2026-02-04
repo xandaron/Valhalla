@@ -5,8 +5,8 @@ import tinyfd "../tinyfiledialogs"
 import "core:fmt"
 import "core:os/os2"
 import "core:path/filepath"
+import "core:reflect"
 import "core:strings"
-import "vendor:glfw"
 
 UIData :: struct {
 	lockInput:           bool,
@@ -293,12 +293,9 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		if imgui.CollapsingHeader("Objects##header") {
 			if imgui.Button("New Object##objects") {
 				addObject(scene, 0)
-				if err := updateSceneBuffers(graphicsData, scene); err != nil {
-					panic("Failed to update scene buffers after adding object")
-				}
-				if err := updateCommandBuffers(graphicsData, scene); err != nil {
-					panic("Failed to update command buffers after adding object")
-				}
+
+				globals.graphicsData.reloadBuffers = true
+				globals.graphicsData.rerecordCommands = true
 			}
 
 			for &object, objectIdx in scene.objects {
@@ -321,6 +318,20 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						)
 					}
 					imgui.DragFloat3(fmt.ctprintf("Scale%v", suffix), &object.scale, 0.1)
+
+					if imgui.TreeNode("Flags:") {
+						for flag in ObjectFlag {
+							present := flag in object.flags
+							if imgui.Checkbox(toCstring(reflect.enum_string(flag)), &present) {
+								if present {
+									object.flags += {flag}
+								} else {
+									object.flags -= {flag}
+								}
+							}
+						}
+						imgui.TreePop()
+					}
 
 					imgui.SeparatorText("Animation")
 					animationData := &object.animation
@@ -929,101 +940,5 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 	}
 
 	imgui.End()
-}
-
-mouseButtonCallback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32) {
-	if globals.uiData.lockInput {
-		return
-	}
-
-	context = globals.runtimeContext
-
-	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
-		if mouseMode {
-			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
-			mouseMode = false
-		} else {
-			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-			mouseMode = true
-		}
-		return
-	}
-}
-
-cursorPosCallback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
-	if globals.uiData.lockInput {
-		return
-	}
-
-	newPos: Vec2 = {f32(xpos), f32(ypos)}
-	mouseDelta.xy += newPos - mousePos
-	mousePos = newPos
-}
-
-scrollCallback :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
-	if globals.uiData.lockInput {
-		return
-	}
-
-	mouseDelta.z = f32(yoffset)
-}
-
-keyCallback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
-	if globals.uiData.lockInput {
-		return
-	}
-
-	context = globals.runtimeContext
-
-	switch key {
-	case glfw.KEY_ESCAPE:
-		glfw.SetWindowShouldClose(window, glfw.TRUE)
-	case glfw.KEY_P:
-		if action == glfw.PRESS do globals.paused = !globals.paused
-	case glfw.KEY_D:
-		if action == glfw.PRESS {
-			cameraMove.x += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.x -= 1
-		}
-	case glfw.KEY_A:
-		if action == glfw.PRESS {
-			cameraMove.x -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.x += 1
-		}
-	case glfw.KEY_SPACE:
-		if action == glfw.PRESS {
-			cameraMove.y += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.y -= 1
-		}
-	case glfw.KEY_LEFT_SHIFT:
-		if action == glfw.PRESS {
-			cameraMove.y -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.y += 1
-		}
-	case glfw.KEY_W:
-		if action == glfw.PRESS {
-			cameraMove.z += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.z -= 1
-		}
-	case glfw.KEY_S:
-		if action == glfw.PRESS {
-			cameraMove.z -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.z += 1
-		}
-	case glfw.KEY_H:
-		if action == glfw.PRESS {
-			globals.uiData.showDemo = !globals.uiData.showDemo
-		}
-	case glfw.KEY_M:
-		if action == glfw.PRESS {
-			globals.uiData.showMetrics = !globals.uiData.showMetrics
-		}
-	}
 }
 
