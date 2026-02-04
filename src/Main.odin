@@ -34,22 +34,21 @@ cameraMoveSpeed: f32 = 1
 cameraMove: Vec3 = {0, 0, 0}
 
 globals: struct {
-	runtimeContext:      runtime.Context,
-	projectDir:          string,
+	runtimeContext: runtime.Context,
+	projectDir:     string,
 
 	// Graphics Engine Data
-	graphicsData:        GraphicsData,
+	graphicsData:   GraphicsData,
 
 	// Scene Data
-	scenes:              [dynamic]Scene,
-	activeScene:         u32,
+	scenes:         [dynamic]Scene,
+	activeScene:    u32,
+	uiData:         UIData,
 
-	uiData: UIData,
-	
 	// Debugging
-	baseDir:             string,
-	fps:                 f64,
-	paused:              bool,
+	baseDir:        string,
+	fps:            f64,
+	paused:         bool,
 }
 
 main :: proc() {
@@ -99,8 +98,8 @@ main :: proc() {
 				{file = "./shaders/Pre.slang", entryPoint = "comp"},
 				{file = "./shaders/Shadow.slang", entryPoint = "vert"},
 				{file = "./shaders/Shadow.slang", entryPoint = "frag"},
-				{file = "./shaders/Main.slang", entryPoint = "vert"},
-				{file = "./shaders/Main.slang", entryPoint = "frag"},
+				{file = "./shaders/Scene.slang", entryPoint = "vert"},
+				{file = "./shaders/Scene.slang", entryPoint = "frag"},
 				{file = "./shaders/Post.slang", entryPoint = "comp"},
 			},
 			preComp = 0,
