@@ -247,6 +247,25 @@ PipelineIndex :: enum {
 	POSTPROCESS,
 }
 
+@(private = "file")
+SemaphoreIndex :: enum {
+	Transform = 0,
+	Main,
+	Compute,
+	Imgui,
+	Image,
+}
+
+@(private = "file")
+CmdBufferIndex :: enum {
+	Transform = 0,
+	Main,
+	Shadow,
+	Scene,
+	Post,
+	Imgui,
+}
+
 TextureIndex :: enum {
 	ALBEDO,
 	NORMAL_MAP,
@@ -291,70 +310,61 @@ deleteSceneBuffers :: proc(using graphicsData: ^GraphicsData, buffers: ^SceneBuf
 
 GraphicsData :: struct {
 	// Rendering push constants
-	contrast:                  f32,
-	brightness:                f32,
-	saturation:                f32,
-	exposure:                  f32,
-	tonemapper:                ToneMapper,
-	gamma:                     f32,
+	contrast:            f32,
+	brightness:          f32,
+	saturation:          f32,
+	exposure:            f32,
+	tonemapper:          ToneMapper,
+	gamma:               f32,
 
 	// GLFW + IMGUI
-	window:                    WindowHandle,
-	imguiData:                 ImguiData,
+	window:              WindowHandle,
+	imguiData:           ImguiData,
 
 	// Vulkan Data
-	instance:                  vk.Instance,
-	debugMessenger:            vk.DebugUtilsMessengerEXT,
-	surface:                   vk.SurfaceKHR,
-	physicalDevice:            vk.PhysicalDevice,
-	device:                    vk.Device,
+	instance:            vk.Instance,
+	debugMessenger:      vk.DebugUtilsMessengerEXT,
+	surface:             vk.SurfaceKHR,
+	physicalDevice:      vk.PhysicalDevice,
+	device:              vk.Device,
 
 	// Queues
-	queueFamilies:             QueueFamilyIndices,
-	graphicsQueue:             vk.Queue,
-	presentQueue:              vk.Queue,
-	computeQueue:              vk.Queue,
+	queueFamilies:       QueueFamilyIndices,
+	graphicsQueue:       vk.Queue,
+	presentQueue:        vk.Queue,
+	computeQueue:        vk.Queue,
 
 	// Swapchain
-	swapchain:                 Swapchain,
+	swapchain:           Swapchain,
 
 	// Pipelines
-	shaderFiles:               [dynamic]Shader,
-	descriptorSets:            [len(DescriptorSetIndex)]DescriptorSet,
-	pipelines:                 [len(PipelineIndex)]Pipeline,
+	shaderFiles:         [dynamic]Shader,
+	descriptorSets:      [len(DescriptorSetIndex)]DescriptorSet,
+	pipelines:           [len(PipelineIndex)]Pipeline,
 
 	// Frame Resources
-	depthFormat:               vk.Format,
-	inFlightFrames:            [MAX_FRAMES_IN_FLIGHT]vk.Fence,
-	transformFinished:         [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-	rendersFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-	computeFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-	imguiFinished:             [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-	imageAvailable:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+	depthFormat:         vk.Format,
+	inFlightFrames:      [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+	semaphores:          [len(SemaphoreIndex)][MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 
 	// Commands
-	graphicsCommandPool:       vk.CommandPool,
-	computeCommandPool:        vk.CommandPool,
-	transformCommandBuffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	mainCommandBuffers:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	shadowMapCommandBuffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	sceneCommandBuffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	postComputeCommandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	imguiCommandBuffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-	samplers:                  []vk.Sampler,
+	graphicsCommandPool: vk.CommandPool,
+	computeCommandPool:  vk.CommandPool,
+	commandBuffers:      [len(CmdBufferIndex)][MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+	samplers:            []vk.Sampler,
 
 	// Buffer
-	uniformBuffers:            [MAX_FRAMES_IN_FLIGHT]Buffer,
+	uniformBuffers:      [MAX_FRAMES_IN_FLIGHT]Buffer,
 
 	// Images for post processing
-	renderedImage:             Image,
-	processedImage:            Image,
+	renderedImage:       Image,
+	processedImage:      Image,
 
 	// Util
-	currentFrame:              u32,
-	drawLights:                bool,
-	reloadBuffers:             bool,
-	rerecordCommands:          bool,
+	currentFrame:        u32,
+	drawLights:          bool,
+	reloadBuffers:       bool,
+	rerecordCommands:    bool,
 }
 
 @(private = "file")
@@ -475,8 +485,6 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: 
 	swapchain = createSwapchain(&graphicsData) or_return
 	createCommandBuffers(&graphicsData) or_return
 
-	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchain.images))
-
 	bufferSize := size_of(UniformBuffer)
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		if err := createBuffer(
@@ -515,6 +523,7 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: 
 	createSamplers(&graphicsData) or_return
 	createRenderPass(&graphicsData) or_return
 	createMainFrameBuffers(&graphicsData) or_return
+	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchain.images))
 	createBuffersDescriptorSets(&graphicsData) or_return
 	createTexturesDescriptorSets(&graphicsData) or_return
 
@@ -556,16 +565,41 @@ cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
 	cleanupImgui(graphicsData)
 	vk.DestroyDescriptorPool(device, imguiData.descriptorPool, nil)
 
-	vk.FreeCommandBuffers(device, computeCommandPool, 2, &transformCommandBuffers[0])
-	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &mainCommandBuffers[0])
-	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &shadowMapCommandBuffers[0])
-	vk.FreeCommandBuffers(device, graphicsCommandPool, 2, &sceneCommandBuffers[0])
-	vk.FreeCommandBuffers(device, computeCommandPool, 2, &postComputeCommandBuffers[0])
+	vk.FreeCommandBuffers(
+		device,
+		computeCommandPool,
+		MAX_FRAMES_IN_FLIGHT,
+		&commandBuffers[CmdBufferIndex.Transform][0],
+	)
 	vk.FreeCommandBuffers(
 		device,
 		graphicsCommandPool,
-		u32(len(swapchain.images)),
-		&imguiCommandBuffers[0],
+		MAX_FRAMES_IN_FLIGHT,
+		&commandBuffers[CmdBufferIndex.Main][0],
+	)
+	vk.FreeCommandBuffers(
+		device,
+		graphicsCommandPool,
+		MAX_FRAMES_IN_FLIGHT,
+		&commandBuffers[CmdBufferIndex.Shadow][0],
+	)
+	vk.FreeCommandBuffers(
+		device,
+		graphicsCommandPool,
+		MAX_FRAMES_IN_FLIGHT,
+		&commandBuffers[CmdBufferIndex.Scene][0],
+	)
+	vk.FreeCommandBuffers(
+		device,
+		computeCommandPool,
+		MAX_FRAMES_IN_FLIGHT,
+		&commandBuffers[CmdBufferIndex.Post][0],
+	)
+	vk.FreeCommandBuffers(
+		device,
+		graphicsCommandPool,
+		MAX_FRAMES_IN_FLIGHT,
+		&commandBuffers[CmdBufferIndex.Imgui][0],
 	)
 
 	vk.DestroyCommandPool(device, graphicsCommandPool, nil)
@@ -573,11 +607,9 @@ cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
 
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.DestroyFence(device, inFlightFrames[index], nil)
-		vk.DestroySemaphore(device, transformFinished[index], nil)
-		vk.DestroySemaphore(device, rendersFinished[index], nil)
-		vk.DestroySemaphore(device, computeFinished[index], nil)
-		vk.DestroySemaphore(device, imguiFinished[index], nil)
-		vk.DestroySemaphore(device, imageAvailable[index], nil)
+		for semaphoreIndex in SemaphoreIndex {
+			vk.DestroySemaphore(device, semaphores[semaphoreIndex][index], nil)
+		}
 	}
 
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -1080,6 +1112,7 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		pNext                          = &features14,
 		shaderDemoteToHelperInvocation = true,
 		synchronization2               = true,
+		dynamicRendering               = true,
 	}
 
 	features12: vk.PhysicalDeviceVulkan12Features = {
@@ -1353,8 +1386,11 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(device, &allocInfo, &mainCommandBuffers[0]);
-	   res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(
+		device,
+		&allocInfo,
+		&commandBuffers[CmdBufferIndex.Main][0],
+	); res != .SUCCESS {
 		log(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1366,8 +1402,11 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .SECONDARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(device, &allocInfo, &shadowMapCommandBuffers[0]);
-	   res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(
+		device,
+		&allocInfo,
+		&commandBuffers[CmdBufferIndex.Shadow][0],
+	); res != .SUCCESS {
 		log(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1379,8 +1418,11 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .SECONDARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(device, &allocInfo, &sceneCommandBuffers[0]);
-	   res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(
+		device,
+		&allocInfo,
+		&commandBuffers[CmdBufferIndex.Scene][0],
+	); res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1390,10 +1432,13 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		pNext              = nil,
 		commandPool        = graphicsCommandPool,
 		level              = .PRIMARY,
-		commandBufferCount = u32(len(swapchain.images)),
+		commandBufferCount = 2,
 	}
-	if res := vk.AllocateCommandBuffers(device, &allocInfo, &imguiCommandBuffers[0]);
-	   res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(
+		device,
+		&allocInfo,
+		&commandBuffers[CmdBufferIndex.Imgui][0],
+	); res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1416,8 +1461,11 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(device, &allocInfo, &transformCommandBuffers[0]);
-	   res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(
+		device,
+		&allocInfo,
+		&commandBuffers[CmdBufferIndex.Transform][0],
+	); res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1429,8 +1477,11 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(device, &allocInfo, &postComputeCommandBuffers[0]);
-	   res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(
+		device,
+		&allocInfo,
+		&commandBuffers[CmdBufferIndex.Post][0],
+	); res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -3400,34 +3451,16 @@ createSyncObjects :: proc(using graphicsData: ^GraphicsData) -> SyncError {
 			return .FailedToCreateFence
 		}
 
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &transformFinished[index]);
-		   res != .SUCCESS {
-			logf(.Fatal, "Failed to create semaphore! vkResult: %d", res)
-			return .FailedToCreateSemaphore
-		}
-
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &rendersFinished[index]);
-		   res != .SUCCESS {
-			logf(.Fatal, "Failed to create semaphore! vkResult: %d", res)
-			return .FailedToCreateSemaphore
-		}
-
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &computeFinished[index]);
-		   res != .SUCCESS {
-			logf(.Fatal, "Failed to create semaphore! vkResult: %d", res)
-			return .FailedToCreateSemaphore
-		}
-
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &imguiFinished[index]);
-		   res != .SUCCESS {
-			logf(.Fatal, "Failed to create semaphore! vkResult: %d", res)
-			return .FailedToCreateSemaphore
-		}
-
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &imageAvailable[index]);
-		   res != .SUCCESS {
-			logf(.Fatal, "Failed to create semaphore! vkResult: %d", res)
-			return .FailedToCreateSemaphore
+		for semaphoreIndex in SemaphoreIndex {
+			if res := vk.CreateSemaphore(
+				device,
+				&semaphoreInfo,
+				nil,
+				&semaphores[semaphoreIndex][index],
+			); res != .SUCCESS {
+				logf(.Fatal, "Failed to create semaphore %v! vkResult: %v", semaphoreIndex, res)
+				return .FailedToCreateSemaphore
+			}
 		}
 	}
 
@@ -4969,11 +5002,11 @@ updateCommandBuffers :: proc(
 	}
 
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.ResetCommandBuffer(transformCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(shadowMapCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(sceneCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(mainCommandBuffers[bufferIndex], {})
-		vk.ResetCommandBuffer(postComputeCommandBuffers[bufferIndex], {})
+		vk.ResetCommandBuffer(commandBuffers[CmdBufferIndex.Transform][bufferIndex], {})
+		vk.ResetCommandBuffer(commandBuffers[CmdBufferIndex.Shadow][bufferIndex], {})
+		vk.ResetCommandBuffer(commandBuffers[CmdBufferIndex.Scene][bufferIndex], {})
+		vk.ResetCommandBuffer(commandBuffers[CmdBufferIndex.Main][bufferIndex], {})
+		vk.ResetCommandBuffer(commandBuffers[CmdBufferIndex.Transform][bufferIndex], {})
 
 		recordTransformCommands(graphicsData, bufferIndex, scene) or_return
 		recordShadowCommands(graphicsData, bufferIndex, scene) or_return
@@ -4998,8 +5031,8 @@ recordTransformCommands :: proc(
 		flags            = {},
 		pInheritanceInfo = nil,
 	}
-
-	if res := vk.BeginCommandBuffer(transformCommandBuffers[index], &beginInfo); res != .SUCCESS {
+	cmdBuffer := commandBuffers[CmdBufferIndex.Transform][index]
+	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Error, "Failed to being recording command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5009,7 +5042,7 @@ recordTransformCommands :: proc(
 		descriptorSets[DescriptorSetIndex.TEXTURES].sets[currentFrame],
 	}
 	vk.CmdBindDescriptorSets(
-		transformCommandBuffers[index],
+		cmdBuffer,
 		.COMPUTE,
 		pipelines[PipelineIndex.TRANSFORM].layout,
 		0,
@@ -5018,11 +5051,7 @@ recordTransformCommands :: proc(
 		0,
 		nil,
 	)
-	vk.CmdBindPipeline(
-		transformCommandBuffers[index],
-		.COMPUTE,
-		pipelines[PipelineIndex.TRANSFORM].pipeline,
-	)
+	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[PipelineIndex.TRANSFORM].pipeline)
 
 	pushConstants: Transform_PushConstants = {
 		instance        = 0,
@@ -5035,7 +5064,7 @@ recordTransformCommands :: proc(
 		OFFSET :: u32(offset_of(Transform_PushConstants, instanceCount))
 
 		vk.CmdPushConstants2(
-			transformCommandBuffers[index],
+			cmdBuffer,
 			&vk.PushConstantsInfo {
 				sType = .PUSH_CONSTANTS_INFO,
 				pNext = nil,
@@ -5052,7 +5081,7 @@ recordTransformCommands :: proc(
 			pushConstants.vertexOffset = mesh.vertexOffset
 
 			vk.CmdPushConstants2(
-				transformCommandBuffers[index],
+				cmdBuffer,
 				&vk.PushConstantsInfo {
 					sType = .PUSH_CONSTANTS_INFO,
 					pNext = nil,
@@ -5063,18 +5092,13 @@ recordTransformCommands :: proc(
 					pValues = &pushConstants.instanceCount,
 				},
 			)
-			vk.CmdDispatch(
-				transformCommandBuffers[index],
-				u32(ceil(f32(mesh.vertexCount) / 64.0)),
-				1,
-				1,
-			)
+			vk.CmdDispatch(cmdBuffer, u32(ceil(f32(mesh.vertexCount) / 64.0)), 1, 1)
 			pushConstants.transformOffset += mesh.vertexCount * u32(len(model.instances))
 		}
 		pushConstants.instance += u32(len(model.instances))
 	}
 
-	if res := vk.EndCommandBuffer(transformCommandBuffers[index]); res != .SUCCESS {
+	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Error, "Failed to record command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5095,7 +5119,9 @@ recordMainCommands :: proc(
 		flags            = {},
 		pInheritanceInfo = nil,
 	}
-	if res := vk.BeginCommandBuffer(mainCommandBuffers[index], &beginInfo); res != .SUCCESS {
+
+	cmdBuffer := commandBuffers[CmdBufferIndex.Main][index]
+	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Error, "Failed to being recording command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5118,12 +5144,12 @@ recordMainCommands :: proc(
 		),
 	}
 
-	vk.CmdBeginRenderPass(mainCommandBuffers[index], &renderPassInfo, .SECONDARY_COMMAND_BUFFERS)
-	vk.CmdExecuteCommands(mainCommandBuffers[index], 1, &shadowMapCommandBuffers[index])
-	vk.CmdEndRenderPass(mainCommandBuffers[index])
+	vk.CmdBeginRenderPass(cmdBuffer, &renderPassInfo, .SECONDARY_COMMAND_BUFFERS)
+	vk.CmdExecuteCommands(cmdBuffer, 1, &commandBuffers[CmdBufferIndex.Shadow][index])
+	vk.CmdEndRenderPass(cmdBuffer)
 
 	vk.CmdPipelineBarrier2(
-		mainCommandBuffers[index],
+		cmdBuffer,
 		&vk.DependencyInfo {
 			sType = .DEPENDENCY_INFO,
 			pNext = nil,
@@ -5170,11 +5196,11 @@ recordMainCommands :: proc(
 			},
 		),
 	}
-	vk.CmdBeginRenderPass(mainCommandBuffers[index], &renderPassInfo, .SECONDARY_COMMAND_BUFFERS)
-	vk.CmdExecuteCommands(mainCommandBuffers[index], 1, &sceneCommandBuffers[index])
-	vk.CmdEndRenderPass(mainCommandBuffers[index])
+	vk.CmdBeginRenderPass(cmdBuffer, &renderPassInfo, .SECONDARY_COMMAND_BUFFERS)
+	vk.CmdExecuteCommands(cmdBuffer, 1, &commandBuffers[CmdBufferIndex.Scene][index])
+	vk.CmdEndRenderPass(cmdBuffer)
 
-	if res := vk.EndCommandBuffer(mainCommandBuffers[index]); res != .SUCCESS {
+	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Error, "Failed to record command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5206,16 +5232,14 @@ recordShadowCommands :: proc(
 			pipelineStatistics = {},
 		},
 	}
-	if res := vk.BeginCommandBuffer(shadowMapCommandBuffers[index], &beginInfo); res != .SUCCESS {
+
+	cmdBuffer := commandBuffers[CmdBufferIndex.Shadow][index]
+	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Error, "Failed to being recording command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
 
-	vk.CmdBindPipeline(
-		shadowMapCommandBuffers[index],
-		.GRAPHICS,
-		pipelines[PipelineIndex.LIGHT].pipeline,
-	)
+	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[PipelineIndex.LIGHT].pipeline)
 
 	sets: [len(DescriptorSetIndex)]vk.DescriptorSet = {
 		descriptorSets[DescriptorSetIndex.BUFFERS].sets[currentFrame],
@@ -5223,7 +5247,7 @@ recordShadowCommands :: proc(
 	}
 
 	vk.CmdBindDescriptorSets(
-		shadowMapCommandBuffers[index],
+		cmdBuffer,
 		.GRAPHICS,
 		pipelines[PipelineIndex.LIGHT].layout,
 		0,
@@ -5234,18 +5258,13 @@ recordShadowCommands :: proc(
 	)
 
 	vk.CmdBindVertexBuffers(
-		shadowMapCommandBuffers[index],
+		cmdBuffer,
 		0,
 		1,
 		&scene.buffers.vertexBuffer.buffer,
 		raw_data([]vk.DeviceSize{0}),
 	)
-	vk.CmdBindIndexBuffer(
-		shadowMapCommandBuffers[index],
-		scene.buffers.indexBuffer.buffer,
-		0,
-		.UINT32,
-	)
+	vk.CmdBindIndexBuffer(cmdBuffer, scene.buffers.indexBuffer.buffer, 0, .UINT32)
 
 	pushConstants: Shadow_PushConstants = {
 		layerIndex   = 0,
@@ -5256,7 +5275,7 @@ recordShadowCommands :: proc(
 		OFFSET :: u32(offset_of(Shadow_PushConstants, vertexOffset))
 		pushConstants.layerIndex = layerIndex
 		vk.CmdPushConstants2(
-			shadowMapCommandBuffers[index],
+			cmdBuffer,
 			&vk.PushConstantsInfo {
 				sType = .PUSH_CONSTANTS_INFO,
 				pNext = nil,
@@ -5273,7 +5292,7 @@ recordShadowCommands :: proc(
 			for &mesh in model.meshes {
 				pushConstants.vertexCount = mesh.vertexCount
 				vk.CmdPushConstants2(
-					shadowMapCommandBuffers[index],
+					cmdBuffer,
 					&vk.PushConstantsInfo {
 						sType = .PUSH_CONSTANTS_INFO,
 						pNext = nil,
@@ -5286,7 +5305,7 @@ recordShadowCommands :: proc(
 				)
 
 				vk.CmdDrawIndexed(
-					shadowMapCommandBuffers[index],
+					cmdBuffer,
 					mesh.indexCount,
 					u32(len(model.instances)),
 					mesh.indexOffset,
@@ -5298,7 +5317,7 @@ recordShadowCommands :: proc(
 		}
 	}
 
-	if res := vk.EndCommandBuffer(shadowMapCommandBuffers[index]); res != .SUCCESS {
+	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Error, "Failed to record command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5327,7 +5346,9 @@ recordSceneCommands :: proc(
 			pipelineStatistics = {},
 		},
 	}
-	if res := vk.BeginCommandBuffer(sceneCommandBuffers[index], &beginInfo); res != .SUCCESS {
+
+	cmdBuffer := commandBuffers[CmdBufferIndex.Scene][index]
+	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Error, "Failed to being recording command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5338,7 +5359,7 @@ recordSceneCommands :: proc(
 	}
 
 	vk.CmdBindDescriptorSets(
-		sceneCommandBuffers[index],
+		cmdBuffer,
 		.GRAPHICS,
 		pipelines[PipelineIndex.MAIN].layout,
 		0,
@@ -5347,20 +5368,16 @@ recordSceneCommands :: proc(
 		0,
 		nil,
 	)
-	vk.CmdBindPipeline(
-		sceneCommandBuffers[index],
-		.GRAPHICS,
-		pipelines[PipelineIndex.MAIN].pipeline,
-	)
+	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[PipelineIndex.MAIN].pipeline)
 
 	vk.CmdBindVertexBuffers(
-		sceneCommandBuffers[index],
+		cmdBuffer,
 		0,
 		1,
 		&scene.buffers.vertexBuffer.buffer,
 		raw_data([]vk.DeviceSize{0}),
 	)
-	vk.CmdBindIndexBuffer(sceneCommandBuffers[index], scene.buffers.indexBuffer.buffer, 0, .UINT32)
+	vk.CmdBindIndexBuffer(cmdBuffer, scene.buffers.indexBuffer.buffer, 0, .UINT32)
 
 	pushConstants: Scene_PushConstants = {
 		vertexOffset   = 0,
@@ -5371,7 +5388,7 @@ recordSceneCommands :: proc(
 		for &mesh in model.meshes {
 			pushConstants.vertexCount = mesh.vertexCount
 			vk.CmdPushConstants2(
-				sceneCommandBuffers[index],
+				cmdBuffer,
 				&vk.PushConstantsInfo {
 					sType = .PUSH_CONSTANTS_INFO,
 					pNext = nil,
@@ -5384,7 +5401,7 @@ recordSceneCommands :: proc(
 			)
 
 			vk.CmdDrawIndexed(
-				sceneCommandBuffers[index],
+				cmdBuffer,
 				mesh.indexCount,
 				u32(len(model.instances)),
 				mesh.indexOffset,
@@ -5396,7 +5413,7 @@ recordSceneCommands :: proc(
 		}
 	}
 
-	if res := vk.EndCommandBuffer(sceneCommandBuffers[index]); res != .SUCCESS {
+	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Error, "Failed to record command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5416,15 +5433,15 @@ recordPostCommands :: proc(
 		pInheritanceInfo = nil,
 	}
 
-	if res := vk.BeginCommandBuffer(postComputeCommandBuffers[index], &beginInfo);
-	   res != .SUCCESS {
+	cmdBuffer := commandBuffers[CmdBufferIndex.Post][index]
+	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Error, "Failed to start recording compute commands! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
 
 	transitionImageLayout(
 		graphicsData,
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		renderedImage.vkImage,
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
@@ -5433,7 +5450,7 @@ recordPostCommands :: proc(
 	)
 
 	upscaleImage(
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		pipelines[PipelineIndex.MAIN].colour.vkImage,
 		renderedImage.vkImage,
 		{RENDER_SIZE.x, RENDER_SIZE.y},
@@ -5444,7 +5461,7 @@ recordPostCommands :: proc(
 
 	transitionImageLayout(
 		graphicsData,
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		renderedImage.vkImage,
 		.TRANSFER_DST_OPTIMAL,
 		.GENERAL,
@@ -5454,7 +5471,7 @@ recordPostCommands :: proc(
 
 	transitionImageLayout(
 		graphicsData,
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		processedImage.vkImage,
 		.UNDEFINED,
 		.GENERAL,
@@ -5467,7 +5484,7 @@ recordPostCommands :: proc(
 		descriptorSets[DescriptorSetIndex.TEXTURES].sets[currentFrame],
 	}
 	vk.CmdBindDescriptorSets(
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		.COMPUTE,
 		pipelines[PipelineIndex.POSTPROCESS].layout,
 		0,
@@ -5487,7 +5504,7 @@ recordPostCommands :: proc(
 		drawLights = b32(drawLights),
 	}
 	vk.CmdPushConstants2(
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		&vk.PushConstantsInfo {
 			sType = .PUSH_CONSTANTS_INFO,
 			pNext = nil,
@@ -5499,22 +5516,13 @@ recordPostCommands :: proc(
 		},
 	)
 
-	vk.CmdBindPipeline(
-		postComputeCommandBuffers[index],
-		.COMPUTE,
-		pipelines[PipelineIndex.POSTPROCESS].pipeline,
-	)
+	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[PipelineIndex.POSTPROCESS].pipeline)
 
-	vk.CmdDispatch(
-		postComputeCommandBuffers[index],
-		swapchain.extent.width / 32 + 1,
-		swapchain.extent.height / 32 + 1,
-		1,
-	)
+	vk.CmdDispatch(cmdBuffer, swapchain.extent.width / 32 + 1, swapchain.extent.height / 32 + 1, 1)
 
 	transitionImageLayout(
 		graphicsData,
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		processedImage.vkImage,
 		.UNDEFINED,
 		.TRANSFER_SRC_OPTIMAL,
@@ -5524,7 +5532,7 @@ recordPostCommands :: proc(
 
 	transitionImageLayout(
 		graphicsData,
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		imguiData.colour.vkImage,
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
@@ -5533,7 +5541,7 @@ recordPostCommands :: proc(
 	)
 
 	copyImage(
-		postComputeCommandBuffers[index],
+		cmdBuffer,
 		vk.Extent3D{swapchain.extent.width, swapchain.extent.height, 1},
 		processedImage.vkImage,
 		imguiData.colour.vkImage,
@@ -5541,7 +5549,7 @@ recordPostCommands :: proc(
 		.TRANSFER_DST_OPTIMAL,
 	)
 
-	if res := vk.EndCommandBuffer(postComputeCommandBuffers[index]); res != .SUCCESS {
+	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Error, "Failed to record compute command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5553,6 +5561,7 @@ recordPostCommands :: proc(
 recordImguiCommands :: proc(
 	using graphicsData: ^GraphicsData,
 	index: u32,
+	imageIndex: u32,
 ) -> RecordCommandBufferError {
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
@@ -5560,7 +5569,9 @@ recordImguiCommands :: proc(
 		flags            = {},
 		pInheritanceInfo = nil,
 	}
-	if res := vk.BeginCommandBuffer(imguiCommandBuffers[index], &beginInfo); res != .SUCCESS {
+
+	cmdBuffer := commandBuffers[CmdBufferIndex.Imgui][index]
+	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Error, "Failed to being recording command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5574,16 +5585,16 @@ recordImguiCommands :: proc(
 		clearValueCount = 0,
 		pClearValues = nil,
 	}
-	vk.CmdBeginRenderPass(imguiCommandBuffers[index], &renderPassInfo, .INLINE)
+	vk.CmdBeginRenderPass(cmdBuffer, &renderPassInfo, .INLINE)
 
 	imgui.Render()
-	imguiVulkan.RenderDrawData(imgui.GetDrawData(), imguiCommandBuffers[index])
-	vk.CmdEndRenderPass(imguiCommandBuffers[index])
+	imguiVulkan.RenderDrawData(imgui.GetDrawData(), cmdBuffer)
+	vk.CmdEndRenderPass(cmdBuffer)
 
 	transitionImageLayout(
 		graphicsData,
-		imguiCommandBuffers[index],
-		swapchain.images[index],
+		cmdBuffer,
+		swapchain.images[imageIndex],
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
 		{.COLOR},
@@ -5591,10 +5602,10 @@ recordImguiCommands :: proc(
 	)
 
 	vk.CmdBlitImage(
-		imguiCommandBuffers[index],
+		cmdBuffer,
 		imguiData.colour.vkImage,
 		.TRANSFER_SRC_OPTIMAL,
-		swapchain.images[index],
+		swapchain.images[imageIndex],
 		.TRANSFER_DST_OPTIMAL,
 		1,
 		&vk.ImageBlit {
@@ -5624,15 +5635,15 @@ recordImguiCommands :: proc(
 
 	transitionImageLayout(
 		graphicsData,
-		imguiCommandBuffers[index],
-		swapchain.images[index],
+		cmdBuffer,
+		swapchain.images[imageIndex],
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
 		{.COLOR},
 		1,
 	)
 
-	if res := vk.EndCommandBuffer(imguiCommandBuffers[index]); res != .SUCCESS {
+	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Error, "Failed to record ui command buffer! vkResult: %v", res)
 		return .FailedToRecordCommandBuffer
 	}
@@ -5698,7 +5709,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 		device,
 		swapchain.handle,
 		max(u64),
-		imageAvailable[currentFrame],
+		semaphores[SemaphoreIndex.Image][currentFrame],
 		{},
 		&imageIndex,
 	); res == .ERROR_OUT_OF_DATE_KHR {
@@ -5720,8 +5731,8 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 
 	imgui.EndFrame()
 
-	vk.ResetCommandBuffer(imguiCommandBuffers[imageIndex], {})
-	if err := recordImguiCommands(graphicsData, imageIndex); err != nil {
+	vk.ResetCommandBuffer(commandBuffers[CmdBufferIndex.Imgui][currentFrame], {})
+	if err := recordImguiCommands(graphicsData, currentFrame, imageIndex); err != nil {
 		logf(.Error, "Failed to record ui command buffer! Error: %v", err)
 		return err
 	}
@@ -5738,7 +5749,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .COMMAND_BUFFER_SUBMIT_INFO,
 					pNext = nil,
-					commandBuffer = transformCommandBuffers[currentFrame],
+					commandBuffer = commandBuffers[CmdBufferIndex.Transform][currentFrame],
 					deviceMask = 0,
 				},
 			},
@@ -5749,7 +5760,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = transformFinished[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Transform][currentFrame],
 					value = 0,
 					stageMask = {.COMPUTE_SHADER},
 					deviceIndex = 0,
@@ -5772,7 +5783,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = transformFinished[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Transform][currentFrame],
 					value = 0,
 					stageMask = {.ALL_GRAPHICS},
 					deviceIndex = 0,
@@ -5785,7 +5796,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .COMMAND_BUFFER_SUBMIT_INFO,
 					pNext = nil,
-					commandBuffer = mainCommandBuffers[currentFrame],
+					commandBuffer = commandBuffers[CmdBufferIndex.Main][currentFrame],
 					deviceMask = 0,
 				},
 			},
@@ -5796,7 +5807,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = rendersFinished[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Main][currentFrame],
 					value = 0,
 					stageMask = {.ALL_GRAPHICS},
 					deviceIndex = 0,
@@ -5819,7 +5830,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = rendersFinished[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Main][currentFrame],
 					value = 0,
 					stageMask = {.COMPUTE_SHADER},
 					deviceIndex = 0,
@@ -5832,7 +5843,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .COMMAND_BUFFER_SUBMIT_INFO,
 					pNext = nil,
-					commandBuffer = postComputeCommandBuffers[currentFrame],
+					commandBuffer = commandBuffers[CmdBufferIndex.Post][currentFrame],
 					deviceMask = 0,
 				},
 			},
@@ -5843,7 +5854,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = computeFinished[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Compute][currentFrame],
 					value = 0,
 					stageMask = {.COMPUTE_SHADER},
 					deviceIndex = 0,
@@ -5866,7 +5877,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = computeFinished[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Compute][currentFrame],
 					value = 1,
 					stageMask = {.TOP_OF_PIPE},
 					deviceIndex = 0,
@@ -5874,7 +5885,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = imageAvailable[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Image][currentFrame],
 					value = 0,
 					stageMask = {.BOTTOM_OF_PIPE},
 					deviceIndex = 0,
@@ -5887,7 +5898,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .COMMAND_BUFFER_SUBMIT_INFO,
 					pNext = nil,
-					commandBuffer = imguiCommandBuffers[imageIndex],
+					commandBuffer = commandBuffers[CmdBufferIndex.Imgui][imageIndex],
 					deviceMask = 0,
 				},
 			},
@@ -5898,7 +5909,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = imguiFinished[currentFrame],
+					semaphore = semaphores[SemaphoreIndex.Imgui][currentFrame],
 					value = 0,
 					stageMask = {.ALL_GRAPHICS},
 					deviceIndex = 0,
@@ -5916,7 +5927,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 		sType              = .PRESENT_INFO_KHR,
 		pNext              = nil,
 		waitSemaphoreCount = 1,
-		pWaitSemaphores    = &imguiFinished[currentFrame],
+		pWaitSemaphores    = &semaphores[SemaphoreIndex.Imgui][currentFrame],
 		swapchainCount     = 1,
 		pSwapchains        = &swapchain.handle,
 		pImageIndices      = &imageIndex,
