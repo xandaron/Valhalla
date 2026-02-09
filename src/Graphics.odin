@@ -27,15 +27,6 @@ REQUESTED_LAYERS: []cstring : {"VK_LAYER_KHRONOS_validation"}
 
 @(private = "file")
 DEVICE_EXTENSIONS: []cstring : {
-	// 1.1
-	vk.KHR_MULTIVIEW_EXTENSION_NAME,
-	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
-	// 1.2
-	vk.EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
-	// 1.3
-	vk.EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
-	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-	// MISC
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	vk.KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
 }
@@ -325,13 +316,7 @@ GraphicsData :: struct {
 	computeQueue:              vk.Queue,
 
 	// Swapchain
-	swapchainTransform:        vk.SurfaceTransformFlagsKHR,
-	swapchain:                 vk.SwapchainKHR,
-	swapchainFormat:           vk.SurfaceFormatKHR,
-	swapchainMode:             vk.PresentModeKHR,
-	swapchainExtent:           vk.Extent2D,
-	swapchainImages:           []vk.Image,
-	swapchainImageViews:       []vk.ImageView,
+	swapchain:                 Swapchain,
 
 	// Pipelines
 	shaderFiles:               [dynamic]Shader,
@@ -345,7 +330,7 @@ GraphicsData :: struct {
 	rendersFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	computeFinished:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	imguiFinished:             [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-	imagesAvailable:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+	imageAvailable:           [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 
 	// Commands
 	graphicsCommandPool:       vk.CommandPool,
@@ -370,6 +355,17 @@ GraphicsData :: struct {
 	drawLights:                bool,
 	reloadBuffers:             bool,
 	rerecordCommands:          bool,
+}
+
+@(private = "file")
+Swapchain :: struct {
+	handle:    vk.SwapchainKHR,
+	transform: vk.SurfaceTransformFlagsKHR,
+	format:    vk.SurfaceFormatKHR,
+	mode:      vk.PresentModeKHR,
+	extent:    vk.Extent2D,
+	images:    []vk.Image,
+	views:     []vk.ImageView,
 }
 
 @(private = "file")
@@ -476,10 +472,10 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: 
 	initWindow(&graphicsData, initInfo.windowTitle) or_return
 	pickPhysicalDevice(&graphicsData) or_return
 	createLogicalDevice(&graphicsData) or_return
-	createSwapchain(&graphicsData) or_return
+	swapchain = createSwapchain(&graphicsData) or_return
 	createCommandBuffers(&graphicsData) or_return
 
-	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
+	pipelines[PipelineIndex.LIGHT].frameBuffers = make([]vk.Framebuffer, len(swapchain.images))
 
 	bufferSize := size_of(UniformBuffer)
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -568,7 +564,7 @@ cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
 	vk.FreeCommandBuffers(
 		device,
 		graphicsCommandPool,
-		u32(len(swapchainImages)),
+		u32(len(swapchain.images)),
 		&imguiCommandBuffers[0],
 	)
 
@@ -581,14 +577,14 @@ cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
 		vk.DestroySemaphore(device, rendersFinished[index], nil)
 		vk.DestroySemaphore(device, computeFinished[index], nil)
 		vk.DestroySemaphore(device, imguiFinished[index], nil)
-		vk.DestroySemaphore(device, imagesAvailable[index], nil)
+		vk.DestroySemaphore(device, imageAvailable[index], nil)
 	}
 
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		deleteBuffer(graphicsData, &uniformBuffers[index])
 	}
 
-	for index in 0 ..< len(swapchainImages) {
+	for index in 0 ..< len(swapchain.images) {
 		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.MAIN].frameBuffers[index], nil)
 		vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
 	}
@@ -597,7 +593,7 @@ cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
 
 	delete(shaderFiles)
 
-	cleanupSwapchain(graphicsData)
+	cleanupSwapchain(graphicsData, swapchain)
 	cleanupPipelines(graphicsData)
 
 	vk.DestroyRenderPass(device, pipelines[PipelineIndex.MAIN].renderPass, nil)
@@ -832,6 +828,7 @@ findQueueFamilies :: proc(
 	return indices, true
 }
 
+@(private = "file")
 SwapchainSupportDetails :: struct {
 	capabilities: vk.SurfaceCapabilitiesKHR,
 	formats:      []vk.SurfaceFormatKHR,
@@ -905,21 +902,25 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	) -> (
 		score: u32 = 0,
 	) {
-		physicalDeviceProperties: vk.PhysicalDeviceProperties
-		physicalDeviceFeatures: vk.PhysicalDeviceFeatures
+		deviceProperties: vk.PhysicalDeviceProperties2 = {
+			sType = .PHYSICAL_DEVICE_PROPERTIES_2,
+		}
+		deviceFeatures: vk.PhysicalDeviceFeatures2 = {
+			sType = .PHYSICAL_DEVICE_FEATURES_2,
+		}
 
-		vk.GetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties)
-		vk.GetPhysicalDeviceFeatures(physicalDevice, &physicalDeviceFeatures)
+		vk.GetPhysicalDeviceProperties2(physicalDevice, &deviceProperties)
+		vk.GetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures)
 
 		indices, err := findQueueFamilies(physicalDevice, graphicsData)
 		if err ||
-		   !physicalDeviceFeatures.samplerAnisotropy ||
+		   !deviceFeatures.features.samplerAnisotropy ||
 		   !checkDeviceExtensionSupport(physicalDevice) ||
 		   !swapchainAdequate(physicalDevice, graphicsData) {
 			return
 		}
 
-		if physicalDeviceProperties.deviceType == .DISCRETE_GPU {
+		if deviceProperties.properties.deviceType == .DISCRETE_GPU {
 			score += 1000
 		}
 
@@ -931,7 +932,7 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 			score += 100
 		}
 
-		score += physicalDeviceProperties.limits.maxImageDimension2D
+		score += deviceProperties.properties.limits.maxImageDimension2D
 		return
 	}
 
@@ -971,12 +972,12 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	}
 
 	getMaxUsableSampleCount :: proc(physicalDevice: vk.PhysicalDevice) -> vk.SampleCountFlags {
-		physicalDeviceProperties: vk.PhysicalDeviceProperties
-		vk.GetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties)
+		deviceProperties: vk.PhysicalDeviceProperties2
+		vk.GetPhysicalDeviceProperties2(physicalDevice, &deviceProperties)
 
 		counts :=
-			physicalDeviceProperties.limits.framebufferColorSampleCounts &
-			physicalDeviceProperties.limits.framebufferDepthSampleCounts
+			deviceProperties.properties.limits.framebufferColorSampleCounts &
+			deviceProperties.properties.limits.framebufferDepthSampleCounts
 		if ._64 in counts do return {._64}
 		if ._32 in counts do return {._32}
 		if ._16 in counts do return {._16}
@@ -1049,7 +1050,8 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		append(&queueCreateInfos, queueCreateInfo)
 	}
 
-	if queueFamilies.graphicsFamily != queueFamilies.computeFamily {
+	if queueFamilies.graphicsFamily != queueFamilies.computeFamily &&
+	   queueFamilies.presentFamily != queueFamilies.computeFamily {
 		queueCreateInfo = {
 			sType            = .DEVICE_QUEUE_CREATE_INFO,
 			pNext            = nil,
@@ -1062,7 +1064,7 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	}
 
 	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR = {
-		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV,
+		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
 		pNext                        = nil,
 		computeDerivativeGroupQuads  = true,
 		computeDerivativeGroupLinear = false,
@@ -1085,6 +1087,8 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		pNext                     = &features13,
 		shaderOutputViewportIndex = true,
 		shaderOutputLayer         = true,
+		timelineSemaphore         = true,
+		bufferDeviceAddress       = true,
 	}
 
 	features11: vk.PhysicalDeviceVulkan11Features = {
@@ -1137,8 +1141,9 @@ SwapchainError :: enum {
 
 @(private = "file")
 @(require_results)
-createSwapchain :: proc(using graphicsData: ^GraphicsData) -> SwapchainError {
+createSwapchain :: proc(graphicsData: ^GraphicsData) -> (Swapchain, SwapchainError) {
 	chooseFormat :: proc(formats: []vk.SurfaceFormatKHR) -> (fmt: vk.SurfaceFormatKHR) {
+		// TODO: improve this function
 		fmt = formats[0]
 		for format in formats {
 			when HDR_ENABLED {
@@ -1191,67 +1196,95 @@ createSwapchain :: proc(using graphicsData: ^GraphicsData) -> SwapchainError {
 		return
 	}
 
-	swapchainSupport := querySwapchainSupport(physicalDevice, graphicsData)
+	swapchainSupport := querySwapchainSupport(graphicsData.physicalDevice, graphicsData)
 
 	max := swapchainSupport.capabilities.maxImageCount
 	min := swapchainSupport.capabilities.minImageCount
 	swapchainImageCount := max if max == 1 else (2 if 2 > min else min)
-	swapchainTransform = swapchainSupport.capabilities.currentTransform
 
-	swapchainFormat = chooseFormat(swapchainSupport.formats)
-	swapchainMode = choosePresentMode(swapchainSupport.modes)
-	swapchainExtent = chooseExtent(graphicsData, swapchainSupport.capabilities)
+	swapchain: Swapchain = {
+		transform = swapchainSupport.capabilities.currentTransform,
+		format    = chooseFormat(swapchainSupport.formats),
+		mode      = choosePresentMode(swapchainSupport.modes),
+		extent    = chooseExtent(graphicsData, swapchainSupport.capabilities),
+	}
 
-	oneQueueFamily :=
-		queueFamilies.graphicsFamily == queueFamilies.presentFamily &&
-		queueFamilies.graphicsFamily == queueFamilies.computeFamily
+	queueFamiliesArray := make([dynamic]u32, context.temp_allocator)
+	append(&queueFamiliesArray, graphicsData.queueFamilies.graphicsFamily)
+	if graphicsData.queueFamilies.graphicsFamily != graphicsData.queueFamilies.presentFamily {
+		append(&queueFamiliesArray, graphicsData.queueFamilies.presentFamily)
+	}
+	if graphicsData.queueFamilies.graphicsFamily != graphicsData.queueFamilies.computeFamily &&
+	   graphicsData.queueFamilies.presentFamily != graphicsData.queueFamilies.computeFamily {
+		append(&queueFamiliesArray, graphicsData.queueFamilies.computeFamily)
+	}
 	createInfo: vk.SwapchainCreateInfoKHR = {
 		sType                 = .SWAPCHAIN_CREATE_INFO_KHR,
 		pNext                 = nil,
 		flags                 = {},
-		surface               = surface,
+		surface               = graphicsData.surface,
 		minImageCount         = swapchainImageCount,
-		imageFormat           = swapchainFormat.format,
-		imageColorSpace       = swapchainFormat.colorSpace,
-		imageExtent           = swapchainExtent,
+		imageFormat           = swapchain.format.format,
+		imageColorSpace       = swapchain.format.colorSpace,
+		imageExtent           = swapchain.extent,
 		imageArrayLayers      = 1,
 		imageUsage            = {.TRANSFER_DST, .COLOR_ATTACHMENT},
-		imageSharingMode      = oneQueueFamily ? .EXCLUSIVE : .CONCURRENT,
-		queueFamilyIndexCount = oneQueueFamily ? 0 : 3,
-		pQueueFamilyIndices   = oneQueueFamily ? nil : raw_data([]u32{queueFamilies.graphicsFamily, queueFamilies.presentFamily, queueFamilies.computeFamily}),
-		preTransform          = swapchainTransform,
+		imageSharingMode      = len(queueFamiliesArray) == 1 ? .EXCLUSIVE : .CONCURRENT,
+		queueFamilyIndexCount = u32(len(queueFamiliesArray)),
+		pQueueFamilyIndices   = raw_data(queueFamiliesArray),
+		preTransform          = swapchain.transform,
 		compositeAlpha        = {.OPAQUE},
-		presentMode           = swapchainMode,
+		presentMode           = swapchain.mode,
 		clipped               = true,
-		oldSwapchain          = {},
+		oldSwapchain          = graphicsData.swapchain.handle,
 	}
 
-	if res := vk.CreateSwapchainKHR(device, &createInfo, nil, &swapchain); res != .SUCCESS {
+	if res := vk.CreateSwapchainKHR(graphicsData.device, &createInfo, nil, &swapchain.handle);
+	   res != .SUCCESS {
 		log(.Fatal, "Failed to create swapchain! vkResult: %v", res)
-		return .FailedToCreateSwapchain
+		return swapchain, .FailedToCreateSwapchain
 	}
 
-	swapchainImages = make([]vk.Image, swapchainImageCount)
-	vk.GetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, raw_data(swapchainImages))
+	swapchain.images = make([]vk.Image, swapchainImageCount)
+	vk.GetSwapchainImagesKHR(
+		graphicsData.device,
+		swapchain.handle,
+		&swapchainImageCount,
+		raw_data(swapchain.images),
+	)
 
-	swapchainImageViews = make([]vk.ImageView, swapchainImageCount)
+	swapchain.views = make([]vk.ImageView, swapchainImageCount)
 	for index in 0 ..< swapchainImageCount {
 		err: ImageError
-		swapchainImageViews[index], err = createImageView(
+		swapchain.views[index], err = createImageView(
 			graphicsData,
-			swapchainImages[index],
+			swapchain.images[index],
 			.D2,
-			swapchainFormat.format,
+			swapchain.format.format,
 			{.COLOR},
 			1,
 		)
 		if err != .None {
 			log(.Fatal, "Failed to create swapchain image view! vkResult: %v", err)
-			return .FailedToCreateSwapchainImageView
+			return swapchain, .FailedToCreateSwapchainImageView
 		}
 	}
 
-	return .None
+	return swapchain, .None
+}
+
+@(private = "file")
+cleanupSwapchain :: proc(graphicsData: ^GraphicsData, swapchain: Swapchain) {
+	for view in swapchain.views {
+		vk.DestroyImageView(graphicsData.device, view, nil)
+	}
+
+	delete(swapchain.images)
+	delete(swapchain.views)
+
+	vk.DestroySwapchainKHR(graphicsData.device, swapchain.handle, nil)
+	deleteImage(graphicsData, &graphicsData.renderedImage)
+	deleteImage(graphicsData, &graphicsData.processedImage)
 }
 
 @(private = "file")
@@ -1263,18 +1296,17 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 		width, height = glfw.GetFramebufferSize(window)
 	}
 
-	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
-		log(.Error, "Failed to wait for device idle! vkResult: %v", res)
-		return .FailedToRecreateSwapchain
-	}
+	vk.WaitForFences(device, len(inFlightFrames), &inFlightFrames[0], true, max(u64))
+	vk.QueueWaitIdle(presentQueue)
 
-	cleanupSwapchain(graphicsData)
-
-	err = createSwapchain(graphicsData)
+	oldSwapchain := swapchain
+	swapchain, err = createSwapchain(graphicsData)
 	if err != nil {
 		log(.Error, "Failed to recreate swapchain!")
 		return err
 	}
+
+	cleanupSwapchain(graphicsData, oldSwapchain)
 
 	err = updateComputeDescriptorSets(graphicsData)
 	if err != nil {
@@ -1290,19 +1322,6 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 	}
 
 	return nil
-}
-
-@(private = "file")
-cleanupSwapchain :: proc(using graphicsData: ^GraphicsData) {
-	for imageView in swapchainImageViews {
-		vk.DestroyImageView(device, imageView, nil)
-	}
-	delete(swapchainImages)
-	delete(swapchainImageViews)
-
-	vk.DestroySwapchainKHR(device, swapchain, nil)
-	deleteImage(graphicsData, &renderedImage)
-	deleteImage(graphicsData, &processedImage)
 }
 
 CommandBufferError :: enum {
@@ -1371,7 +1390,7 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		pNext              = nil,
 		commandPool        = graphicsCommandPool,
 		level              = .PRIMARY,
-		commandBufferCount = u32(len(swapchainImages)),
+		commandBufferCount = u32(len(swapchain.images)),
 	}
 	if res := vk.AllocateCommandBuffers(device, &allocInfo, &imguiCommandBuffers[0]);
 	   res != .SUCCESS {
@@ -2960,8 +2979,8 @@ updateDescriptorSets :: proc(
 		&renderedImage,
 		{},
 		.D2,
-		swapchainExtent.width,
-		swapchainExtent.height,
+		swapchain.extent.width,
+		swapchain.extent.height,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -2995,8 +3014,8 @@ updateDescriptorSets :: proc(
 		&processedImage,
 		{},
 		.D2,
-		swapchainExtent.width,
-		swapchainExtent.height,
+		swapchain.extent.width,
+		swapchain.extent.height,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -3221,8 +3240,8 @@ updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) -> ImageE
 		&renderedImage,
 		{},
 		.D2,
-		swapchainExtent.width,
-		swapchainExtent.height,
+		swapchain.extent.width,
+		swapchain.extent.height,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -3256,8 +3275,8 @@ updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) -> ImageE
 		&processedImage,
 		{},
 		.D2,
-		swapchainExtent.width,
-		swapchainExtent.height,
+		swapchain.extent.width,
+		swapchain.extent.height,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -3405,7 +3424,7 @@ createSyncObjects :: proc(using graphicsData: ^GraphicsData) -> SyncError {
 			return .FailedToCreateSemaphore
 		}
 
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &imagesAvailable[index]);
+		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &imageAvailable[index]);
 		   res != .SUCCESS {
 			logf(.Fatal, "Failed to create semaphore! vkResult: %d", res)
 			return .FailedToCreateSemaphore
@@ -3701,8 +3720,8 @@ createMainFrameBuffers :: proc(using graphicsData: ^GraphicsData) -> FrameBuffer
 		layers          = 1,
 	}
 
-	pipelines[PipelineIndex.MAIN].frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
-	for index in 0 ..< len(swapchainImages) {
+	pipelines[PipelineIndex.MAIN].frameBuffers = make([]vk.Framebuffer, len(swapchain.images))
+	for index in 0 ..< len(swapchain.images) {
 		if res := vk.CreateFramebuffer(
 			device,
 			&frameBufferInfo,
@@ -3836,7 +3855,7 @@ createShadowMapFrameBuffer :: proc(
 		layers          = layerCount,
 	}
 
-	for index in 0 ..< len(swapchainImages) {
+	for index in 0 ..< len(swapchain.images) {
 		if res := vk.CreateFramebuffer(
 			device,
 			&frameBufferInfo,
@@ -3854,7 +3873,7 @@ createShadowMapFrameBuffer :: proc(
 @(private = "file")
 updateShadowMapFrameBuffer :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	if pipelines[PipelineIndex.LIGHT].colour != {} {
-		for index in 0 ..< len(swapchainImages) {
+		for index in 0 ..< len(swapchain.images) {
 			vk.DestroyFramebuffer(device, pipelines[PipelineIndex.LIGHT].frameBuffers[index], nil)
 		}
 		deleteImage(graphicsData, &pipelines[PipelineIndex.LIGHT].colour)
@@ -4638,8 +4657,8 @@ updateImgui :: proc(using graphicsData: ^GraphicsData) -> Error {
 			&imguiData.colour,
 			{},
 			.D2,
-			u32(swapchainExtent.width),
-			u32(swapchainExtent.height),
+			u32(swapchain.extent.width),
+			u32(swapchain.extent.height),
 			1,
 			{._1},
 			.OPTIMAL,
@@ -4724,13 +4743,13 @@ updateImgui :: proc(using graphicsData: ^GraphicsData) -> Error {
 			renderPass      = imguiData.renderPass,
 			attachmentCount = 1,
 			pAttachments    = &imguiData.colour.view,
-			width           = u32(swapchainExtent.width),
-			height          = u32(swapchainExtent.height),
+			width           = u32(swapchain.extent.width),
+			height          = u32(swapchain.extent.height),
 			layers          = 1,
 		}
 
-		imguiData.frameBuffers = make([]vk.Framebuffer, len(swapchainImages))
-		for index in 0 ..< len(swapchainImages) {
+		imguiData.frameBuffers = make([]vk.Framebuffer, len(swapchain.images))
+		for index in 0 ..< len(swapchain.images) {
 			if res := vk.CreateFramebuffer(
 				device,
 				&frameBufferInfo,
@@ -5418,7 +5437,7 @@ recordPostCommands :: proc(
 		pipelines[PipelineIndex.MAIN].colour.vkImage,
 		renderedImage.vkImage,
 		{RENDER_SIZE.x, RENDER_SIZE.y},
-		{swapchainExtent.width, swapchainExtent.height},
+		{swapchain.extent.width, swapchain.extent.height},
 		0,
 		0,
 	)
@@ -5488,8 +5507,8 @@ recordPostCommands :: proc(
 
 	vk.CmdDispatch(
 		postComputeCommandBuffers[index],
-		swapchainExtent.width / 32 + 1,
-		swapchainExtent.height / 32 + 1,
+		swapchain.extent.width / 32 + 1,
+		swapchain.extent.height / 32 + 1,
 		1,
 	)
 
@@ -5515,7 +5534,7 @@ recordPostCommands :: proc(
 
 	copyImage(
 		postComputeCommandBuffers[index],
-		vk.Extent3D{swapchainExtent.width, swapchainExtent.height, 1},
+		vk.Extent3D{swapchain.extent.width, swapchain.extent.height, 1},
 		processedImage.vkImage,
 		imguiData.colour.vkImage,
 		.TRANSFER_SRC_OPTIMAL,
@@ -5551,7 +5570,7 @@ recordImguiCommands :: proc(
 		pNext = nil,
 		renderPass = imguiData.renderPass,
 		framebuffer = imguiData.frameBuffers[index],
-		renderArea = vk.Rect2D{offset = {0, 0}, extent = swapchainExtent},
+		renderArea = vk.Rect2D{offset = {0, 0}, extent = swapchain.extent},
 		clearValueCount = 0,
 		pClearValues = nil,
 	}
@@ -5564,7 +5583,7 @@ recordImguiCommands :: proc(
 	transitionImageLayout(
 		graphicsData,
 		imguiCommandBuffers[index],
-		swapchainImages[index],
+		swapchain.images[index],
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
 		{.COLOR},
@@ -5575,7 +5594,7 @@ recordImguiCommands :: proc(
 		imguiCommandBuffers[index],
 		imguiData.colour.vkImage,
 		.TRANSFER_SRC_OPTIMAL,
-		swapchainImages[index],
+		swapchain.images[index],
 		.TRANSFER_DST_OPTIMAL,
 		1,
 		&vk.ImageBlit {
@@ -5587,7 +5606,7 @@ recordImguiCommands :: proc(
 			},
 			srcOffsets = {
 				{x = 0, y = 0, z = 0},
-				{x = i32(swapchainExtent.width), y = i32(swapchainExtent.height), z = 1},
+				{x = i32(swapchain.extent.width), y = i32(swapchain.extent.height), z = 1},
 			},
 			dstSubresource = {
 				aspectMask = {.COLOR},
@@ -5597,7 +5616,7 @@ recordImguiCommands :: proc(
 			},
 			dstOffsets = {
 				{x = 0, y = 0, z = 0},
-				{x = i32(swapchainExtent.width), y = i32(swapchainExtent.height), z = 1},
+				{x = i32(swapchain.extent.width), y = i32(swapchain.extent.height), z = 1},
 			},
 		},
 		.NEAREST,
@@ -5606,7 +5625,7 @@ recordImguiCommands :: proc(
 	transitionImageLayout(
 		graphicsData,
 		imguiCommandBuffers[index],
-		swapchainImages[index],
+		swapchain.images[index],
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
 		{.COLOR},
@@ -5677,9 +5696,9 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 	imageIndex: u32
 	if res := vk.AcquireNextImageKHR(
 		device,
-		swapchain,
+		swapchain.handle,
 		max(u64),
-		imagesAvailable[currentFrame],
+		imageAvailable[currentFrame],
 		{},
 		&imageIndex,
 	); res == .ERROR_OUT_OF_DATE_KHR {
@@ -5707,7 +5726,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 		return err
 	}
 
-	submitInfo := vk.SubmitInfo2 {
+	submitInfo: vk.SubmitInfo2 = {
 		sType                    = .SUBMIT_INFO_2,
 		pNext                    = nil,
 		flags                    = {},
@@ -5738,9 +5757,8 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 			},
 		),
 	}
-
-	if res := vk.QueueSubmit2(computeQueue, 1, &submitInfo, 0); res != .SUCCESS {
-		logf(.Error, "Failed to submit pre command buffer! vkResult: %v", res)
+	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, 0); res != .SUCCESS {
+		logf(.Error, "Failed to submit command buffer! vkResult: %v", res)
 		return .FailedToSubmitPreCommandBuffer
 	}
 
@@ -5755,7 +5773,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
 					semaphore = transformFinished[currentFrame],
-					value = 1,
+					value = 0,
 					stageMask = {.ALL_GRAPHICS},
 					deviceIndex = 0,
 				},
@@ -5786,10 +5804,9 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 			},
 		),
 	}
-
-	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, 0); res != .SUCCESS {
-		logf(.Error, "Failed to submit main command buffer! vkResult: %v", res)
-		return .FailedToSubmitMainCommandBuffer
+	if res := vk.QueueSubmit2(computeQueue, 1, &submitInfo, 0); res != .SUCCESS {
+		logf(.Error, "Failed to submit command buffer! vkResult: %v", res)
+		return .FailedToSubmitPreCommandBuffer
 	}
 
 	submitInfo = {
@@ -5803,7 +5820,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
 					semaphore = rendersFinished[currentFrame],
-					value = 1,
+					value = 0,
 					stageMask = {.COMPUTE_SHADER},
 					deviceIndex = 0,
 				},
@@ -5834,9 +5851,9 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 			},
 		),
 	}
-	if res := vk.QueueSubmit2(computeQueue, 1, &submitInfo, 0); res != .SUCCESS {
-		logf(.Error, "Failed to submit post command buffer! vkResult: %v", res)
-		return DrawError.FailedToSubmitPostCommandBuffer
+	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, 0); res != .SUCCESS {
+		logf(.Error, "Failed to submit command buffer! vkResult: %v", res)
+		return .FailedToSubmitPreCommandBuffer
 	}
 
 	submitInfo = {
@@ -5857,8 +5874,8 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = imagesAvailable[currentFrame],
-					value = 1,
+					semaphore = imageAvailable[currentFrame],
+					value = 0,
 					stageMask = {.BOTTOM_OF_PIPE},
 					deviceIndex = 0,
 				},
@@ -5889,11 +5906,10 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 			},
 		),
 	}
-
-	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, inFlightFrames[currentFrame]);
+	if res := vk.QueueSubmit2(computeQueue, 1, &submitInfo, inFlightFrames[currentFrame]);
 	   res != .SUCCESS {
-		logf(.Error, "Failed to submit ui command buffer! vkResult: %v", res)
-		return .FailedToSubmitUICommandBuffer
+		logf(.Error, "Failed to submit command buffer! vkResult: %v", res)
+		return .FailedToSubmitPreCommandBuffer
 	}
 
 	presentInfo: vk.PresentInfoKHR = {
@@ -5902,7 +5918,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 		waitSemaphoreCount = 1,
 		pWaitSemaphores    = &imguiFinished[currentFrame],
 		swapchainCount     = 1,
-		pSwapchains        = &swapchain,
+		pSwapchains        = &swapchain.handle,
 		pImageIndices      = &imageIndex,
 		pResults           = nil,
 	}
