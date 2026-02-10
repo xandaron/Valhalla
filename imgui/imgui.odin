@@ -2,10 +2,28 @@ package imgui
 
 import "core:c"
 
-// when ODIN_OS == .Linux || ODIN_OS == .Darwin { @(require) foreign import stdcpp { "system:c++" } }
-when      ODIN_OS == .Windows { when ODIN_ARCH == .amd64 { foreign import lib "imgui_windows_x64.lib" } else { foreign import lib "imgui_windows_arm64.lib" } }
-else when ODIN_OS == .Linux   { when ODIN_ARCH == .amd64 { foreign import lib "imgui_linux_x64.a" }     else { foreign import lib "imgui_linux_arm64.a" } }
-else when ODIN_OS == .Darwin  { when ODIN_ARCH == .amd64 { foreign import lib "imgui_darwin_x64.a" }    else { foreign import lib "imgui_darwin_arm64.a" } }
+@(private="file") ARCH :: "x64" when ODIN_ARCH == .amd64 else "arm64"
+
+when ODIN_OS == .Windows {
+	foreign import lib { "imgui_windows_" + ARCH + ".lib" }
+} else when ODIN_OS == .Linux {
+	foreign import lib {
+		"imgui_linux_" + ARCH + ".a",
+		"system:c++",
+	}
+} else when ODIN_OS == .Darwin {
+	foreign import lib {
+		"imgui_darwin_" + ARCH + ".a",
+		"system:c++",
+	}
+} else when ODIN_OS == .JS {
+	foreign import lib "wasm/c_imgui.o"
+	@(require) foreign import "wasm/imgui.o"
+	@(require) foreign import "wasm/imgui_demo.o"
+	@(require) foreign import "wasm/imgui_draw.o"
+	@(require) foreign import "wasm/imgui_tables.o"
+	@(require) foreign import "wasm/imgui_widgets.o"
+}
 
 CHECKVERSION :: proc() {
 	DebugCheckVersionAndDataLayout(VERSION, size_of(IO), size_of(Style), size_of(Vec2), size_of(Vec4), size_of(DrawVert), size_of(DrawIdx))
@@ -52,14 +70,12 @@ WindowFlag :: enum c.int {
 	UnsavedDocument           = 18, // Display a dot next to the title. When used in a tab/docking context, tab is selected when clicking the X + closure is not assumed (will wait for user to stop submitting the tab). Otherwise closure is assumed when pressing the X, so if you keep submitting the tab may reappear at end of tab bar.
 	NoDocking                 = 19, // Disable docking of this window
 	// [Internal]
-	ChildWindow            = 24, // Don't use! For internal use by BeginChild()
-	Tooltip                = 25, // Don't use! For internal use by BeginTooltip()
-	Popup                  = 26, // Don't use! For internal use by BeginPopup()
-	Modal                  = 27, // Don't use! For internal use by BeginPopupModal()
-	ChildMenu              = 28, // Don't use! For internal use by BeginMenu()
-	DockNodeHost           = 29, // Don't use! For internal use by Begin()/NewFrame()
-	NavFlattened           = 29, // Obsoleted in 1.90.9: Use ImGuiChildFlags_NavFlattened in BeginChild() call.
-	AlwaysUseWindowPadding = 30, // Obsoleted in 1.90.0: Use ImGuiChildFlags_AlwaysUseWindowPadding in BeginChild() call.
+	ChildWindow  = 24, // Don't use! For internal use by BeginChild()
+	Tooltip      = 25, // Don't use! For internal use by BeginTooltip()
+	Popup        = 26, // Don't use! For internal use by BeginPopup()
+	Modal        = 27, // Don't use! For internal use by BeginPopupModal()
+	ChildMenu    = 28, // Don't use! For internal use by BeginMenu()
+	DockNodeHost = 29, // Don't use! For internal use by Begin()/NewFrame()
 }
 
 WindowFlags_NoNav        :: WindowFlags{.NoNavInputs,.NoNavFocus}
@@ -88,7 +104,6 @@ ChildFlag :: enum c.int {
 	NavFlattened           = 8, // [BETA] Share focus scope, allow keyboard/gamepad navigation to cross over parent border to this child or between sibling child windows.
 }
 
-ChildFlags_Border :: ChildFlags{.Borders} // Renamed in 1.91.1 (August 2024) for consistency.
 
 // Flags for ImGui::PushItemFlag()
 // (Those are shared by all items)
@@ -162,8 +177,6 @@ TreeNodeFlag :: enum c.int {
 }
 
 TreeNodeFlags_CollapsingHeader :: TreeNodeFlags{.Framed,.NoTreePushOnOpen,.NoAutoOpenOnLog}
-TreeNodeFlags_AllowItemOverlap :: TreeNodeFlags{.AllowOverlap}                              // Renamed in 1.89.7
-TreeNodeFlags_SpanTextWidth    :: TreeNodeFlags{.SpanLabelWidth}                            // Renamed in 1.90.7
 
 // Flags for OpenPopup*(), BeginPopupContext*(), IsPopupOpen() functions.
 // - To be backward compatible with older API which took an 'int mouse_button = 1' argument instead of 'ImGuiPopupFlags flags',
@@ -199,8 +212,6 @@ SelectableFlag :: enum c.int {
 	Highlight         = 5, // Make the item be displayed as if it is hovered
 }
 
-SelectableFlags_DontClosePopups  :: SelectableFlags{.NoAutoClosePopups} // Renamed in 1.91.0
-SelectableFlags_AllowItemOverlap :: SelectableFlags{.AllowOverlap}      // Renamed in 1.89.7
 
 // Flags for ImGui::BeginCombo()
 ComboFlags :: bit_set[ComboFlag; c.int]
@@ -312,8 +323,6 @@ DockNodeFlag :: enum c.int {
 	NoUndocking              = 7, //       // Disable undocking this node.
 }
 
-DockNodeFlags_NoSplit                :: DockNodeFlags{.NoDockingSplit}           // Renamed in 1.90
-DockNodeFlags_NoDockingInCentralNode :: DockNodeFlags{.NoDockingOverCentralNode} // Renamed in 1.90
 
 // Flags for ImGui::BeginDragDropSource(), ImGui::AcceptDragDropPayload()
 DragDropFlags :: bit_set[DragDropFlag; c.int]
@@ -333,46 +342,53 @@ DragDropFlag :: enum c.int {
 	AcceptNoPreviewTooltip  = 12, // Request hiding the BeginDragDropSource tooltip from the BeginDragDropTarget site.
 }
 
-DragDropFlags_AcceptPeekOnly          :: DragDropFlags{.AcceptBeforeDelivery,.AcceptNoDrawDefaultRect} // For peeking ahead and inspecting the payload before delivery.
-DragDropFlags_SourceAutoExpirePayload :: DragDropFlags{.PayloadAutoExpire}                             // Renamed in 1.90.9
+DragDropFlags_AcceptPeekOnly :: DragDropFlags{.AcceptBeforeDelivery,.AcceptNoDrawDefaultRect} // For peeking ahead and inspecting the payload before delivery.
 
+// A primary data type
 DataType :: enum c.int {
-	S8,
-	U8,
-	S16,
-	U16,
-	S32,
-	U32,
-	S64,
-	U64,
-	Float,
-	Double,
-	Bool,
-	String,
+	S8,     // signed char / char (with sensible compilers)
+	U8,     // unsigned char
+	S16,    // short
+	U16,    // unsigned short
+	S32,    // int
+	U32,    // unsigned int
+	S64,    // long long / __int64
+	U64,    // unsigned long long / unsigned __int64
+	Float,  // float
+	Double, // double
+	Bool,   // bool (provided for user convenience, not supported by scalar widgets)
+	String, // char* (provided for user convenience, not supported by scalar widgets)
 	COUNT,
 }
 
-Dir :: enum c.int {
+// A cardinal direction
+Dir :: enum c.int { // Forward declared enum type ImGuiDir
 	None = -1,
-	Left = 0,
-	Right = 1,
-	Up = 2,
-	Down = 3,
+	Left,
+	Right,
+	Up,
+	Down,
 	COUNT,
 }
 
-SortDirection :: enum c.int {
-	None = 0,
-	Ascending = 1,
-	Descending = 2,
+// A sorting direction
+SortDirection :: enum c.int { // Forward declared enum type ImGuiSortDirection
+	None,
+	Ascending,  // Ascending = 0->9, A->Z etc.
+	Descending, // Descending = 9->0, Z->A etc.
 }
 
-Key :: enum c.int {
-	None = 0,
-	// Some of the next enum values are self referential, which currently causes issues
-	// Search for this in the generator for more info.
-	NamedKey_BEGIN = 512,
-	Tab = 512,
+// A key identifier (ImGuiKey_XXX or ImGuiMod_XXX value): can represent Keyboard, Mouse and Gamepad values.
+// All our named keys are >= 512. Keys value 0 to 511 are left unused and were legacy native/opaque key values (< 1.87).
+// Support for legacy keys was completely removed in 1.91.5.
+// Read details about the 1.87+ transition : https://github.com/ocornut/imgui/issues/4921
+// Note that "Keys" related to physical keys and are not the same concept as input "Characters", the later are submitted via io.AddInputCharacter().
+// The keyboard key enum values are named after the keys on a standard US keyboard, and on other keyboard types the keys reported may not match the keycaps.
+Key :: enum c.int { // Forward declared enum type ImGuiKey
+	// Keyboard
+	None,
+	NamedKey_BEGIN = 512, // First valid key value (other than 0)
+	Tab = 512,            // == ImGuiKey_NamedKey_BEGIN
 	LeftArrow,
 	RightArrow,
 	UpArrow,
@@ -456,17 +472,17 @@ Key :: enum c.int {
 	F22,
 	F23,
 	F24,
-	Apostrophe,
-	Comma,
-	Minus,
-	Period,
-	Slash,
-	Semicolon,
-	Equal,
-	LeftBracket,
-	Backslash,
-	RightBracket,
-	GraveAccent,
+	Apostrophe,           // '
+	Comma,                // ,
+	Minus,                // -
+	Period,               // .
+	Slash,                // /
+	Semicolon,            // ;
+	Equal,                // =
+	LeftBracket,          // [
+	Backslash,            // \ (this text inhibit multiline comment caused by backslash)
+	RightBracket,         // ]
+	GraveAccent,          // `
 	CapsLock,
 	ScrollLock,
 	NumLock,
@@ -489,32 +505,36 @@ Key :: enum c.int {
 	KeypadAdd,
 	KeypadEnter,
 	KeypadEqual,
-	AppBack,
+	AppBack,              // Available on some keyboard/mouses. Often referred as "Browser Back"
 	AppForward,
-	GamepadStart,
-	GamepadBack,
-	GamepadFaceLeft,
-	GamepadFaceRight,
-	GamepadFaceUp,
-	GamepadFaceDown,
-	GamepadDpadLeft,
-	GamepadDpadRight,
-	GamepadDpadUp,
-	GamepadDpadDown,
-	GamepadL1,
-	GamepadR1,
-	GamepadL2,
-	GamepadR2,
-	GamepadL3,
-	GamepadR3,
-	GamepadLStickLeft,
-	GamepadLStickRight,
-	GamepadLStickUp,
-	GamepadLStickDown,
-	GamepadRStickLeft,
-	GamepadRStickRight,
-	GamepadRStickUp,
-	GamepadRStickDown,
+	// Gamepad (some of those are analog values, 0.0f to 1.0f)                          // NAVIGATION ACTION
+	// (download controller mapping PNG/PSD at http://dearimgui.com/controls_sheets)
+	GamepadStart,       // Menu (Xbox)      + (Switch)   Start/Options (PS)
+	GamepadBack,        // View (Xbox)      - (Switch)   Share (PS)
+	GamepadFaceLeft,    // X (Xbox)         Y (Switch)   Square (PS)        // Tap: Toggle Menu. Hold: Windowing mode (Focus/Move/Resize windows)
+	GamepadFaceRight,   // B (Xbox)         A (Switch)   Circle (PS)        // Cancel / Close / Exit
+	GamepadFaceUp,      // Y (Xbox)         X (Switch)   Triangle (PS)      // Text Input / On-screen Keyboard
+	GamepadFaceDown,    // A (Xbox)         B (Switch)   Cross (PS)         // Activate / Open / Toggle / Tweak
+	GamepadDpadLeft,    // D-pad Left                                       // Move / Tweak / Resize Window (in Windowing mode)
+	GamepadDpadRight,   // D-pad Right                                      // Move / Tweak / Resize Window (in Windowing mode)
+	GamepadDpadUp,      // D-pad Up                                         // Move / Tweak / Resize Window (in Windowing mode)
+	GamepadDpadDown,    // D-pad Down                                       // Move / Tweak / Resize Window (in Windowing mode)
+	GamepadL1,          // L Bumper (Xbox)  L (Switch)   L1 (PS)            // Tweak Slower / Focus Previous (in Windowing mode)
+	GamepadR1,          // R Bumper (Xbox)  R (Switch)   R1 (PS)            // Tweak Faster / Focus Next (in Windowing mode)
+	GamepadL2,          // L Trig. (Xbox)   ZL (Switch)  L2 (PS) [Analog]
+	GamepadR2,          // R Trig. (Xbox)   ZR (Switch)  R2 (PS) [Analog]
+	GamepadL3,          // L Stick (Xbox)   L3 (Switch)  L3 (PS)
+	GamepadR3,          // R Stick (Xbox)   R3 (Switch)  R3 (PS)
+	GamepadLStickLeft,  // [Analog]                                         // Move Window (in Windowing mode)
+	GamepadLStickRight, // [Analog]                                         // Move Window (in Windowing mode)
+	GamepadLStickUp,    // [Analog]                                         // Move Window (in Windowing mode)
+	GamepadLStickDown,  // [Analog]                                         // Move Window (in Windowing mode)
+	GamepadRStickLeft,  // [Analog]
+	GamepadRStickRight, // [Analog]
+	GamepadRStickUp,    // [Analog]
+	GamepadRStickDown,  // [Analog]
+	// Aliases: Mouse Buttons (auto-submitted from AddMouseButtonEvent() calls)
+	// - This is mirroring the data also written to io.MouseDown[], io.MouseWheel, in a format allowing them to be accessed via standard key API.
 	MouseLeft,
 	MouseRight,
 	MouseMiddle,
@@ -522,24 +542,29 @@ Key :: enum c.int {
 	MouseX2,
 	MouseWheelX,
 	MouseWheelY,
+	// [Internal] Reserved for mod storage
 	ReservedForModCtrl,
 	ReservedForModShift,
 	ReservedForModAlt,
 	ReservedForModSuper,
 	NamedKey_END,
+	// Keyboard Modifiers (explicitly submitted by backend via AddKeyEvent() calls)
+	// - This is mirroring the data also written to io.KeyCtrl, io.KeyShift, io.KeyAlt, io.KeySuper, in a format allowing
+	//   them to be accessed via standard key API, allowing calls such as IsKeyPressed(), IsKeyReleased(), querying duration etc.
+	// - Code polling every key (e.g. an interface to detect a key press for input mapping) might want to ignore those
+	//   and prefer using the real keys (e.g. ImGuiKey_LeftCtrl, ImGuiKey_RightCtrl instead of ImGuiMod_Ctrl).
+	// - In theory the value of keyboard modifiers should be roughly equivalent to a logical or of the equivalent left/right keys.
+	//   In practice: it's complicated; mods are often provided from different sources. Keyboard layout, IME, sticky keys and
+	//   backends tend to interfere and break that equivalence. The safer decision is to relay that ambiguity down to the end-user...
+	// - On macOS, we swap Cmd(Super) and Ctrl keys at the time of the io.AddKeyEvent() call.
 	ImGuiMod_None = 0,
-	ImGuiMod_Ctrl = 1<<12,
-	ImGuiMod_Shift = 1<<13,
-	ImGuiMod_Alt = 1<<14,
-	ImGuiMod_Super = 1<<15,
-	ImGuiMod_Mask_ = 0xF000,
-	// NamedKey_COUNT = Key.NamedKey_END-ImGuiKey_NamedKey_BEGIN,
-	// COUNT = Key.NamedKey_END,
-	// ImGuiMod_Shortcut = Key.ImGuiMod_Ctrl,
-	// ModCtrl = Key.ImGuiMod_Ctrl,
-	// ModShift = Key.ImGuiMod_Shift,
-	// ModAlt = Key.ImGuiMod_Alt,
-	// ModSuper = Key.ImGuiMod_Super,
+	ImGuiMod_Ctrl = 4096,   // Ctrl (non-macOS), Cmd (macOS)
+	ImGuiMod_Shift = 8192,  // Shift
+	ImGuiMod_Alt = 16384,   // Option/Menu
+	ImGuiMod_Super = 32768, // Windows/Super (non-macOS), Ctrl (macOS)
+	ImGuiMod_Mask_ = 61440, // 4-bits
+	// [Internal] If you need to iterate all keys (for e.g. an input mapper) you may use ImGuiKey_NamedKey_BEGIN..ImGuiKey_NamedKey_END.
+	NamedKey_COUNT = 154,
 }
 
 // Flags for Shortcut(), SetNextItemShortcut(),
@@ -581,10 +606,8 @@ ConfigFlag :: enum c.int {
 	DpiEnableScaleViewports = 14, // [BETA: Don't use] FIXME-DPI: Reposition and resize imgui windows when the DpiScale of a viewport changed (mostly useful for the main viewport hosting other window). Note that resizing the main window itself is up to your application.
 	DpiEnableScaleFonts     = 15, // [BETA: Don't use] FIXME-DPI: Request bitmap-scaled fonts to match DpiScale. This is a very low-quality workaround. The correct way to handle DPI is _currently_ to replace the atlas and/or fonts in the Platform_OnChangedViewport callback, but this is all early work in progress.
 	// User storage (to allow your backend/engine to communicate to code that may be shared between multiple projects. Those flags are NOT used by core Dear ImGui)
-	IsSRGB               = 20, // Application is SRGB-aware.
-	IsTouchScreen        = 21, // Application is using a touch screen instead of a mouse.
-	NavEnableSetMousePos = 2,  // [moved/renamed in 1.91.4] -> use bool io.ConfigNavMoveSetMousePos
-	NavNoCaptureKeyboard = 3,  // [moved/renamed in 1.91.4] -> use bool io.ConfigNavCaptureKeyboard
+	IsSRGB        = 20, // Application is SRGB-aware.
+	IsTouchScreen = 21, // Application is using a touch screen instead of a mouse.
 }
 
 
@@ -602,109 +625,113 @@ BackendFlag :: enum c.int {
 }
 
 
+// Enumeration for PushStyleColor() / PopStyleColor()
 Col :: enum c.int {
 	Text,
 	TextDisabled,
-	WindowBg,
-	ChildBg,
-	PopupBg,
+	WindowBg,                  // Background of normal windows
+	ChildBg,                   // Background of child windows
+	PopupBg,                   // Background of popups, menus, tooltips windows
 	Border,
 	BorderShadow,
-	FrameBg,
+	FrameBg,                   // Background of checkbox, radio button, plot, slider, text input
 	FrameBgHovered,
 	FrameBgActive,
-	TitleBg,
-	TitleBgActive,
-	TitleBgCollapsed,
+	TitleBg,                   // Title bar
+	TitleBgActive,             // Title bar when focused
+	TitleBgCollapsed,          // Title bar when collapsed
 	MenuBarBg,
 	ScrollbarBg,
 	ScrollbarGrab,
 	ScrollbarGrabHovered,
 	ScrollbarGrabActive,
-	CheckMark,
+	CheckMark,                 // Checkbox tick and RadioButton circle
 	SliderGrab,
 	SliderGrabActive,
 	Button,
 	ButtonHovered,
 	ButtonActive,
-	Header,
+	Header,                    // Header* colors are used for CollapsingHeader, TreeNode, Selectable, MenuItem
 	HeaderHovered,
 	HeaderActive,
 	Separator,
 	SeparatorHovered,
 	SeparatorActive,
-	ResizeGrip,
+	ResizeGrip,                // Resize grip in lower-right and lower-left corners of windows.
 	ResizeGripHovered,
 	ResizeGripActive,
-	TabHovered,
-	Tab,
-	TabSelected,
-	TabSelectedOverline,
-	TabDimmed,
-	TabDimmedSelected,
-	TabDimmedSelectedOverline,
-	DockingPreview,
-	DockingEmptyBg,
+	TabHovered,                // Tab background, when hovered
+	Tab,                       // Tab background, when tab-bar is focused & tab is unselected
+	TabSelected,               // Tab background, when tab-bar is focused & tab is selected
+	TabSelectedOverline,       // Tab horizontal overline, when tab-bar is focused & tab is selected
+	TabDimmed,                 // Tab background, when tab-bar is unfocused & tab is unselected
+	TabDimmedSelected,         // Tab background, when tab-bar is unfocused & tab is selected
+	TabDimmedSelectedOverline, //..horizontal overline, when tab-bar is unfocused & tab is selected
+	DockingPreview,            // Preview overlay color when about to docking something
+	DockingEmptyBg,            // Background color for empty node (e.g. CentralNode with no window docked into it)
 	PlotLines,
 	PlotLinesHovered,
 	PlotHistogram,
 	PlotHistogramHovered,
-	TableHeaderBg,
-	TableBorderStrong,
-	TableBorderLight,
-	TableRowBg,
-	TableRowBgAlt,
-	TextLink,
+	TableHeaderBg,             // Table header background
+	TableBorderStrong,         // Table outer and header borders (prefer using Alpha=1.0 here)
+	TableBorderLight,          // Table inner borders (prefer using Alpha=1.0 here)
+	TableRowBg,                // Table row background (even rows)
+	TableRowBgAlt,             // Table row background (odd rows)
+	TextLink,                  // Hyperlink color
 	TextSelectedBg,
-	DragDropTarget,
-	NavCursor,
-	NavWindowingHighlight,
-	NavWindowingDimBg,
-	ModalWindowDimBg,
+	DragDropTarget,            // Rectangle highlighting a drop target
+	NavCursor,                 // Color of keyboard/gamepad navigation cursor/rectangle, when visible
+	NavWindowingHighlight,     // Highlight window when using CTRL+TAB
+	NavWindowingDimBg,         // Darken/colorize entire screen behind the CTRL+TAB window list, when active
+	ModalWindowDimBg,          // Darken/colorize entire screen behind a modal window, when one is active
 	COUNT,
-	// Some of the next enum values are self referential, which currently causes issues
-	// Search for this in the generator for more info.
-	// TabActive = Col.TabSelected,
-	// TabUnfocused = Col.TabDimmed,
-	// TabUnfocusedActive = Col.TabDimmedSelected,
-	// NavHighlight = Col.NavCursor,
 }
 
+// Enumeration for PushStyleVar() / PopStyleVar() to temporarily modify the ImGuiStyle structure.
+// - The enum only refers to fields of ImGuiStyle which makes sense to be pushed/popped inside UI code.
+//   During initialization or between frames, feel free to just poke into ImGuiStyle directly.
+// - Tip: Use your programming IDE navigation facilities on the names in the _second column_ below to find the actual members and their description.
+//   - In Visual Studio: CTRL+comma ("Edit.GoToAll") can follow symbols inside comments, whereas CTRL+F12 ("Edit.GoToImplementation") cannot.
+//   - In Visual Studio w/ Visual Assist installed: ALT+G ("VAssistX.GoToImplementation") can also follow symbols inside comments.
+//   - In VS Code, CLion, etc.: CTRL+click can follow symbols inside comments.
+// - When changing this enum, you need to update the associated internal table GStyleVarInfo[] accordingly. This is where we link enum values to members offset/type.
 StyleVar :: enum c.int {
-	Alpha,
-	DisabledAlpha,
-	WindowPadding,
-	WindowRounding,
-	WindowBorderSize,
-	WindowMinSize,
-	WindowTitleAlign,
-	ChildRounding,
-	ChildBorderSize,
-	PopupRounding,
-	PopupBorderSize,
-	FramePadding,
-	FrameRounding,
-	FrameBorderSize,
-	ItemSpacing,
-	ItemInnerSpacing,
-	IndentSpacing,
-	CellPadding,
-	ScrollbarSize,
-	ScrollbarRounding,
-	GrabMinSize,
-	GrabRounding,
-	TabRounding,
-	TabBorderSize,
-	TabBarBorderSize,
-	TabBarOverlineSize,
-	TableAngledHeadersAngle,
-	TableAngledHeadersTextAlign,
-	ButtonTextAlign,
-	SelectableTextAlign,
-	SeparatorTextBorderSize,
-	SeparatorTextAlign,
-	SeparatorTextPadding,
-	DockingSeparatorSize,
+	// Enum name -------------------------- // Member in ImGuiStyle structure (see ImGuiStyle for descriptions)
+	Alpha,                       // float     Alpha
+	DisabledAlpha,               // float     DisabledAlpha
+	WindowPadding,               // ImVec2    WindowPadding
+	WindowRounding,              // float     WindowRounding
+	WindowBorderSize,            // float     WindowBorderSize
+	WindowMinSize,               // ImVec2    WindowMinSize
+	WindowTitleAlign,            // ImVec2    WindowTitleAlign
+	ChildRounding,               // float     ChildRounding
+	ChildBorderSize,             // float     ChildBorderSize
+	PopupRounding,               // float     PopupRounding
+	PopupBorderSize,             // float     PopupBorderSize
+	FramePadding,                // ImVec2    FramePadding
+	FrameRounding,               // float     FrameRounding
+	FrameBorderSize,             // float     FrameBorderSize
+	ItemSpacing,                 // ImVec2    ItemSpacing
+	ItemInnerSpacing,            // ImVec2    ItemInnerSpacing
+	IndentSpacing,               // float     IndentSpacing
+	CellPadding,                 // ImVec2    CellPadding
+	ScrollbarSize,               // float     ScrollbarSize
+	ScrollbarRounding,           // float     ScrollbarRounding
+	GrabMinSize,                 // float     GrabMinSize
+	GrabRounding,                // float     GrabRounding
+	TabRounding,                 // float     TabRounding
+	TabBorderSize,               // float     TabBorderSize
+	TabBarBorderSize,            // float     TabBarBorderSize
+	TabBarOverlineSize,          // float     TabBarOverlineSize
+	TableAngledHeadersAngle,     // float     TableAngledHeadersAngle
+	TableAngledHeadersTextAlign, // ImVec2  TableAngledHeadersTextAlign
+	ButtonTextAlign,             // ImVec2    ButtonTextAlign
+	SelectableTextAlign,         // ImVec2    SelectableTextAlign
+	SeparatorTextBorderSize,     // float     SeparatorTextBorderSize
+	SeparatorTextAlign,          // ImVec2    SeparatorTextAlign
+	SeparatorTextPadding,        // ImVec2    SeparatorTextPadding
+	DockingSeparatorSize,        // float     DockingSeparatorSize
 	COUNT,
 }
 
@@ -774,40 +801,51 @@ SliderFlag :: enum c.int {
 SliderFlags_AlwaysClamp  :: SliderFlags{.ClampOnInput,.ClampZeroRange}
 SliderFlags_InvalidMask_ :: c.int(0x7000000F) // Meant to be of type SliderFlags // [Internal] We treat using those bits as being potentially a 'float power' argument from the previous API that has got miscast to this enum, and will trigger an assert if needed.
 
+// Identify a mouse button.
+// Those values are guaranteed to be stable and we frequently use 0/1 directly. Named enums provided for convenience.
 MouseButton :: enum c.int {
-	Left = 0,
-	Right = 1,
-	Middle = 2,
+	Left,
+	Right,
+	Middle,
 	COUNT = 5,
 }
 
+// Enumeration for GetMouseCursor()
+// User code may request backend to display given cursor by calling SetMouseCursor(), which is why we have some cursors that are marked unused here
 MouseCursor :: enum c.int {
 	None = -1,
-	Arrow = 0,
-	TextInput,
-	ResizeAll,
-	ResizeNS,
-	ResizeEW,
-	ResizeNESW,
-	ResizeNWSE,
-	Hand,
-	NotAllowed,
+	Arrow,
+	TextInput,  // When hovering over InputText, etc.
+	ResizeAll,  // (Unused by Dear ImGui functions)
+	ResizeNS,   // When hovering over a horizontal border
+	ResizeEW,   // When hovering over a vertical border or a column
+	ResizeNESW, // When hovering over the bottom-left corner of a window
+	ResizeNWSE, // When hovering over the bottom-right corner of a window
+	Hand,       // (Unused by Dear ImGui functions. Use for e.g. hyperlinks)
+	NotAllowed, // When hovering something with disallowed interaction. Usually a crossed circle.
 	COUNT,
 }
 
-MouseSource :: enum c.int {
-	Mouse = 0,
-	TouchScreen,
-	Pen,
+// Enumeration for AddMouseSourceEvent() actual source of Mouse Input data.
+// Historically we use "Mouse" terminology everywhere to indicate pointer data, e.g. MousePos, IsMousePressed(), io.AddMousePosEvent()
+// But that "Mouse" data can come from different source which occasionally may be useful for application to know about.
+// You can submit a change of pointer type using io.AddMouseSourceEvent().
+MouseSource :: enum c.int { // Forward declared enum type ImGuiMouseSource
+	Mouse,       // Input is coming from an actual mouse.
+	TouchScreen, // Input is coming from a touch screen (no hovering prior to initial press, less precise initial press aiming, dual-axis wheeling possible).
+	Pen,         // Input is coming from a pressure/magnetic pen (often used in conjunction with high-sampling rates).
 	COUNT,
 }
 
+// Enumeration for ImGui::SetNextWindow***(), SetWindow***(), SetNextItem***() functions
+// Represent a condition.
+// Important: Treat as a regular enum! Do NOT combine multiple values using binary operators! All the functions above treat 0 as a shortcut to ImGuiCond_Always.
 Cond :: enum c.int {
-	None = 0,
-	Always = 1<<0,
-	Once = 1<<1,
-	FirstUseEver = 1<<2,
-	Appearing = 1<<3,
+	None,             // No condition (always set the variable), same as _Always
+	Always,           // No condition (always set the variable), same as _None
+	Once,             // Set the variable once per runtime session (only the first call will succeed)
+	FirstUseEver = 4, // Set the variable if the object/window has no persistently saved data (no entry in .ini file)
+	Appearing = 8,    // Set the variable if the object/window is appearing after being hidden/inactive (or the first time)
 }
 
 // Flags for ImGui::BeginTable()
@@ -923,11 +961,20 @@ TableRowFlag :: enum c.int {
 }
 
 
+// Enum for ImGui::TableSetBgColor()
+// Background colors are rendering in 3 layers:
+//  - Layer 0: draw with RowBg0 color if set, otherwise draw with ColumnBg0 if set.
+//  - Layer 1: draw with RowBg1 color if set, otherwise draw with ColumnBg1 if set.
+//  - Layer 2: draw with CellBg color if set.
+// The purpose of the two row/columns layers is to let you decide if a background color change should override or blend with the existing color.
+// When using ImGuiTableFlags_RowBg on the table, each row has the RowBg0 color automatically set for odd/even rows.
+// If you set the color of RowBg0 target, your color will override the existing RowBg0 color.
+// If you set the color of RowBg1 or ColumnBg1 target, your color will blend over the RowBg0 color.
 TableBgTarget :: enum c.int {
-	None = 0,
-	RowBg0 = 1,
-	RowBg1 = 2,
-	CellBg = 3,
+	None,
+	RowBg0, // Set row background color 0 (generally used for background, automatically set when ImGuiTableFlags_RowBg is used)
+	RowBg1, // Set row background color 1 (generally used for selection marking)
+	CellBg, // Set cell background color (top-most color)
 }
 
 // Flags for BeginMultiSelect()
@@ -953,10 +1000,11 @@ MultiSelectFlag :: enum c.int {
 }
 
 
+// Selection request type
 SelectionRequestType :: enum c.int {
-	None = 0,
-	SetAll,
-	SetRange,
+	None,
+	SetAll,   // Request app to clear selection (if Selected==false) or select all items (if Selected==true). We cannot set RangeFirstItem/RangeLastItem as its contents is entirely up to user (not necessarily an index)
+	SetRange, // Request app to select/unselect [RangeFirstItem..RangeLastItem] items (inclusive) based on value of Selected. Only EndMultiSelect() request this, app code can read after BeginMultiSelect() and it will always be false.
 }
 
 // Flags for ImDrawList functions
@@ -1022,15 +1070,6 @@ ViewportFlag :: enum c.int {
 ////////////////////////////////////////////////////////////
 // STRUCTS
 ////////////////////////////////////////////////////////////
-
-DrawListSharedData :: struct { // Data shared among multiple draw lists (typically owned by parent ImGui context, but you may create one yourself)
-}
-
-FontBuilderIO :: struct { // Opaque interface to a font builder (stb_truetype or FreeType).
-}
-
-Context :: struct { // Dear ImGui context (opaque structure, unless including imgui_internal.h)
-}
 
 Vec2 :: [2]f32
 Vec4 :: [4]f32
@@ -1380,33 +1419,30 @@ IO :: struct {
 	KeyAlt:               bool,        // Keyboard modifier down: Alt
 	KeySuper:             bool,        // Keyboard modifier down: Cmd/Super/Windows
 	// Other state maintained from data above + IO function calls
-	KeyMods:                          KeyChord,                                    // Key mods flags (any of ImGuiMod_Ctrl/ImGuiMod_Shift/ImGuiMod_Alt/ImGuiMod_Super flags, same as io.KeyCtrl/KeyShift/KeyAlt/KeySuper but merged into flags. Read-only, updated by NewFrame()
-	KeysData:                         [Key.NamedKey_END - Key.NamedKey_BEGIN]KeyData,// Key state for all known keys. Use IsKeyXXX() functions to access this.
-	WantCaptureMouseUnlessPopupClose: bool,                                        // Alternative to WantCaptureMouse: (WantCaptureMouse == true && WantCaptureMouseUnlessPopupClose == false) when a click over void is expected to close a popup.
-	MousePosPrev:                     Vec2,                                        // Previous mouse position (note that MouseDelta is not necessary == MousePos-MousePosPrev, in case either position is invalid)
-	MouseClickedPos:                  [5]Vec2,                                     // Position at time of clicking
-	MouseClickedTime:                 [5]f64,                                      // Time of last click (used to figure out double-click)
-	MouseClicked:                     [5]bool,                                     // Mouse button went from !Down to Down (same as MouseClickedCount[x] != 0)
-	MouseDoubleClicked:               [5]bool,                                     // Has mouse button been double-clicked? (same as MouseClickedCount[x] == 2)
-	MouseClickedCount:                [5]u16,                                      // == 0 (not clicked), == 1 (same as MouseClicked[]), == 2 (double-clicked), == 3 (triple-clicked) etc. when going from !Down to Down
-	MouseClickedLastCount:            [5]u16,                                      // Count successive number of clicks. Stays valid after mouse release. Reset after another click is done.
-	MouseReleased:                    [5]bool,                                     // Mouse button went from Down to !Down
-	MouseDownOwned:                   [5]bool,                                     // Track if button was clicked inside a dear imgui window or over void blocked by a popup. We don't request mouse capture from the application if click started outside ImGui bounds.
-	MouseDownOwnedUnlessPopupClose:   [5]bool,                                     // Track if button was clicked inside a dear imgui window.
-	MouseWheelRequestAxisSwap:        bool,                                        // On a non-Mac system, holding SHIFT requests WheelY to perform the equivalent of a WheelX event. On a Mac system this is already enforced by the system.
-	MouseCtrlLeftAsRightClick:        bool,                                        // (OSX) Set to true when the current click was a ctrl-click that spawned a simulated right click
-	MouseDownDuration:                [5]f32,                                      // Duration the mouse button has been down (0.0f == just clicked)
-	MouseDownDurationPrev:            [5]f32,                                      // Previous time the mouse button has been down
-	MouseDragMaxDistanceAbs:          [5]Vec2,                                     // Maximum distance, absolute, on each axis, of how much mouse has traveled from the clicking point
-	MouseDragMaxDistanceSqr:          [5]f32,                                      // Squared maximum distance of how much mouse has traveled from the clicking point (used for moving thresholds)
-	PenPressure:                      f32,                                         // Touch/Pen pressure (0.0f to 1.0f, should be >0.0f only when MouseDown[0] == true). Helper storage currently unused by Dear ImGui.
-	AppFocusLost:                     bool,                                        // Only modify via AddFocusEvent()
-	AppAcceptingEvents:               bool,                                        // Only modify via SetAppAcceptingEvents()
-	InputQueueSurrogate:              Wchar16,                                     // For AddInputCharacterUTF16()
-	InputQueueCharacters:             Vector_Wchar,                                // Queue of _characters_ input (obtained by platform backend). Fill using AddInputCharacter() helper.
-	GetClipboardTextFn:               proc "c" (user_data: rawptr) -> cstring,
-	SetClipboardTextFn:               proc "c" (user_data: rawptr, text: cstring),
-	ClipboardUserData:                rawptr,
+	KeyMods:                          KeyChord,                    // Key mods flags (any of ImGuiMod_Ctrl/ImGuiMod_Shift/ImGuiMod_Alt/ImGuiMod_Super flags, same as io.KeyCtrl/KeyShift/KeyAlt/KeySuper but merged into flags. Read-only, updated by NewFrame()
+	KeysData:                         [Key.NamedKey_COUNT]KeyData, // Key state for all known keys. Use IsKeyXXX() functions to access this.
+	WantCaptureMouseUnlessPopupClose: bool,                        // Alternative to WantCaptureMouse: (WantCaptureMouse == true && WantCaptureMouseUnlessPopupClose == false) when a click over void is expected to close a popup.
+	MousePosPrev:                     Vec2,                        // Previous mouse position (note that MouseDelta is not necessary == MousePos-MousePosPrev, in case either position is invalid)
+	MouseClickedPos:                  [5]Vec2,                     // Position at time of clicking
+	MouseClickedTime:                 [5]f64,                      // Time of last click (used to figure out double-click)
+	MouseClicked:                     [5]bool,                     // Mouse button went from !Down to Down (same as MouseClickedCount[x] != 0)
+	MouseDoubleClicked:               [5]bool,                     // Has mouse button been double-clicked? (same as MouseClickedCount[x] == 2)
+	MouseClickedCount:                [5]u16,                      // == 0 (not clicked), == 1 (same as MouseClicked[]), == 2 (double-clicked), == 3 (triple-clicked) etc. when going from !Down to Down
+	MouseClickedLastCount:            [5]u16,                      // Count successive number of clicks. Stays valid after mouse release. Reset after another click is done.
+	MouseReleased:                    [5]bool,                     // Mouse button went from Down to !Down
+	MouseDownOwned:                   [5]bool,                     // Track if button was clicked inside a dear imgui window or over void blocked by a popup. We don't request mouse capture from the application if click started outside ImGui bounds.
+	MouseDownOwnedUnlessPopupClose:   [5]bool,                     // Track if button was clicked inside a dear imgui window.
+	MouseWheelRequestAxisSwap:        bool,                        // On a non-Mac system, holding SHIFT requests WheelY to perform the equivalent of a WheelX event. On a Mac system this is already enforced by the system.
+	MouseCtrlLeftAsRightClick:        bool,                        // (OSX) Set to true when the current click was a ctrl-click that spawned a simulated right click
+	MouseDownDuration:                [5]f32,                      // Duration the mouse button has been down (0.0f == just clicked)
+	MouseDownDurationPrev:            [5]f32,                      // Previous time the mouse button has been down
+	MouseDragMaxDistanceAbs:          [5]Vec2,                     // Maximum distance, absolute, on each axis, of how much mouse has traveled from the clicking point
+	MouseDragMaxDistanceSqr:          [5]f32,                      // Squared maximum distance of how much mouse has traveled from the clicking point (used for moving thresholds)
+	PenPressure:                      f32,                         // Touch/Pen pressure (0.0f to 1.0f, should be >0.0f only when MouseDown[0] == true). Helper storage currently unused by Dear ImGui.
+	AppFocusLost:                     bool,                        // Only modify via AddFocusEvent()
+	AppAcceptingEvents:               bool,                        // Only modify via SetAppAcceptingEvents()
+	InputQueueSurrogate:              Wchar16,                     // For AddInputCharacterUTF16()
+	InputQueueCharacters:             Vector_Wchar,                // Queue of _characters_ input (obtained by platform backend). Fill using AddInputCharacter() helper.
 }
 
 // Shared state of InputText(), passed as an argument to your callback when a ImGuiInputTextFlags_Callback* flag is used.
@@ -1771,7 +1807,7 @@ FontAtlasCustomRect :: struct {
 	GlyphColored:  c.uint,   // Input  // For custom font glyphs only: glyph is colored, removed tinting.
 	GlyphAdvanceX: f32,      // Input    // For custom font glyphs only: glyph xadvance
 	GlyphOffset:   Vec2,     // Input    // For custom font glyphs only: glyph display offset
-	Font:          ^Font,    // Input    // For custom font glyphs only: target font
+	Font_:         ^Font,    // Input    // For custom font glyphs only: target font
 }
 
 // Load and rasterize multiple TTF/OTF fonts into a same texture. The font atlas will build a single texture holding:
@@ -1857,7 +1893,7 @@ Font :: struct {
 //   - Work Area = entire viewport minus sections used by main menu bars (for platform windows), or by task bar (for platform monitor).
 //   - Windows are generally trying to stay within the Work Area of their host viewport.
 Viewport :: struct {
-	_ID:              ID,            // Unique identifier for the viewport
+	ID_:              ID,            // Unique identifier for the viewport
 	Flags:            ViewportFlags, // See ImGuiViewportFlags_
 	Pos:              Vec2,          // Main Area: Position of the viewport (Dear ImGui coordinates are the same as OS desktop/native coordinates)
 	Size:             Vec2,          // Main Area: Size of the viewport.
@@ -1865,7 +1901,7 @@ Viewport :: struct {
 	WorkSize:         Vec2,          // Work Area: Size of the viewport minus task bars, menu bars, status bars (<= Size)
 	DpiScale:         f32,           // 1.0f = 96 DPI = No extra scale.
 	ParentViewportId: ID,            // (Advanced) 0: no parent. Instruct the platform backend to setup a parent/child relationship between platform windows.
-	DrawData:         ^DrawData,     // The ImDrawData corresponding to this viewport. Valid after Render() and until the next call to NewFrame().
+	DrawData_:        ^DrawData,     // The ImDrawData corresponding to this viewport. Valid after Render() and until the next call to NewFrame().
 	// Platform/Backend Dependent Data
 	// Our design separate the Renderer and Platform backends to facilitate combining default backends with each others.
 	// When our create your own backend for a custom engine, it is possible that both Renderer and Platform will be handled
@@ -1959,6 +1995,7 @@ PlatformImeData :: struct {
 // FUNCTIONS
 ////////////////////////////////////////////////////////////
 
+@(default_calling_convention="c")
 foreign lib {
 	// Context creation and access
 	// - Each context create its own ImFontAtlas by default. You may instance one yourself and pass it to CreateContext() to share a font atlas between contexts.
@@ -1977,16 +2014,16 @@ foreign lib {
 	@(link_name="ImGui_Render")        Render        :: proc()                --- // ends the Dear ImGui frame, finalize the draw data. You can then get call GetDrawData().
 	@(link_name="ImGui_GetDrawData")   GetDrawData   :: proc() -> ^DrawData   --- // valid after Render() and until the next call to NewFrame(). this is what you have to render.
 	// Demo, Debug, Information
-	@(link_name="ImGui_ShowDemoWindow")          ShowDemoWindow        :: proc(p_open: ^bool = nil)    --- // create Demo window. demonstrate most ImGui features. call this to learn about the library! try to make it always available in your application!
-	@(link_name="ImGui_ShowMetricsWindow")       ShowMetricsWindow     :: proc(p_open: ^bool = nil)    --- // create Metrics/Debugger window. display Dear ImGui internals: windows, draw commands, various internal state, etc.
-	@(link_name="ImGui_ShowDebugLogWindow")      ShowDebugLogWindow    :: proc(p_open: ^bool = nil)    --- // create Debug Log window. display a simplified log of important dear imgui events.
-	@(link_name="ImGui_ShowIDStackToolWindowEx") ShowIDStackToolWindow :: proc(p_open: ^bool = nil)    --- // create Stack Tool window. hover items with mouse to query information about the source of their unique ID.
-	@(link_name="ImGui_ShowAboutWindow")         ShowAboutWindow       :: proc(p_open: ^bool = nil)    --- // create About window. display Dear ImGui version, credits and build/system information.
-	@(link_name="ImGui_ShowStyleEditor")         ShowStyleEditor       :: proc(ref: ^Style = nil)      --- // add style editor block (not a window). you can pass in a reference ImGuiStyle structure to compare to, revert to and save to (else it uses the default style)
-	@(link_name="ImGui_ShowStyleSelector")       ShowStyleSelector     :: proc(label: cstring) -> bool --- // add style selector block (not a window), essentially a combo listing the default styles.
-	@(link_name="ImGui_ShowFontSelector")        ShowFontSelector      :: proc(label: cstring)         --- // add font selector block (not a window), essentially a combo listing the loaded fonts.
-	@(link_name="ImGui_ShowUserGuide")           ShowUserGuide         :: proc()                       --- // add basic help/info block (not a window): how to manipulate ImGui as an end-user (mouse/keyboard controls).
-	@(link_name="ImGui_GetVersion")              GetVersion            :: proc() -> cstring            --- // get the compiled version string e.g. "1.80 WIP" (essentially the value for IMGUI_VERSION from the compiled version of imgui.cpp)
+	@(link_name="ImGui_ShowDemoWindow")        ShowDemoWindow        :: proc(p_open: ^bool = nil)    --- // create Demo window. demonstrate most ImGui features. call this to learn about the library! try to make it always available in your application!
+	@(link_name="ImGui_ShowMetricsWindow")     ShowMetricsWindow     :: proc(p_open: ^bool = nil)    --- // create Metrics/Debugger window. display Dear ImGui internals: windows, draw commands, various internal state, etc.
+	@(link_name="ImGui_ShowDebugLogWindow")    ShowDebugLogWindow    :: proc(p_open: ^bool = nil)    --- // create Debug Log window. display a simplified log of important dear imgui events.
+	@(link_name="ImGui_ShowIDStackToolWindow") ShowIDStackToolWindow :: proc(p_open: ^bool = nil)    --- // create Stack Tool window. hover items with mouse to query information about the source of their unique ID.
+	@(link_name="ImGui_ShowAboutWindow")       ShowAboutWindow       :: proc(p_open: ^bool = nil)    --- // create About window. display Dear ImGui version, credits and build/system information.
+	@(link_name="ImGui_ShowStyleEditor")       ShowStyleEditor       :: proc(ref: ^Style = nil)      --- // add style editor block (not a window). you can pass in a reference ImGuiStyle structure to compare to, revert to and save to (else it uses the default style)
+	@(link_name="ImGui_ShowStyleSelector")     ShowStyleSelector     :: proc(label: cstring) -> bool --- // add style selector block (not a window), essentially a combo listing the default styles.
+	@(link_name="ImGui_ShowFontSelector")      ShowFontSelector      :: proc(label: cstring)         --- // add font selector block (not a window), essentially a combo listing the loaded fonts.
+	@(link_name="ImGui_ShowUserGuide")         ShowUserGuide         :: proc()                       --- // add basic help/info block (not a window): how to manipulate ImGui as an end-user (mouse/keyboard controls).
+	@(link_name="ImGui_GetVersion")            GetVersion            :: proc() -> cstring            --- // get the compiled version string e.g. "1.80 WIP" (essentially the value for IMGUI_VERSION from the compiled version of imgui.cpp)
 	// Styles
 	@(link_name="ImGui_StyleColorsDark")    StyleColorsDark    :: proc(dst: ^Style = nil) --- // new, recommended style (default)
 	@(link_name="ImGui_StyleColorsLight")   StyleColorsLight   :: proc(dst: ^Style = nil) --- // best used with borders and a custom, thicker font
@@ -2028,18 +2065,20 @@ foreign lib {
 	@(link_name="ImGui_EndChild")     EndChild     :: proc()                                                                                                           ---
 	// Windows Utilities
 	// - 'current window' = the window we are appending into while inside a Begin()/End() block. 'next window' = next window we will Begin() into.
-	@(link_name="ImGui_IsWindowAppearing")            IsWindowAppearing            :: proc() -> bool                                                                                                ---
-	@(link_name="ImGui_IsWindowCollapsed")            IsWindowCollapsed            :: proc() -> bool                                                                                                ---
-	@(link_name="ImGui_IsWindowFocused")              IsWindowFocused              :: proc(flags: FocusedFlags = {}) -> bool                                                                        --- // is current window focused? or its root/child, depending on flags. see flags for options.
-	@(link_name="ImGui_IsWindowHovered")              IsWindowHovered              :: proc(flags: HoveredFlags = {}) -> bool                                                                        --- // is current window hovered and hoverable (e.g. not blocked by a popup/modal)? See ImGuiHoveredFlags_ for options. IMPORTANT: If you are trying to check whether your mouse should be dispatched to Dear ImGui or to your underlying app, you should not use this function! Use the 'io.WantCaptureMouse' boolean for that! Refer to FAQ entry "How can I tell whether to dispatch mouse/keyboard to Dear ImGui or my application?" for details.
-	@(link_name="ImGui_GetWindowDrawList")            GetWindowDrawList            :: proc() -> ^DrawList                                                                                           --- // get draw list associated to the current window, to append your own drawing primitives
-	@(link_name="ImGui_GetWindowDpiScale")            GetWindowDpiScale            :: proc() -> f32                                                                                                 --- // get DPI scale currently associated to the current window's viewport.
-	@(link_name="ImGui_GetWindowPos")                 GetWindowPos                 :: proc() -> Vec2                                                                                                --- // get current window position in screen space (IT IS UNLIKELY YOU EVER NEED TO USE THIS. Consider always using GetCursorScreenPos() and GetContentRegionAvail() instead)
-	@(link_name="ImGui_GetWindowSize")                GetWindowSize                :: proc() -> Vec2                                                                                                --- // get current window size (IT IS UNLIKELY YOU EVER NEED TO USE THIS. Consider always using GetCursorScreenPos() and GetContentRegionAvail() instead)
-	@(link_name="ImGui_GetWindowWidth")               GetWindowWidth               :: proc() -> f32                                                                                                 --- // get current window width (IT IS UNLIKELY YOU EVER NEED TO USE THIS). Shortcut for GetWindowSize().x.
-	@(link_name="ImGui_GetWindowHeight")              GetWindowHeight              :: proc() -> f32                                                                                                 --- // get current window height (IT IS UNLIKELY YOU EVER NEED TO USE THIS). Shortcut for GetWindowSize().y.
-	@(link_name="ImGui_GetWindowViewport")            GetWindowViewport            :: proc() -> ^Viewport                                                                                           --- // get viewport currently associated to the current window.
-	@(link_name="ImGui_SetNextWindowPosEx")           SetNextWindowPos             :: proc(pos: Vec2, cond: Cond = {}, pivot: Vec2 = {0, 0})                                                        --- // set next window position. call before Begin(). use pivot=(0.5f,0.5f) to center on given point, etc.
+	@(link_name="ImGui_IsWindowAppearing") IsWindowAppearing :: proc() -> bool                         ---
+	@(link_name="ImGui_IsWindowCollapsed") IsWindowCollapsed :: proc() -> bool                         ---
+	@(link_name="ImGui_IsWindowFocused")   IsWindowFocused   :: proc(flags: FocusedFlags = {}) -> bool --- // is current window focused? or its root/child, depending on flags. see flags for options.
+	@(link_name="ImGui_IsWindowHovered")   IsWindowHovered   :: proc(flags: HoveredFlags = {}) -> bool --- // is current window hovered and hoverable (e.g. not blocked by a popup/modal)? See ImGuiHoveredFlags_ for options. IMPORTANT: If you are trying to check whether your mouse should be dispatched to Dear ImGui or to your underlying app, you should not use this function! Use the 'io.WantCaptureMouse' boolean for that! Refer to FAQ entry "How can I tell whether to dispatch mouse/keyboard to Dear ImGui or my application?" for details.
+	@(link_name="ImGui_GetWindowDrawList") GetWindowDrawList :: proc() -> ^DrawList                    --- // get draw list associated to the current window, to append your own drawing primitives
+	@(link_name="ImGui_GetWindowDpiScale") GetWindowDpiScale :: proc() -> f32                          --- // get DPI scale currently associated to the current window's viewport.
+	@(link_name="ImGui_GetWindowPos")      GetWindowPos      :: proc() -> Vec2                         --- // get current window position in screen space (IT IS UNLIKELY YOU EVER NEED TO USE THIS. Consider always using GetCursorScreenPos() and GetContentRegionAvail() instead)
+	@(link_name="ImGui_GetWindowSize")     GetWindowSize     :: proc() -> Vec2                         --- // get current window size (IT IS UNLIKELY YOU EVER NEED TO USE THIS. Consider always using GetCursorScreenPos() and GetContentRegionAvail() instead)
+	@(link_name="ImGui_GetWindowWidth")    GetWindowWidth    :: proc() -> f32                          --- // get current window width (IT IS UNLIKELY YOU EVER NEED TO USE THIS). Shortcut for GetWindowSize().x.
+	@(link_name="ImGui_GetWindowHeight")   GetWindowHeight   :: proc() -> f32                          --- // get current window height (IT IS UNLIKELY YOU EVER NEED TO USE THIS). Shortcut for GetWindowSize().y.
+	@(link_name="ImGui_GetWindowViewport") GetWindowViewport :: proc() -> ^Viewport                    --- // get viewport currently associated to the current window.
+	// Window manipulation
+	// - Prefer using SetNextXXX functions (before Begin) rather that SetXXX functions (after Begin).
+	@(link_name="ImGui_SetNextWindowPos")             SetNextWindowPos             :: proc(pos: Vec2, cond: Cond = {}, pivot: Vec2 = {0, 0})                                                        --- // set next window position. call before Begin(). use pivot=(0.5f,0.5f) to center on given point, etc.
 	@(link_name="ImGui_SetNextWindowSize")            SetNextWindowSize            :: proc(size: Vec2, cond: Cond = {})                                                                             --- // set next window size. set axis to 0.0f to force an auto-fit on this axis. call before Begin()
 	@(link_name="ImGui_SetNextWindowSizeConstraints") SetNextWindowSizeConstraints :: proc(size_min: Vec2, size_max: Vec2, custom_callback: SizeCallback = nil, custom_callback_data: rawptr = nil) --- // set next window size limits. use 0.0f or FLT_MAX if you don't want limits. Use -1 for both min and max of same axis to preserve current size (which itself is a constraint). Use callback to apply non-trivial programmatic constraints.
 	@(link_name="ImGui_SetNextWindowContentSize")     SetNextWindowContentSize     :: proc(size: Vec2)                                                                                              --- // set next window content size (~ scrollable client area, which enforce the range of scrollbars). Not including window decorations (title bar, menu bar, etc.) nor WindowPadding. set an axis to 0.0f to leave it automatic. call before Begin()
@@ -2075,12 +2114,12 @@ foreign lib {
 	@(link_name="ImGui_PopFont")              PopFont              :: proc()                                 ---
 	@(link_name="ImGui_PushStyleColor")       PushStyleColor       :: proc(idx: Col, col: u32)               --- // modify a style color. always use this if you modify the style after NewFrame().
 	@(link_name="ImGui_PushStyleColorImVec4") PushStyleColorImVec4 :: proc(idx: Col, col: Vec4)              ---
-	@(link_name="ImGui_PopStyleColorEx")      PopStyleColor        :: proc(count: c.int = 1)                 ---
+	@(link_name="ImGui_PopStyleColor")        PopStyleColor        :: proc(count: c.int = 1)                 ---
 	@(link_name="ImGui_PushStyleVar")         PushStyleVar         :: proc(idx: StyleVar, val: f32)          --- // modify a style float variable. always use this if you modify the style after NewFrame()!
 	@(link_name="ImGui_PushStyleVarImVec2")   PushStyleVarImVec2   :: proc(idx: StyleVar, val: Vec2)         --- // modify a style ImVec2 variable. "
 	@(link_name="ImGui_PushStyleVarX")        PushStyleVarX        :: proc(idx: StyleVar, val_x: f32)        --- // modify X component of a style ImVec2 variable. "
 	@(link_name="ImGui_PushStyleVarY")        PushStyleVarY        :: proc(idx: StyleVar, val_y: f32)        --- // modify Y component of a style ImVec2 variable. "
-	@(link_name="ImGui_PopStyleVarEx")        PopStyleVar          :: proc(count: c.int = 1)                 ---
+	@(link_name="ImGui_PopStyleVar")          PopStyleVar          :: proc(count: c.int = 1)                 ---
 	@(link_name="ImGui_PushItemFlag")         PushItemFlag         :: proc(option: ItemFlags, enabled: bool) --- // modify specified shared item flag, e.g. PushItemFlag(ImGuiItemFlags_NoTabStop, true)
 	@(link_name="ImGui_PopItemFlag")          PopItemFlag          :: proc()                                 ---
 	// Parameters stacks (current window)
@@ -2095,9 +2134,9 @@ foreign lib {
 	@(link_name="ImGui_GetFont")                GetFont                :: proc() -> ^Font                             --- // get current font
 	@(link_name="ImGui_GetFontSize")            GetFontSize            :: proc() -> f32                               --- // get current font size (= height in pixels) of current font with current scale applied
 	@(link_name="ImGui_GetFontTexUvWhitePixel") GetFontTexUvWhitePixel :: proc() -> Vec2                              --- // get UV coordinate for a white pixel, useful to draw custom shapes via the ImDrawList API
-	@(link_name="ImGui_GetColorU32Ex")          GetColorU32            :: proc(idx: Col, alpha_mul: f32 = 1.0) -> u32 --- // retrieve given style color with style alpha applied and optional extra alpha multiplier, packed as a 32-bit value suitable for ImDrawList
+	@(link_name="ImGui_GetColorU32")            GetColorU32            :: proc(idx: Col, alpha_mul: f32 = 1.0) -> u32 --- // retrieve given style color with style alpha applied and optional extra alpha multiplier, packed as a 32-bit value suitable for ImDrawList
 	@(link_name="ImGui_GetColorU32ImVec4")      GetColorU32ImVec4      :: proc(col: Vec4) -> u32                      --- // retrieve given color with style alpha applied, packed as a 32-bit value suitable for ImDrawList
-	@(link_name="ImGui_GetColorU32ImU32Ex")     GetColorU32ImU32       :: proc(col: u32, alpha_mul: f32 = 1.0) -> u32 --- // retrieve given color with style alpha applied, packed as a 32-bit value suitable for ImDrawList
+	@(link_name="ImGui_GetColorU32ImU32")       GetColorU32ImU32       :: proc(col: u32, alpha_mul: f32 = 1.0) -> u32 --- // retrieve given color with style alpha applied, packed as a 32-bit value suitable for ImDrawList
 	@(link_name="ImGui_GetStyleColorVec4")      GetStyleColorVec4      :: proc(idx: Col) -> ^Vec4                     --- // retrieve style color as stored in ImGuiStyle structure. use to feed back into PushStyleColor(), otherwise use GetColorU32() to get style color with style alpha baked in.
 	// Layout cursor positioning
 	// - By "cursor" we mean the current output position.
@@ -2121,12 +2160,12 @@ foreign lib {
 	@(link_name="ImGui_GetCursorStartPos")     GetCursorStartPos     :: proc() -> Vec2        --- // [window-local] initial cursor position, in window-local coordinates. Call GetCursorScreenPos() after Begin() to get the absolute coordinates version.
 	// Other layout functions
 	@(link_name="ImGui_Separator")                    Separator                    :: proc()                                                    --- // separator, generally horizontal. inside a menu bar or in horizontal layout mode, this becomes a vertical separator.
-	@(link_name="ImGui_SameLineEx")                   SameLine                     :: proc(offset_from_start_x: f32 = 0.0, spacing: f32 = -1.0) --- // call between widgets or groups to layout them horizontally. X position given in window coordinates.
+	@(link_name="ImGui_SameLine")                     SameLine                     :: proc(offset_from_start_x: f32 = 0.0, spacing: f32 = -1.0) --- // call between widgets or groups to layout them horizontally. X position given in window coordinates.
 	@(link_name="ImGui_NewLine")                      NewLine                      :: proc()                                                    --- // undo a SameLine() or force a new line when in a horizontal-layout context.
 	@(link_name="ImGui_Spacing")                      Spacing                      :: proc()                                                    --- // add vertical spacing.
 	@(link_name="ImGui_Dummy")                        Dummy                        :: proc(size: Vec2)                                          --- // add a dummy item of given size. unlike InvisibleButton(), Dummy() won't take the mouse click or be navigable into.
-	@(link_name="ImGui_IndentEx")                     Indent                       :: proc(indent_w: f32 = 0.0)                                 --- // move content position toward the right, by indent_w, or style.IndentSpacing if indent_w <= 0
-	@(link_name="ImGui_UnindentEx")                   Unindent                     :: proc(indent_w: f32 = 0.0)                                 --- // move content position back to the left, by indent_w, or style.IndentSpacing if indent_w <= 0
+	@(link_name="ImGui_Indent")                       Indent                       :: proc(indent_w: f32 = 0.0)                                 --- // move content position toward the right, by indent_w, or style.IndentSpacing if indent_w <= 0
+	@(link_name="ImGui_Unindent")                     Unindent                     :: proc(indent_w: f32 = 0.0)                                 --- // move content position back to the left, by indent_w, or style.IndentSpacing if indent_w <= 0
 	@(link_name="ImGui_BeginGroup")                   BeginGroup                   :: proc()                                                    --- // lock horizontal starting position
 	@(link_name="ImGui_EndGroup")                     EndGroup                     :: proc()                                                    --- // unlock horizontal starting position + capture the whole group bounding box into one "item" (so you can use IsItemHovered() or layout primitives such as SameLine() on whole group, etc.)
 	@(link_name="ImGui_AlignTextToFramePadding")      AlignTextToFramePadding      :: proc()                                                    --- // vertically align upcoming text baseline to FramePadding.y so that it will align properly to regularly framed items (call if you have text on a line before a framed item)
@@ -2145,86 +2184,116 @@ foreign lib {
 	// - You can also use the "Label##foobar" syntax within widget label to distinguish them from each others.
 	// - In this header file we use the "label"/"name" terminology to denote a string that will be displayed + used as an ID,
 	//   whereas "str_id" denote a string that is only used as an ID and not normally displayed.
-	@(link_name="ImGui_PushID")               PushID               :: proc(str_id: cstring)                                                                                                                                                           --- // push string into the ID stack (will hash string).
-	@(link_name="ImGui_PushIDStr")            PushIDStr            :: proc(str_id_begin: cstring, str_id_end: cstring)                                                                                                                                --- // push string into the ID stack (will hash string).
-	@(link_name="ImGui_PushIDPtr")            PushIDPtr            :: proc(ptr_id: rawptr)                                                                                                                                                            --- // push pointer into the ID stack (will hash pointer).
-	@(link_name="ImGui_PushIDInt")            PushIDInt            :: proc(int_id: c.int)                                                                                                                                                             --- // push integer into the ID stack (will hash integer).
-	@(link_name="ImGui_PopID")                PopID                :: proc()                                                                                                                                                                          --- // pop from the ID stack.
-	@(link_name="ImGui_GetID")                GetID                :: proc(str_id: cstring) -> ID                                                                                                                                                     --- // calculate unique ID (hash of whole ID stack + given parameter). e.g. if you want to query into ImGuiStorage yourself
-	@(link_name="ImGui_GetIDStr")             GetIDStr             :: proc(str_id_begin: cstring, str_id_end: cstring) -> ID                                                                                                                          ---
-	@(link_name="ImGui_GetIDPtr")             GetIDPtr             :: proc(ptr_id: rawptr) -> ID                                                                                                                                                      ---
-	@(link_name="ImGui_GetIDInt")             GetIDInt             :: proc(int_id: c.int) -> ID                                                                                                                                                       ---
-	@(link_name="ImGui_TextUnformattedEx")    TextUnformatted      :: proc(text: cstring, text_end: cstring = nil)                                                                                                                                    --- // raw text without formatting. Roughly equivalent to Text("%s", text) but: A) doesn't require null terminated string if 'text_end' is specified, B) it's faster, no memory copy is done, no buffer size limits, recommended for long chunks of text.
-	@(link_name="ImGui_Text")                 Text                 :: proc(fmt: cstring, #c_vararg args: ..any)                                                                                                                                       --- // formatted text
-	@(link_name="ImGui_TextColored")          TextColored          :: proc(col: Vec4, fmt: cstring, #c_vararg args: ..any)                                                                                                                            --- // shortcut for PushStyleColor(ImGuiCol_Text, col); Text(fmt, ...); PopStyleColor();
-	@(link_name="ImGui_TextDisabled")         TextDisabled         :: proc(fmt: cstring, #c_vararg args: ..any)                                                                                                                                       --- // shortcut for PushStyleColor(ImGuiCol_Text, style.Colors[ImGuiCol_TextDisabled]); Text(fmt, ...); PopStyleColor();
-	@(link_name="ImGui_TextWrapped")          TextWrapped          :: proc(fmt: cstring, #c_vararg args: ..any)                                                                                                                                       --- // shortcut for PushTextWrapPos(0.0f); Text(fmt, ...); PopTextWrapPos();. Note that this won't work on an auto-resizing window if there's no other widgets to extend the window width, yoy may need to set a size using SetNextWindowSize().
-	@(link_name="ImGui_LabelText")            LabelText            :: proc(label: cstring, fmt: cstring, #c_vararg args: ..any)                                                                                                                       --- // display text+label aligned the same way as value+label widgets
-	@(link_name="ImGui_BulletText")           BulletText           :: proc(fmt: cstring, #c_vararg args: ..any)                                                                                                                                       --- // shortcut for Bullet()+Text()
-	@(link_name="ImGui_SeparatorText")        SeparatorText        :: proc(label: cstring)                                                                                                                                                            --- // currently: formatted text with an horizontal line
-	@(link_name="ImGui_ButtonEx")             Button               :: proc(label: cstring, size: Vec2 = {0, 0}) -> bool                                                                                                                               --- // button
-	@(link_name="ImGui_SmallButton")          SmallButton          :: proc(label: cstring) -> bool                                                                                                                                                    --- // button with (FramePadding.y == 0) to easily embed within text
-	@(link_name="ImGui_InvisibleButton")      InvisibleButton      :: proc(str_id: cstring, size: Vec2, flags: ButtonFlags = {}) -> bool                                                                                                              --- // flexible button behavior without the visuals, frequently useful to build custom behaviors using the public api (along with IsItemActive, IsItemHovered, etc.)
-	@(link_name="ImGui_ArrowButton")          ArrowButton          :: proc(str_id: cstring, dir: Dir) -> bool                                                                                                                                         --- // square button with an arrow shape
-	@(link_name="ImGui_Checkbox")             Checkbox             :: proc(label: cstring, v: ^bool) -> bool                                                                                                                                          ---
-	@(link_name="ImGui_CheckboxFlagsIntPtr")  CheckboxFlagsIntPtr  :: proc(label: cstring, flags: ^c.int, flags_value: c.int) -> bool                                                                                                                 ---
-	@(link_name="ImGui_CheckboxFlagsUintPtr") CheckboxFlagsUintPtr :: proc(label: cstring, flags: ^c.uint, flags_value: c.uint) -> bool                                                                                                               ---
-	@(link_name="ImGui_RadioButton")          RadioButton          :: proc(label: cstring, active: bool) -> bool                                                                                                                                      --- // use with e.g. if (RadioButton("one", my_value==1)) { my_value = 1; }
-	@(link_name="ImGui_RadioButtonIntPtr")    RadioButtonIntPtr    :: proc(label: cstring, v: ^c.int, v_button: c.int) -> bool                                                                                                                        --- // shortcut to handle the above pattern when value is an integer
-	@(link_name="ImGui_ProgressBar")          ProgressBar          :: proc(fraction: f32, size_arg: Vec2 = {-min(f32), 0}, overlay: cstring = nil)                                                                                                    ---
-	@(link_name="ImGui_Bullet")               Bullet               :: proc()                                                                                                                                                                          --- // draw a small circle + keep the cursor on the same line. advance cursor x position by GetTreeNodeToLabelSpacing(), same distance that TreeNode() uses
-	@(link_name="ImGui_TextLink")             TextLink             :: proc(label: cstring) -> bool                                                                                                                                                    --- // hyperlink text button, return true when clicked
-	@(link_name="ImGui_TextLinkOpenURLEx")    TextLinkOpenURL      :: proc(label: cstring, url: cstring = nil)                                                                                                                                        --- // hyperlink text button, automatically open file/url when clicked
-	@(link_name="ImGui_ImageEx")              Image                :: proc(user_texture_id: TextureID, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, tint_col: Vec4 = {1, 1, 1, 1}, border_col: Vec4 = {0, 0, 0, 0})                      ---
-	@(link_name="ImGui_ImageButtonEx")        ImageButton          :: proc(str_id: cstring, user_texture_id: TextureID, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, bg_col: Vec4 = {0, 0, 0, 0}, tint_col: Vec4 = {1, 1, 1, 1}) -> bool ---
+	@(link_name="ImGui_PushID")    PushID    :: proc(str_id: cstring)                                  --- // push string into the ID stack (will hash string).
+	@(link_name="ImGui_PushIDStr") PushIDStr :: proc(str_id_begin: cstring, str_id_end: cstring)       --- // push string into the ID stack (will hash string).
+	@(link_name="ImGui_PushIDPtr") PushIDPtr :: proc(ptr_id: rawptr)                                   --- // push pointer into the ID stack (will hash pointer).
+	@(link_name="ImGui_PushIDInt") PushIDInt :: proc(int_id: c.int)                                    --- // push integer into the ID stack (will hash integer).
+	@(link_name="ImGui_PopID")     PopID     :: proc()                                                 --- // pop from the ID stack.
+	@(link_name="ImGui_GetID")     GetID     :: proc(str_id: cstring) -> ID                            --- // calculate unique ID (hash of whole ID stack + given parameter). e.g. if you want to query into ImGuiStorage yourself
+	@(link_name="ImGui_GetIDStr")  GetIDStr  :: proc(str_id_begin: cstring, str_id_end: cstring) -> ID ---
+	@(link_name="ImGui_GetIDPtr")  GetIDPtr  :: proc(ptr_id: rawptr) -> ID                             ---
+	@(link_name="ImGui_GetIDInt")  GetIDInt  :: proc(int_id: c.int) -> ID                              ---
+	// Widgets: Text
+	@(link_name="ImGui_TextUnformatted") TextUnformatted :: proc(text: cstring, text_end: cstring = nil)              --- // raw text without formatting. Roughly equivalent to Text("%s", text) but: A) doesn't require null terminated string if 'text_end' is specified, B) it's faster, no memory copy is done, no buffer size limits, recommended for long chunks of text.
+	@(link_name="ImGui_Text")            Text            :: proc(fmt: cstring, #c_vararg args: ..any)                 --- // formatted text
+	@(link_name="ImGui_TextColored")     TextColored     :: proc(col: Vec4, fmt: cstring, #c_vararg args: ..any)      --- // shortcut for PushStyleColor(ImGuiCol_Text, col); Text(fmt, ...); PopStyleColor();
+	@(link_name="ImGui_TextDisabled")    TextDisabled    :: proc(fmt: cstring, #c_vararg args: ..any)                 --- // shortcut for PushStyleColor(ImGuiCol_Text, style.Colors[ImGuiCol_TextDisabled]); Text(fmt, ...); PopStyleColor();
+	@(link_name="ImGui_TextWrapped")     TextWrapped     :: proc(fmt: cstring, #c_vararg args: ..any)                 --- // shortcut for PushTextWrapPos(0.0f); Text(fmt, ...); PopTextWrapPos();. Note that this won't work on an auto-resizing window if there's no other widgets to extend the window width, yoy may need to set a size using SetNextWindowSize().
+	@(link_name="ImGui_LabelText")       LabelText       :: proc(label: cstring, fmt: cstring, #c_vararg args: ..any) --- // display text+label aligned the same way as value+label widgets
+	@(link_name="ImGui_BulletText")      BulletText      :: proc(fmt: cstring, #c_vararg args: ..any)                 --- // shortcut for Bullet()+Text()
+	@(link_name="ImGui_SeparatorText")   SeparatorText   :: proc(label: cstring)                                      --- // currently: formatted text with an horizontal line
+	// Widgets: Main
+	// - Most widgets return true when the value has been changed or when pressed/selected
+	// - You may also use one of the many IsItemXXX functions (e.g. IsItemActive, IsItemHovered, etc.) to query widget state.
+	@(link_name="ImGui_Button")               Button               :: proc(label: cstring, size: Vec2 = {0, 0}) -> bool                            --- // button
+	@(link_name="ImGui_SmallButton")          SmallButton          :: proc(label: cstring) -> bool                                                 --- // button with (FramePadding.y == 0) to easily embed within text
+	@(link_name="ImGui_InvisibleButton")      InvisibleButton      :: proc(str_id: cstring, size: Vec2, flags: ButtonFlags = {}) -> bool           --- // flexible button behavior without the visuals, frequently useful to build custom behaviors using the public api (along with IsItemActive, IsItemHovered, etc.)
+	@(link_name="ImGui_ArrowButton")          ArrowButton          :: proc(str_id: cstring, dir: Dir) -> bool                                      --- // square button with an arrow shape
+	@(link_name="ImGui_Checkbox")             Checkbox             :: proc(label: cstring, v: ^bool) -> bool                                       ---
+	@(link_name="ImGui_CheckboxFlagsIntPtr")  CheckboxFlagsIntPtr  :: proc(label: cstring, flags: ^c.int, flags_value: c.int) -> bool              ---
+	@(link_name="ImGui_CheckboxFlagsUintPtr") CheckboxFlagsUintPtr :: proc(label: cstring, flags: ^c.uint, flags_value: c.uint) -> bool            ---
+	@(link_name="ImGui_RadioButton")          RadioButton          :: proc(label: cstring, active: bool) -> bool                                   --- // use with e.g. if (RadioButton("one", my_value==1)) { my_value = 1; }
+	@(link_name="ImGui_RadioButtonIntPtr")    RadioButtonIntPtr    :: proc(label: cstring, v: ^c.int, v_button: c.int) -> bool                     --- // shortcut to handle the above pattern when value is an integer
+	@(link_name="ImGui_ProgressBar")          ProgressBar          :: proc(fraction: f32, size_arg: Vec2 = {-min(f32), 0}, overlay: cstring = nil) ---
+	@(link_name="ImGui_Bullet")               Bullet               :: proc()                                                                       --- // draw a small circle + keep the cursor on the same line. advance cursor x position by GetTreeNodeToLabelSpacing(), same distance that TreeNode() uses
+	@(link_name="ImGui_TextLink")             TextLink             :: proc(label: cstring) -> bool                                                 --- // hyperlink text button, return true when clicked
+	@(link_name="ImGui_TextLinkOpenURL")      TextLinkOpenURL      :: proc(label: cstring, url: cstring = nil)                                     --- // hyperlink text button, automatically open file/url when clicked
+	// Widgets: Images
+	// - Read about ImTextureID here: https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
+	// - 'uv0' and 'uv1' are texture coordinates. Read about them from the same link above.
+	// - Note that Image() may add +2.0f to provided size if a border is visible, ImageButton() adds style.FramePadding*2.0f to provided size.
+	// - ImageButton() draws a background based on regular Button() color + optionally an inner background if specified.
+	@(link_name="ImGui_Image")       Image       :: proc(user_texture_id: TextureID, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, tint_col: Vec4 = {1, 1, 1, 1}, border_col: Vec4 = {0, 0, 0, 0})                      ---
+	@(link_name="ImGui_ImageButton") ImageButton :: proc(str_id: cstring, user_texture_id: TextureID, image_size: Vec2, uv0: Vec2 = {0, 0}, uv1: Vec2 = {1, 1}, bg_col: Vec4 = {0, 0, 0, 0}, tint_col: Vec4 = {1, 1, 1, 1}) -> bool ---
 	// Widgets: Combo Box (Dropdown)
 	// - The BeginCombo()/EndCombo() api allows you to manage your contents and selection state however you want it, by creating e.g. Selectable() items.
 	// - The old Combo() api are helpers over BeginCombo()/EndCombo() which are kept available for convenience purpose. This is analogous to how ListBox are created.
-	@(link_name="ImGui_BeginCombo")           BeginCombo         :: proc(label: cstring, preview_value: cstring, flags: ComboFlags = {}) -> bool                                                                                                                                     ---
-	@(link_name="ImGui_EndCombo")             EndCombo           :: proc()                                                                                                                                                                                                           --- // only call EndCombo() if BeginCombo() returns true!
-	@(link_name="ImGui_ComboCharEx")          ComboChar          :: proc(label: cstring, current_item: ^c.int, items: [^]cstring, items_count: c.int, popup_max_height_in_items: c.int = -1) -> bool                                                                                 ---
-	@(link_name="ImGui_ComboEx")              Combo              :: proc(label: cstring, current_item: ^c.int, items_separated_by_zeros: cstring, popup_max_height_in_items: c.int = -1) -> bool                                                                                     --- // Separate items with \0 within a string, end item-list with \0\0. e.g. "One\0Two\0Three\0"
-	@(link_name="ImGui_ComboCallbackEx")      ComboCallback      :: proc(label: cstring, current_item: ^c.int, getter: proc "c" (user_data: rawptr, idx: c.int) -> cstring, user_data: rawptr, items_count: c.int, popup_max_height_in_items: c.int = -1) -> bool                    ---
-	@(link_name="ImGui_DragFloatEx")          DragFloat          :: proc(label: cstring, v: ^f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                                 --- // If v_min >= v_max we have no bound
-	@(link_name="ImGui_DragFloat2Ex")         DragFloat2         :: proc(label: cstring, v: ^[2]f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                              ---
-	@(link_name="ImGui_DragFloat3Ex")         DragFloat3         :: proc(label: cstring, v: ^[3]f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                              ---
-	@(link_name="ImGui_DragFloat4Ex")         DragFloat4         :: proc(label: cstring, v: ^[4]f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                              ---
-	@(link_name="ImGui_DragFloatRange2Ex")    DragFloatRange2    :: proc(label: cstring, v_current_min: ^f32, v_current_max: ^f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", format_max: cstring = nil, flags: SliderFlags = {}) -> bool     ---
-	@(link_name="ImGui_DragIntEx")            DragInt            :: proc(label: cstring, v: ^c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                               --- // If v_min >= v_max we have no bound
-	@(link_name="ImGui_DragInt2Ex")           DragInt2           :: proc(label: cstring, v: ^[2]c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                            ---
-	@(link_name="ImGui_DragInt3Ex")           DragInt3           :: proc(label: cstring, v: ^[3]c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                            ---
-	@(link_name="ImGui_DragInt4Ex")           DragInt4           :: proc(label: cstring, v: ^[4]c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                            ---
-	@(link_name="ImGui_DragIntRange2Ex")      DragIntRange2      :: proc(label: cstring, v_current_min: ^c.int, v_current_max: ^c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", format_max: cstring = nil, flags: SliderFlags = {}) -> bool ---
-	@(link_name="ImGui_DragScalarEx")         DragScalar         :: proc(label: cstring, data_type: DataType, p_data: rawptr, v_speed: f32 = 1.0, p_min: rawptr = nil, p_max: rawptr = nil, format: cstring = nil, flags: SliderFlags = {}) -> bool                                  ---
-	@(link_name="ImGui_DragScalarNEx")        DragScalarN        :: proc(label: cstring, data_type: DataType, p_data: rawptr, components: c.int, v_speed: f32 = 1.0, p_min: rawptr = nil, p_max: rawptr = nil, format: cstring = nil, flags: SliderFlags = {}) -> bool               ---
-	@(link_name="ImGui_SliderFloatEx")        SliderFloat        :: proc(label: cstring, v: ^f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                                                                 --- // adjust format to decorate the value with a prefix or a suffix for in-slider labels or unit display.
-	@(link_name="ImGui_SliderFloat2Ex")       SliderFloat2       :: proc(label: cstring, v: ^[2]f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                                                              ---
-	@(link_name="ImGui_SliderFloat3Ex")       SliderFloat3       :: proc(label: cstring, v: ^[3]f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                                                              ---
-	@(link_name="ImGui_SliderFloat4Ex")       SliderFloat4       :: proc(label: cstring, v: ^[4]f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                                                              ---
-	@(link_name="ImGui_SliderAngleEx")        SliderAngle        :: proc(label: cstring, v_rad: ^f32, v_degrees_min: f32 = -360.0, v_degrees_max: f32 = +360.0, format: cstring = "%.0f deg", flags: SliderFlags = {}) -> bool                                                       ---
-	@(link_name="ImGui_SliderIntEx")          SliderInt          :: proc(label: cstring, v: ^c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                                                             ---
-	@(link_name="ImGui_SliderInt2Ex")         SliderInt2         :: proc(label: cstring, v: ^[2]c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                                                          ---
-	@(link_name="ImGui_SliderInt3Ex")         SliderInt3         :: proc(label: cstring, v: ^[3]c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                                                          ---
-	@(link_name="ImGui_SliderInt4Ex")         SliderInt4         :: proc(label: cstring, v: ^[4]c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                                                          ---
-	@(link_name="ImGui_SliderScalarEx")       SliderScalar       :: proc(label: cstring, data_type: DataType, p_data: rawptr, p_min: rawptr, p_max: rawptr, format: cstring = nil, flags: SliderFlags = {}) -> bool                                                                  ---
-	@(link_name="ImGui_SliderScalarNEx")      SliderScalarN      :: proc(label: cstring, data_type: DataType, p_data: rawptr, components: c.int, p_min: rawptr, p_max: rawptr, format: cstring = nil, flags: SliderFlags = {}) -> bool                                               ---
-	@(link_name="ImGui_VSliderFloatEx")       VSliderFloat       :: proc(label: cstring, size: Vec2, v: ^f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                                                     ---
-	@(link_name="ImGui_VSliderIntEx")         VSliderInt         :: proc(label: cstring, size: Vec2, v: ^c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                                                 ---
-	@(link_name="ImGui_VSliderScalarEx")      VSliderScalar      :: proc(label: cstring, size: Vec2, data_type: DataType, p_data: rawptr, p_min: rawptr, p_max: rawptr, format: cstring = nil, flags: SliderFlags = {}) -> bool                                                      ---
-	@(link_name="ImGui_InputTextEx")          InputText          :: proc(label: cstring, buf: cstring, buf_size: c.size_t, flags: InputTextFlags = {}, callback: InputTextCallback = nil, user_data: rawptr = nil) -> bool                                                           ---
-	@(link_name="ImGui_InputTextMultilineEx") InputTextMultiline :: proc(label: cstring, buf: cstring, buf_size: c.size_t, size: Vec2 = {0, 0}, flags: InputTextFlags = {}, callback: InputTextCallback = nil, user_data: rawptr = nil) -> bool                                      ---
-	@(link_name="ImGui_InputTextWithHintEx")  InputTextWithHint  :: proc(label: cstring, hint: cstring, buf: cstring, buf_size: c.size_t, flags: InputTextFlags = {}, callback: InputTextCallback = nil, user_data: rawptr = nil) -> bool                                            ---
-	@(link_name="ImGui_InputFloatEx")         InputFloat         :: proc(label: cstring, v: ^f32, step: f32 = 0.0, step_fast: f32 = 0.0, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                                               ---
-	@(link_name="ImGui_InputFloat2Ex")        InputFloat2        :: proc(label: cstring, v: ^[2]f32, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                                                                                   ---
-	@(link_name="ImGui_InputFloat3Ex")        InputFloat3        :: proc(label: cstring, v: ^[3]f32, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                                                                                   ---
-	@(link_name="ImGui_InputFloat4Ex")        InputFloat4        :: proc(label: cstring, v: ^[4]f32, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                                                                                   ---
-	@(link_name="ImGui_InputIntEx")           InputInt           :: proc(label: cstring, v: ^c.int, step: c.int = 1, step_fast: c.int = 100, flags: InputTextFlags = {}) -> bool                                                                                                     ---
-	@(link_name="ImGui_InputInt2")            InputInt2          :: proc(label: cstring, v: ^[2]c.int, flags: InputTextFlags = {}) -> bool                                                                                                                                           ---
-	@(link_name="ImGui_InputInt3")            InputInt3          :: proc(label: cstring, v: ^[3]c.int, flags: InputTextFlags = {}) -> bool                                                                                                                                           ---
-	@(link_name="ImGui_InputInt4")            InputInt4          :: proc(label: cstring, v: ^[4]c.int, flags: InputTextFlags = {}) -> bool                                                                                                                                           ---
-	@(link_name="ImGui_InputDoubleEx")        InputDouble        :: proc(label: cstring, v: ^f64, step: f64 = 0.0, step_fast: f64 = 0.0, format: cstring = "%.6f", flags: InputTextFlags = {}) -> bool                                                                               ---
-	@(link_name="ImGui_InputScalarEx")        InputScalar        :: proc(label: cstring, data_type: DataType, p_data: rawptr, p_step: rawptr = nil, p_step_fast: rawptr = nil, format: cstring = nil, flags: InputTextFlags = {}) -> bool                                            ---
-	@(link_name="ImGui_InputScalarNEx")       InputScalarN       :: proc(label: cstring, data_type: DataType, p_data: rawptr, components: c.int, p_step: rawptr = nil, p_step_fast: rawptr = nil, format: cstring = nil, flags: InputTextFlags = {}) -> bool                         ---
+	@(link_name="ImGui_BeginCombo")    BeginCombo    :: proc(label: cstring, preview_value: cstring, flags: ComboFlags = {}) -> bool                                                                                                                  ---
+	@(link_name="ImGui_EndCombo")      EndCombo      :: proc()                                                                                                                                                                                        --- // only call EndCombo() if BeginCombo() returns true!
+	@(link_name="ImGui_ComboChar")     ComboChar     :: proc(label: cstring, current_item: ^c.int, items: [^]cstring, items_count: c.int, popup_max_height_in_items: c.int = -1) -> bool                                                              ---
+	@(link_name="ImGui_Combo")         Combo         :: proc(label: cstring, current_item: ^c.int, items_separated_by_zeros: cstring, popup_max_height_in_items: c.int = -1) -> bool                                                                  --- // Separate items with \0 within a string, end item-list with \0\0. e.g. "One\0Two\0Three\0"
+	@(link_name="ImGui_ComboCallback") ComboCallback :: proc(label: cstring, current_item: ^c.int, getter: proc "c" (user_data: rawptr, idx: c.int) -> cstring, user_data: rawptr, items_count: c.int, popup_max_height_in_items: c.int = -1) -> bool ---
+	// Widgets: Drag Sliders
+	// - CTRL+Click on any drag box to turn them into an input box. Manually input values aren't clamped by default and can go off-bounds. Use ImGuiSliderFlags_AlwaysClamp to always clamp.
+	// - For all the Float2/Float3/Float4/Int2/Int3/Int4 versions of every function, note that a 'float v[X]' function argument is the same as 'float* v',
+	//   the array syntax is just a way to document the number of elements that are expected to be accessible. You can pass address of your first element out of a contiguous set, e.g. &myvector.x
+	// - Adjust format string to decorate the value with a prefix, a suffix, or adapt the editing and display precision e.g. "%.3f" -> 1.234; "%5.2f secs" -> 01.23 secs; "Biscuit: %.0f" -> Biscuit: 1; etc.
+	// - Format string may also be set to NULL or use the default format ("%f" or "%d").
+	// - Speed are per-pixel of mouse movement (v_speed=0.2f: mouse needs to move by 5 pixels to increase value by 1). For keyboard/gamepad navigation, minimum speed is Max(v_speed, minimum_step_at_given_precision).
+	// - Use v_min < v_max to clamp edits to given limits. Note that CTRL+Click manual input can override those limits if ImGuiSliderFlags_AlwaysClamp is not used.
+	// - Use v_max = FLT_MAX / INT_MAX etc to avoid clamping to a maximum, same with v_min = -FLT_MAX / INT_MIN to avoid clamping to a minimum.
+	// - We use the same sets of flags for DragXXX() and SliderXXX() functions as the features are the same and it makes it easier to swap them.
+	// - Legacy: Pre-1.78 there are DragXXX() function signatures that take a final `float power=1.0f' argument instead of the `ImGuiSliderFlags flags=0' argument.
+	//   If you get a warning converting a float to ImGuiSliderFlags, read https://github.com/ocornut/imgui/issues/3361
+	@(link_name="ImGui_DragFloat")       DragFloat       :: proc(label: cstring, v: ^f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                                 --- // If v_min >= v_max we have no bound
+	@(link_name="ImGui_DragFloat2")      DragFloat2      :: proc(label: cstring, v: ^[2]f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                              ---
+	@(link_name="ImGui_DragFloat3")      DragFloat3      :: proc(label: cstring, v: ^[3]f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                              ---
+	@(link_name="ImGui_DragFloat4")      DragFloat4      :: proc(label: cstring, v: ^[4]f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                              ---
+	@(link_name="ImGui_DragFloatRange2") DragFloatRange2 :: proc(label: cstring, v_current_min: ^f32, v_current_max: ^f32, v_speed: f32 = 1.0, v_min: f32 = 0.0, v_max: f32 = 0.0, format: cstring = "%.3f", format_max: cstring = nil, flags: SliderFlags = {}) -> bool     ---
+	@(link_name="ImGui_DragInt")         DragInt         :: proc(label: cstring, v: ^c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                               --- // If v_min >= v_max we have no bound
+	@(link_name="ImGui_DragInt2")        DragInt2        :: proc(label: cstring, v: ^[2]c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                            ---
+	@(link_name="ImGui_DragInt3")        DragInt3        :: proc(label: cstring, v: ^[3]c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                            ---
+	@(link_name="ImGui_DragInt4")        DragInt4        :: proc(label: cstring, v: ^[4]c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                                            ---
+	@(link_name="ImGui_DragIntRange2")   DragIntRange2   :: proc(label: cstring, v_current_min: ^c.int, v_current_max: ^c.int, v_speed: f32 = 1.0, v_min: c.int = {}, v_max: c.int = {}, format: cstring = "%d", format_max: cstring = nil, flags: SliderFlags = {}) -> bool ---
+	@(link_name="ImGui_DragScalar")      DragScalar      :: proc(label: cstring, data_type: DataType, p_data: rawptr, v_speed: f32 = 1.0, p_min: rawptr = nil, p_max: rawptr = nil, format: cstring = nil, flags: SliderFlags = {}) -> bool                                  ---
+	@(link_name="ImGui_DragScalarN")     DragScalarN     :: proc(label: cstring, data_type: DataType, p_data: rawptr, components: c.int, v_speed: f32 = 1.0, p_min: rawptr = nil, p_max: rawptr = nil, format: cstring = nil, flags: SliderFlags = {}) -> bool               ---
+	// Widgets: Regular Sliders
+	// - CTRL+Click on any slider to turn them into an input box. Manually input values aren't clamped by default and can go off-bounds. Use ImGuiSliderFlags_AlwaysClamp to always clamp.
+	// - Adjust format string to decorate the value with a prefix, a suffix, or adapt the editing and display precision e.g. "%.3f" -> 1.234; "%5.2f secs" -> 01.23 secs; "Biscuit: %.0f" -> Biscuit: 1; etc.
+	// - Format string may also be set to NULL or use the default format ("%f" or "%d").
+	// - Legacy: Pre-1.78 there are SliderXXX() function signatures that take a final `float power=1.0f' argument instead of the `ImGuiSliderFlags flags=0' argument.
+	//   If you get a warning converting a float to ImGuiSliderFlags, read https://github.com/ocornut/imgui/issues/3361
+	@(link_name="ImGui_SliderFloat")   SliderFloat   :: proc(label: cstring, v: ^f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                   --- // adjust format to decorate the value with a prefix or a suffix for in-slider labels or unit display.
+	@(link_name="ImGui_SliderFloat2")  SliderFloat2  :: proc(label: cstring, v: ^[2]f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                ---
+	@(link_name="ImGui_SliderFloat3")  SliderFloat3  :: proc(label: cstring, v: ^[3]f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                ---
+	@(link_name="ImGui_SliderFloat4")  SliderFloat4  :: proc(label: cstring, v: ^[4]f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                                ---
+	@(link_name="ImGui_SliderAngle")   SliderAngle   :: proc(label: cstring, v_rad: ^f32, v_degrees_min: f32 = -360.0, v_degrees_max: f32 = +360.0, format: cstring = "%.0f deg", flags: SliderFlags = {}) -> bool         ---
+	@(link_name="ImGui_SliderInt")     SliderInt     :: proc(label: cstring, v: ^c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                               ---
+	@(link_name="ImGui_SliderInt2")    SliderInt2    :: proc(label: cstring, v: ^[2]c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                            ---
+	@(link_name="ImGui_SliderInt3")    SliderInt3    :: proc(label: cstring, v: ^[3]c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                            ---
+	@(link_name="ImGui_SliderInt4")    SliderInt4    :: proc(label: cstring, v: ^[4]c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                            ---
+	@(link_name="ImGui_SliderScalar")  SliderScalar  :: proc(label: cstring, data_type: DataType, p_data: rawptr, p_min: rawptr, p_max: rawptr, format: cstring = nil, flags: SliderFlags = {}) -> bool                    ---
+	@(link_name="ImGui_SliderScalarN") SliderScalarN :: proc(label: cstring, data_type: DataType, p_data: rawptr, components: c.int, p_min: rawptr, p_max: rawptr, format: cstring = nil, flags: SliderFlags = {}) -> bool ---
+	@(link_name="ImGui_VSliderFloat")  VSliderFloat  :: proc(label: cstring, size: Vec2, v: ^f32, v_min: f32, v_max: f32, format: cstring = "%.3f", flags: SliderFlags = {}) -> bool                                       ---
+	@(link_name="ImGui_VSliderInt")    VSliderInt    :: proc(label: cstring, size: Vec2, v: ^c.int, v_min: c.int, v_max: c.int, format: cstring = "%d", flags: SliderFlags = {}) -> bool                                   ---
+	@(link_name="ImGui_VSliderScalar") VSliderScalar :: proc(label: cstring, size: Vec2, data_type: DataType, p_data: rawptr, p_min: rawptr, p_max: rawptr, format: cstring = nil, flags: SliderFlags = {}) -> bool        ---
+	// Widgets: Input with Keyboard
+	// - If you want to use InputText() with std::string or any custom dynamic string type, see misc/cpp/imgui_stdlib.h and comments in imgui_demo.cpp.
+	// - Most of the ImGuiInputTextFlags flags are only useful for InputText() and not for InputFloatX, InputIntX, InputDouble etc.
+	@(link_name="ImGui_InputText")          InputText          :: proc(label: cstring, buf: cstring, buf_size: c.size_t, flags: InputTextFlags = {}, callback: InputTextCallback = nil, user_data: rawptr = nil) -> bool                                   ---
+	@(link_name="ImGui_InputTextMultiline") InputTextMultiline :: proc(label: cstring, buf: cstring, buf_size: c.size_t, size: Vec2 = {0, 0}, flags: InputTextFlags = {}, callback: InputTextCallback = nil, user_data: rawptr = nil) -> bool              ---
+	@(link_name="ImGui_InputTextWithHint")  InputTextWithHint  :: proc(label: cstring, hint: cstring, buf: cstring, buf_size: c.size_t, flags: InputTextFlags = {}, callback: InputTextCallback = nil, user_data: rawptr = nil) -> bool                    ---
+	@(link_name="ImGui_InputFloat")         InputFloat         :: proc(label: cstring, v: ^f32, step: f32 = 0.0, step_fast: f32 = 0.0, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                       ---
+	@(link_name="ImGui_InputFloat2")        InputFloat2        :: proc(label: cstring, v: ^[2]f32, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                                                           ---
+	@(link_name="ImGui_InputFloat3")        InputFloat3        :: proc(label: cstring, v: ^[3]f32, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                                                           ---
+	@(link_name="ImGui_InputFloat4")        InputFloat4        :: proc(label: cstring, v: ^[4]f32, format: cstring = "%.3f", flags: InputTextFlags = {}) -> bool                                                                                           ---
+	@(link_name="ImGui_InputInt")           InputInt           :: proc(label: cstring, v: ^c.int, step: c.int = 1, step_fast: c.int = 100, flags: InputTextFlags = {}) -> bool                                                                             ---
+	@(link_name="ImGui_InputInt2")          InputInt2          :: proc(label: cstring, v: ^[2]c.int, flags: InputTextFlags = {}) -> bool                                                                                                                   ---
+	@(link_name="ImGui_InputInt3")          InputInt3          :: proc(label: cstring, v: ^[3]c.int, flags: InputTextFlags = {}) -> bool                                                                                                                   ---
+	@(link_name="ImGui_InputInt4")          InputInt4          :: proc(label: cstring, v: ^[4]c.int, flags: InputTextFlags = {}) -> bool                                                                                                                   ---
+	@(link_name="ImGui_InputDouble")        InputDouble        :: proc(label: cstring, v: ^f64, step: f64 = 0.0, step_fast: f64 = 0.0, format: cstring = "%.6f", flags: InputTextFlags = {}) -> bool                                                       ---
+	@(link_name="ImGui_InputScalar")        InputScalar        :: proc(label: cstring, data_type: DataType, p_data: rawptr, p_step: rawptr = nil, p_step_fast: rawptr = nil, format: cstring = nil, flags: InputTextFlags = {}) -> bool                    ---
+	@(link_name="ImGui_InputScalarN")       InputScalarN       :: proc(label: cstring, data_type: DataType, p_data: rawptr, components: c.int, p_step: rawptr = nil, p_step_fast: rawptr = nil, format: cstring = nil, flags: InputTextFlags = {}) -> bool ---
 	// Widgets: Color Editor/Picker (tip: the ColorEdit* functions have a little color square that can be left-clicked to open a picker, and right-clicked to open an option menu.)
 	// - Note that in C++ a 'float v[X]' function argument is the _same_ as 'float* v', the array syntax is just a way to document the number of elements that are expected to be accessible.
 	// - You can pass the address of a first float element out of a contiguous structure, e.g. &myvector.x
@@ -2232,30 +2301,40 @@ foreign lib {
 	@(link_name="ImGui_ColorEdit4")          ColorEdit4          :: proc(label: cstring, col: ^[4]f32, flags: ColorEditFlags = {}) -> bool                      ---
 	@(link_name="ImGui_ColorPicker3")        ColorPicker3        :: proc(label: cstring, col: ^[3]f32, flags: ColorEditFlags = {}) -> bool                      ---
 	@(link_name="ImGui_ColorPicker4")        ColorPicker4        :: proc(label: cstring, col: ^[4]f32, flags: ColorEditFlags = {}, ref_col: ^f32 = nil) -> bool ---
-	@(link_name="ImGui_ColorButtonEx")       ColorButton         :: proc(desc_id: cstring, col: Vec4, flags: ColorEditFlags = {}, size: Vec2 = {0, 0}) -> bool  --- // display a color square/button, hover for details, return true when pressed.
+	@(link_name="ImGui_ColorButton")         ColorButton         :: proc(desc_id: cstring, col: Vec4, flags: ColorEditFlags = {}, size: Vec2 = {0, 0}) -> bool  --- // display a color square/button, hover for details, return true when pressed.
 	@(link_name="ImGui_SetColorEditOptions") SetColorEditOptions :: proc(flags: ColorEditFlags)                                                                 --- // initialize current options (generally on application startup) if you want to select a default format, picker type, etc. User will be able to change many settings, unless you pass the _NoOptions flag to your calls.
 	// Widgets: Trees
 	// - TreeNode functions return true when the node is open, in which case you need to also call TreePop() when you are finished displaying the tree node contents.
-	@(link_name="ImGui_TreeNode")                     TreeNode                     :: proc(label: cstring) -> bool                                                                           ---
-	@(link_name="ImGui_TreeNodeStr")                  TreeNodeStr                  :: proc(str_id: cstring, fmt: cstring, #c_vararg args: ..any) -> bool                                     --- // helper variation to easily decorelate the id from the displayed string. Read the FAQ about why and how to use ID. to align arbitrary text at the same level as a TreeNode() you can use Bullet().
-	@(link_name="ImGui_TreeNodePtr")                  TreeNodePtr                  :: proc(ptr_id: rawptr, fmt: cstring, #c_vararg args: ..any) -> bool                                      --- // "
-	@(link_name="ImGui_TreeNodeEx")                   TreeNodeEx                   :: proc(label: cstring, flags: TreeNodeFlags = {}) -> bool                                                ---
-	@(link_name="ImGui_TreeNodeExStr")                TreeNodeExStr                :: proc(str_id: cstring, flags: TreeNodeFlags, fmt: cstring, #c_vararg args: ..any) -> bool               ---
-	@(link_name="ImGui_TreeNodeExPtr")                TreeNodeExPtr                :: proc(ptr_id: rawptr, flags: TreeNodeFlags, fmt: cstring, #c_vararg args: ..any) -> bool                ---
-	@(link_name="ImGui_TreePush")                     TreePush                     :: proc(str_id: cstring)                                                                                  --- // ~ Indent()+PushID(). Already called by TreeNode() when returning true, but you can call TreePush/TreePop yourself if desired.
-	@(link_name="ImGui_TreePushPtr")                  TreePushPtr                  :: proc(ptr_id: rawptr)                                                                                   --- // "
-	@(link_name="ImGui_TreePop")                      TreePop                      :: proc()                                                                                                 --- // ~ Unindent()+PopID()
-	@(link_name="ImGui_GetTreeNodeToLabelSpacing")    GetTreeNodeToLabelSpacing    :: proc() -> f32                                                                                          --- // horizontal distance preceding label when using TreeNode*() or Bullet() == (g.FontSize + style.FramePadding.x*2) for a regular unframed TreeNode
-	@(link_name="ImGui_CollapsingHeader")             CollapsingHeader             :: proc(label: cstring, flags: TreeNodeFlags = {}) -> bool                                                --- // if returning 'true' the header is open. doesn't indent nor push on ID stack. user doesn't have to call TreePop().
-	@(link_name="ImGui_CollapsingHeaderBoolPtr")      CollapsingHeaderBoolPtr      :: proc(label: cstring, p_visible: ^bool, flags: TreeNodeFlags = {}) -> bool                              --- // when 'p_visible != NULL': if '*p_visible==true' display an additional small close button on upper right of the header which will set the bool to false when clicked, if '*p_visible==false' don't display the header.
-	@(link_name="ImGui_SetNextItemOpen")              SetNextItemOpen              :: proc(is_open: bool, cond: Cond = {})                                                                   --- // set next TreeNode/CollapsingHeader open state.
-	@(link_name="ImGui_SetNextItemStorageID")         SetNextItemStorageID         :: proc(storage_id: ID)                                                                                   --- // set id to use for open/close storage (default to same as item id).
-	@(link_name="ImGui_SelectableEx")                 Selectable                   :: proc(label: cstring, selected: bool = false, flags: SelectableFlags = {}, size: Vec2 = {0, 0}) -> bool --- // "bool selected" carry the selection state (read-only). Selectable() is clicked is returns true so you can modify your selection state. size.x==0.0: use remaining width, size.x>0.0: specify width. size.y==0.0: use label height, size.y>0.0: specify height
-	@(link_name="ImGui_SelectableBoolPtrEx")          SelectableBoolPtr            :: proc(label: cstring, p_selected: ^bool, flags: SelectableFlags = {}, size: Vec2 = {0, 0}) -> bool      --- // "bool* p_selected" point to the selection state (read-write), as a convenient helper.
-	@(link_name="ImGui_BeginMultiSelectEx")           BeginMultiSelect             :: proc(flags: MultiSelectFlags, selection_size: c.int = -1, items_count: c.int = -1) -> ^MultiSelectIO   ---
-	@(link_name="ImGui_EndMultiSelect")               EndMultiSelect               :: proc() -> ^MultiSelectIO                                                                               ---
-	@(link_name="ImGui_SetNextItemSelectionUserData") SetNextItemSelectionUserData :: proc(selection_user_data: SelectionUserData)                                                           ---
-	@(link_name="ImGui_IsItemToggledSelection")       IsItemToggledSelection       :: proc() -> bool                                                                                         --- // Was the last item selection state toggled? Useful if you need the per-item information _before_ reaching EndMultiSelect(). We only returns toggle _event_ in order to handle clipping correctly.
+	@(link_name="ImGui_TreeNode")                  TreeNode                  :: proc(label: cstring) -> bool                                                             ---
+	@(link_name="ImGui_TreeNodeStr")               TreeNodeStr               :: proc(str_id: cstring, fmt: cstring, #c_vararg args: ..any) -> bool                       --- // helper variation to easily decorelate the id from the displayed string. Read the FAQ about why and how to use ID. to align arbitrary text at the same level as a TreeNode() you can use Bullet().
+	@(link_name="ImGui_TreeNodePtr")               TreeNodePtr               :: proc(ptr_id: rawptr, fmt: cstring, #c_vararg args: ..any) -> bool                        --- // "
+	@(link_name="ImGui_TreeNodeEx")                TreeNodeEx                :: proc(label: cstring, flags: TreeNodeFlags = {}) -> bool                                  ---
+	@(link_name="ImGui_TreeNodeExStr")             TreeNodeExStr             :: proc(str_id: cstring, flags: TreeNodeFlags, fmt: cstring, #c_vararg args: ..any) -> bool ---
+	@(link_name="ImGui_TreeNodeExPtr")             TreeNodeExPtr             :: proc(ptr_id: rawptr, flags: TreeNodeFlags, fmt: cstring, #c_vararg args: ..any) -> bool  ---
+	@(link_name="ImGui_TreePush")                  TreePush                  :: proc(str_id: cstring)                                                                    --- // ~ Indent()+PushID(). Already called by TreeNode() when returning true, but you can call TreePush/TreePop yourself if desired.
+	@(link_name="ImGui_TreePushPtr")               TreePushPtr               :: proc(ptr_id: rawptr)                                                                     --- // "
+	@(link_name="ImGui_TreePop")                   TreePop                   :: proc()                                                                                   --- // ~ Unindent()+PopID()
+	@(link_name="ImGui_GetTreeNodeToLabelSpacing") GetTreeNodeToLabelSpacing :: proc() -> f32                                                                            --- // horizontal distance preceding label when using TreeNode*() or Bullet() == (g.FontSize + style.FramePadding.x*2) for a regular unframed TreeNode
+	@(link_name="ImGui_CollapsingHeader")          CollapsingHeader          :: proc(label: cstring, flags: TreeNodeFlags = {}) -> bool                                  --- // if returning 'true' the header is open. doesn't indent nor push on ID stack. user doesn't have to call TreePop().
+	@(link_name="ImGui_CollapsingHeaderBoolPtr")   CollapsingHeaderBoolPtr   :: proc(label: cstring, p_visible: ^bool, flags: TreeNodeFlags = {}) -> bool                --- // when 'p_visible != NULL': if '*p_visible==true' display an additional small close button on upper right of the header which will set the bool to false when clicked, if '*p_visible==false' don't display the header.
+	@(link_name="ImGui_SetNextItemOpen")           SetNextItemOpen           :: proc(is_open: bool, cond: Cond = {})                                                     --- // set next TreeNode/CollapsingHeader open state.
+	@(link_name="ImGui_SetNextItemStorageID")      SetNextItemStorageID      :: proc(storage_id: ID)                                                                     --- // set id to use for open/close storage (default to same as item id).
+	// Widgets: Selectables
+	// - A selectable highlights when hovered, and can display another color when selected.
+	// - Neighbors selectable extend their highlight bounds in order to leave no gap between them. This is so a series of selected Selectable appear contiguous.
+	@(link_name="ImGui_Selectable")        Selectable        :: proc(label: cstring, selected: bool = false, flags: SelectableFlags = {}, size: Vec2 = {0, 0}) -> bool --- // "bool selected" carry the selection state (read-only). Selectable() is clicked is returns true so you can modify your selection state. size.x==0.0: use remaining width, size.x>0.0: specify width. size.y==0.0: use label height, size.y>0.0: specify height
+	@(link_name="ImGui_SelectableBoolPtr") SelectableBoolPtr :: proc(label: cstring, p_selected: ^bool, flags: SelectableFlags = {}, size: Vec2 = {0, 0}) -> bool      --- // "bool* p_selected" point to the selection state (read-write), as a convenient helper.
+	// Multi-selection system for Selectable(), Checkbox(), TreeNode() functions [BETA]
+	// - This enables standard multi-selection/range-selection idioms (CTRL+Mouse/Keyboard, SHIFT+Mouse/Keyboard, etc.) in a way that also allow a clipper to be used.
+	// - ImGuiSelectionUserData is often used to store your item index within the current view (but may store something else).
+	// - Read comments near ImGuiMultiSelectIO for instructions/details and see 'Demo->Widgets->Selection State & Multi-Select' for demo.
+	// - TreeNode() is technically supported but... using this correctly is more complicated. You need some sort of linear/random access to your tree,
+	//   which is suited to advanced trees setups already implementing filters and clipper. We will work simplifying the current demo.
+	// - 'selection_size' and 'items_count' parameters are optional and used by a few features. If they are costly for you to compute, you may avoid them.
+	@(link_name="ImGui_BeginMultiSelect")             BeginMultiSelect             :: proc(flags: MultiSelectFlags, selection_size: c.int = -1, items_count: c.int = -1) -> ^MultiSelectIO ---
+	@(link_name="ImGui_EndMultiSelect")               EndMultiSelect               :: proc() -> ^MultiSelectIO                                                                             ---
+	@(link_name="ImGui_SetNextItemSelectionUserData") SetNextItemSelectionUserData :: proc(selection_user_data: SelectionUserData)                                                         ---
+	@(link_name="ImGui_IsItemToggledSelection")       IsItemToggledSelection       :: proc() -> bool                                                                                       --- // Was the last item selection state toggled? Useful if you need the per-item information _before_ reaching EndMultiSelect(). We only returns toggle _event_ in order to handle clipping correctly.
 	// Widgets: List Boxes
 	// - This is essentially a thin wrapper to using BeginChild/EndChild with the ImGuiChildFlags_FrameStyle flag for stylistic changes + displaying a label.
 	// - If you don't need a label you can probably simply use BeginChild() with the ImGuiChildFlags_FrameStyle flag for the same result.
@@ -2263,14 +2342,16 @@ foreign lib {
 	// - The simplified/old ListBox() api are helpers over BeginListBox()/EndListBox() which are kept available for convenience purpose. This is analoguous to how Combos are created.
 	// - Choose frame width:   size.x > 0.0f: custom  /  size.x < 0.0f or -FLT_MIN: right-align   /  size.x = 0.0f (default): use current ItemWidth
 	// - Choose frame height:  size.y > 0.0f: custom  /  size.y < 0.0f or -FLT_MIN: bottom-align  /  size.y = 0.0f (default): arbitrary default height which can fit ~7 items
-	@(link_name="ImGui_BeginListBox")            BeginListBox          :: proc(label: cstring, size: Vec2 = {0, 0}) -> bool                                                                                                                                                                                                           --- // open a framed scrolling region
-	@(link_name="ImGui_EndListBox")              EndListBox            :: proc()                                                                                                                                                                                                                                                      --- // only call EndListBox() if BeginListBox() returned true!
-	@(link_name="ImGui_ListBox")                 ListBox               :: proc(label: cstring, current_item: ^c.int, items: [^]cstring, items_count: c.int, height_in_items: c.int = -1) -> bool                                                                                                                                      ---
-	@(link_name="ImGui_ListBoxCallbackEx")       ListBoxCallback       :: proc(label: cstring, current_item: ^c.int, getter: proc "c" (user_data: rawptr, idx: c.int) -> cstring, user_data: rawptr, items_count: c.int, height_in_items: c.int = -1) -> bool                                                                         ---
-	@(link_name="ImGui_PlotLinesEx")             PlotLines             :: proc(label: cstring, values: ^f32, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}, stride: c.int = size_of(f32))                              ---
-	@(link_name="ImGui_PlotLinesCallbackEx")     PlotLinesCallback     :: proc(label: cstring, values_getter: proc "c" (data: rawptr, idx: c.int) -> f32, data: rawptr, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}) ---
-	@(link_name="ImGui_PlotHistogramEx")         PlotHistogram         :: proc(label: cstring, values: ^f32, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}, stride: c.int = size_of(f32))                              ---
-	@(link_name="ImGui_PlotHistogramCallbackEx") PlotHistogramCallback :: proc(label: cstring, values_getter: proc "c" (data: rawptr, idx: c.int) -> f32, data: rawptr, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}) ---
+	@(link_name="ImGui_BeginListBox")    BeginListBox    :: proc(label: cstring, size: Vec2 = {0, 0}) -> bool                                                                                                                                   --- // open a framed scrolling region
+	@(link_name="ImGui_EndListBox")      EndListBox      :: proc()                                                                                                                                                                              --- // only call EndListBox() if BeginListBox() returned true!
+	@(link_name="ImGui_ListBox")         ListBox         :: proc(label: cstring, current_item: ^c.int, items: [^]cstring, items_count: c.int, height_in_items: c.int = -1) -> bool                                                              ---
+	@(link_name="ImGui_ListBoxCallback") ListBoxCallback :: proc(label: cstring, current_item: ^c.int, getter: proc "c" (user_data: rawptr, idx: c.int) -> cstring, user_data: rawptr, items_count: c.int, height_in_items: c.int = -1) -> bool ---
+	// Widgets: Data Plotting
+	// - Consider using ImPlot (https://github.com/epezent/implot) which is much better!
+	@(link_name="ImGui_PlotLines")             PlotLines             :: proc(label: cstring, values: ^f32, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}, stride: c.int = size_of(f32))                              ---
+	@(link_name="ImGui_PlotLinesCallback")     PlotLinesCallback     :: proc(label: cstring, values_getter: proc "c" (data: rawptr, idx: c.int) -> f32, data: rawptr, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}) ---
+	@(link_name="ImGui_PlotHistogram")         PlotHistogram         :: proc(label: cstring, values: ^f32, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}, stride: c.int = size_of(f32))                              ---
+	@(link_name="ImGui_PlotHistogramCallback") PlotHistogramCallback :: proc(label: cstring, values_getter: proc "c" (data: rawptr, idx: c.int) -> f32, data: rawptr, values_count: c.int, values_offset: c.int = {}, overlay_text: cstring = nil, scale_min: f32 = max(f32), scale_max: f32 = max(f32), graph_size: Vec2 = {0, 0}) ---
 	// Widgets: Menus
 	// - Use BeginMenuBar() on a window ImGuiWindowFlags_MenuBar to append to its menu bar.
 	// - Use BeginMainMenuBar() to create a menu bar at the top of the screen and append to it.
@@ -2280,9 +2361,9 @@ foreign lib {
 	@(link_name="ImGui_EndMenuBar")       EndMenuBar       :: proc()                                                                                              --- // only call EndMenuBar() if BeginMenuBar() returns true!
 	@(link_name="ImGui_BeginMainMenuBar") BeginMainMenuBar :: proc() -> bool                                                                                      --- // create and append to a full screen menu-bar.
 	@(link_name="ImGui_EndMainMenuBar")   EndMainMenuBar   :: proc()                                                                                              --- // only call EndMainMenuBar() if BeginMainMenuBar() returns true!
-	@(link_name="ImGui_BeginMenuEx")      BeginMenu        :: proc(label: cstring, enabled: bool = true) -> bool                                                  --- // create a sub-menu entry. only call EndMenu() if this returns true!
+	@(link_name="ImGui_BeginMenu")        BeginMenu        :: proc(label: cstring, enabled: bool = true) -> bool                                                  --- // create a sub-menu entry. only call EndMenu() if this returns true!
 	@(link_name="ImGui_EndMenu")          EndMenu          :: proc()                                                                                              --- // only call EndMenu() if BeginMenu() returns true!
-	@(link_name="ImGui_MenuItemEx")       MenuItem         :: proc(label: cstring, shortcut: cstring = nil, selected: bool = false, enabled: bool = true) -> bool --- // return true when activated.
+	@(link_name="ImGui_MenuItem")         MenuItem         :: proc(label: cstring, shortcut: cstring = nil, selected: bool = false, enabled: bool = true) -> bool --- // return true when activated.
 	@(link_name="ImGui_MenuItemBoolPtr")  MenuItemBoolPtr  :: proc(label: cstring, shortcut: cstring, p_selected: ^bool, enabled: bool = true) -> bool            --- // return true when activated + toggle (*p_selected) if p_selected != NULL
 	// Tooltips
 	// - Tooltips are windows following the mouse. They do not take focus away.
@@ -2318,65 +2399,114 @@ foreign lib {
 	//  - Use ImGuiPopupFlags_NoOpenOverExistingPopup to avoid opening a popup if there's already one at the same level. This is equivalent to e.g. testing for !IsAnyPopupOpen() prior to OpenPopup().
 	//  - Use IsWindowAppearing() after BeginPopup() to tell if a window just opened.
 	//  - IMPORTANT: Notice that for OpenPopupOnItemClick() we exceptionally default flags to 1 (== ImGuiPopupFlags_MouseButtonRight) for backward compatibility with older API taking 'int mouse_button = 1' parameter
-	@(link_name="ImGui_OpenPopup")                 OpenPopup               :: proc(str_id: cstring, popup_flags: PopupFlags = {})              --- // call to mark popup as open (don't call every frame!).
-	@(link_name="ImGui_OpenPopupID")               OpenPopupID             :: proc(id: ID, popup_flags: PopupFlags = {})                       --- // id overload to facilitate calling from nested stacks
-	@(link_name="ImGui_OpenPopupOnItemClick")      OpenPopupOnItemClick    :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1)         --- // helper to open popup when clicked on last item. Default to ImGuiPopupFlags_MouseButtonRight == 1. (note: actually triggers on the mouse _released_ event to be consistent with popup behaviors)
-	@(link_name="ImGui_CloseCurrentPopup")         CloseCurrentPopup       :: proc()                                                           --- // manually close the popup we have begin-ed into.
-	@(link_name="ImGui_BeginPopupContextItemEx")   BeginPopupContextItem   :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1) -> bool --- // open+begin popup when clicked on last item. Use str_id==NULL to associate the popup to previous item. If you want to use that on a non-interactive item such as Text() you need to pass in an explicit ID here. read comments in .cpp!
-	@(link_name="ImGui_BeginPopupContextWindowEx") BeginPopupContextWindow :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1) -> bool --- // open+begin popup when clicked on current window.
-	@(link_name="ImGui_BeginPopupContextVoidEx")   BeginPopupContextVoid   :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1) -> bool --- // open+begin popup when clicked in void (where there are no windows).
+	@(link_name="ImGui_OpenPopup")            OpenPopup            :: proc(str_id: cstring, popup_flags: PopupFlags = {})      --- // call to mark popup as open (don't call every frame!).
+	@(link_name="ImGui_OpenPopupID")          OpenPopupID          :: proc(id: ID, popup_flags: PopupFlags = {})               --- // id overload to facilitate calling from nested stacks
+	@(link_name="ImGui_OpenPopupOnItemClick") OpenPopupOnItemClick :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1) --- // helper to open popup when clicked on last item. Default to ImGuiPopupFlags_MouseButtonRight == 1. (note: actually triggers on the mouse _released_ event to be consistent with popup behaviors)
+	@(link_name="ImGui_CloseCurrentPopup")    CloseCurrentPopup    :: proc()                                                   --- // manually close the popup we have begin-ed into.
+	// Popups: open+begin combined functions helpers
+	//  - Helpers to do OpenPopup+BeginPopup where the Open action is triggered by e.g. hovering an item and right-clicking.
+	//  - They are convenient to easily create context menus, hence the name.
+	//  - IMPORTANT: Notice that BeginPopupContextXXX takes ImGuiPopupFlags just like OpenPopup() and unlike BeginPopup(). For full consistency, we may add ImGuiWindowFlags to the BeginPopupContextXXX functions in the future.
+	//  - IMPORTANT: Notice that we exceptionally default their flags to 1 (== ImGuiPopupFlags_MouseButtonRight) for backward compatibility with older API taking 'int mouse_button = 1' parameter, so if you add other flags remember to re-add the ImGuiPopupFlags_MouseButtonRight.
+	@(link_name="ImGui_BeginPopupContextItem")   BeginPopupContextItem   :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1) -> bool --- // open+begin popup when clicked on last item. Use str_id==NULL to associate the popup to previous item. If you want to use that on a non-interactive item such as Text() you need to pass in an explicit ID here. read comments in .cpp!
+	@(link_name="ImGui_BeginPopupContextWindow") BeginPopupContextWindow :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1) -> bool --- // open+begin popup when clicked on current window.
+	@(link_name="ImGui_BeginPopupContextVoid")   BeginPopupContextVoid   :: proc(str_id: cstring = nil, popup_flags: PopupFlags = 1) -> bool --- // open+begin popup when clicked in void (where there are no windows).
 	// Popups: query functions
 	//  - IsPopupOpen(): return true if the popup is open at the current BeginPopup() level of the popup stack.
 	//  - IsPopupOpen() with ImGuiPopupFlags_AnyPopupId: return true if any popup is open at the current BeginPopup() level of the popup stack.
 	//  - IsPopupOpen() with ImGuiPopupFlags_AnyPopupId + ImGuiPopupFlags_AnyPopupLevel: return true if any popup is open.
-	@(link_name="ImGui_IsPopupOpen")            IsPopupOpen            :: proc(str_id: cstring, flags: PopupFlags = {}) -> bool                                                                        --- // return true if the popup is open.
-	@(link_name="ImGui_BeginTableEx")           BeginTable             :: proc(str_id: cstring, columns: c.int, flags: TableFlags = {}, outer_size: Vec2 = {0.0, 0.0}, inner_width: f32 = 0.0) -> bool ---
-	@(link_name="ImGui_EndTable")               EndTable               :: proc()                                                                                                                       --- // only call EndTable() if BeginTable() returns true!
-	@(link_name="ImGui_TableNextRowEx")         TableNextRow           :: proc(row_flags: TableRowFlags = {}, min_row_height: f32 = 0.0)                                                               --- // append into the first cell of a new row.
-	@(link_name="ImGui_TableNextColumn")        TableNextColumn        :: proc() -> bool                                                                                                               --- // append into the next column (or first column of next row if currently in last column). Return true when column is visible.
-	@(link_name="ImGui_TableSetColumnIndex")    TableSetColumnIndex    :: proc(column_n: c.int) -> bool                                                                                                --- // append into the specified column. Return true when column is visible.
-	@(link_name="ImGui_TableSetupColumnEx")     TableSetupColumn       :: proc(label: cstring, flags: TableColumnFlags = {}, init_width_or_weight: f32 = 0.0, user_id: ID = {})                        ---
-	@(link_name="ImGui_TableSetupScrollFreeze") TableSetupScrollFreeze :: proc(cols: c.int, rows: c.int)                                                                                               --- // lock columns/rows so they stay visible when scrolled.
-	@(link_name="ImGui_TableHeader")            TableHeader            :: proc(label: cstring)                                                                                                         --- // submit one header cell manually (rarely used)
-	@(link_name="ImGui_TableHeadersRow")        TableHeadersRow        :: proc()                                                                                                                       --- // submit a row with headers cells based on data provided to TableSetupColumn() + submit context menu
-	@(link_name="ImGui_TableAngledHeadersRow")  TableAngledHeadersRow  :: proc()                                                                                                                       --- // submit a row with angled headers for every column with the ImGuiTableColumnFlags_AngledHeader flag. MUST BE FIRST ROW.
+	@(link_name="ImGui_IsPopupOpen") IsPopupOpen :: proc(str_id: cstring, flags: PopupFlags = {}) -> bool --- // return true if the popup is open.
+	// Tables
+	// - Full-featured replacement for old Columns API.
+	// - See Demo->Tables for demo code. See top of imgui_tables.cpp for general commentary.
+	// - See ImGuiTableFlags_ and ImGuiTableColumnFlags_ enums for a description of available flags.
+	// The typical call flow is:
+	// - 1. Call BeginTable(), early out if returning false.
+	// - 2. Optionally call TableSetupColumn() to submit column name/flags/defaults.
+	// - 3. Optionally call TableSetupScrollFreeze() to request scroll freezing of columns/rows.
+	// - 4. Optionally call TableHeadersRow() to submit a header row. Names are pulled from TableSetupColumn() data.
+	// - 5. Populate contents:
+	//    - In most situations you can use TableNextRow() + TableSetColumnIndex(N) to start appending into a column.
+	//    - If you are using tables as a sort of grid, where every column is holding the same type of contents,
+	//      you may prefer using TableNextColumn() instead of TableNextRow() + TableSetColumnIndex().
+	//      TableNextColumn() will automatically wrap-around into the next row if needed.
+	//    - IMPORTANT: Comparatively to the old Columns() API, we need to call TableNextColumn() for the first column!
+	//    - Summary of possible call flow:
+	//        - TableNextRow() -> TableSetColumnIndex(0) -> Text("Hello 0") -> TableSetColumnIndex(1) -> Text("Hello 1")  // OK
+	//        - TableNextRow() -> TableNextColumn()      -> Text("Hello 0") -> TableNextColumn()      -> Text("Hello 1")  // OK
+	//        -                   TableNextColumn()      -> Text("Hello 0") -> TableNextColumn()      -> Text("Hello 1")  // OK: TableNextColumn() automatically gets to next row!
+	//        - TableNextRow()                           -> Text("Hello 0")                                               // Not OK! Missing TableSetColumnIndex() or TableNextColumn()! Text will not appear!
+	// - 5. Call EndTable()
+	@(link_name="ImGui_BeginTable")          BeginTable          :: proc(str_id: cstring, columns: c.int, flags: TableFlags = {}, outer_size: Vec2 = {0.0, 0.0}, inner_width: f32 = 0.0) -> bool ---
+	@(link_name="ImGui_EndTable")            EndTable            :: proc()                                                                                                                       --- // only call EndTable() if BeginTable() returns true!
+	@(link_name="ImGui_TableNextRow")        TableNextRow        :: proc(row_flags: TableRowFlags = {}, min_row_height: f32 = 0.0)                                                               --- // append into the first cell of a new row.
+	@(link_name="ImGui_TableNextColumn")     TableNextColumn     :: proc() -> bool                                                                                                               --- // append into the next column (or first column of next row if currently in last column). Return true when column is visible.
+	@(link_name="ImGui_TableSetColumnIndex") TableSetColumnIndex :: proc(column_n: c.int) -> bool                                                                                                --- // append into the specified column. Return true when column is visible.
+	// Tables: Headers & Columns declaration
+	// - Use TableSetupColumn() to specify label, resizing policy, default width/weight, id, various other flags etc.
+	// - Use TableHeadersRow() to create a header row and automatically submit a TableHeader() for each column.
+	//   Headers are required to perform: reordering, sorting, and opening the context menu.
+	//   The context menu can also be made available in columns body using ImGuiTableFlags_ContextMenuInBody.
+	// - You may manually submit headers using TableNextRow() + TableHeader() calls, but this is only useful in
+	//   some advanced use cases (e.g. adding custom widgets in header row).
+	// - Use TableSetupScrollFreeze() to lock columns/rows so they stay visible when scrolled.
+	@(link_name="ImGui_TableSetupColumn")       TableSetupColumn       :: proc(label: cstring, flags: TableColumnFlags = {}, init_width_or_weight: f32 = 0.0, user_id: ID = {}) ---
+	@(link_name="ImGui_TableSetupScrollFreeze") TableSetupScrollFreeze :: proc(cols: c.int, rows: c.int)                                                                        --- // lock columns/rows so they stay visible when scrolled.
+	@(link_name="ImGui_TableHeader")            TableHeader            :: proc(label: cstring)                                                                                  --- // submit one header cell manually (rarely used)
+	@(link_name="ImGui_TableHeadersRow")        TableHeadersRow        :: proc()                                                                                                --- // submit a row with headers cells based on data provided to TableSetupColumn() + submit context menu
+	@(link_name="ImGui_TableAngledHeadersRow")  TableAngledHeadersRow  :: proc()                                                                                                --- // submit a row with angled headers for every column with the ImGuiTableColumnFlags_AngledHeader flag. MUST BE FIRST ROW.
 	// Tables: Sorting & Miscellaneous functions
 	// - Sorting: call TableGetSortSpecs() to retrieve latest sort specs for the table. NULL when not sorting.
 	//   When 'sort_specs->SpecsDirty == true' you should sort your data. It will be true when sorting specs have
 	//   changed since last call, or the first time. Make sure to set 'SpecsDirty = false' after sorting,
 	//   else you may wastefully sort your data every frame!
 	// - Functions args 'int column_n' treat the default value of -1 as the same as passing the current column index.
-	@(link_name="ImGui_TableGetSortSpecs")     TableGetSortSpecs     :: proc() -> ^TableSortSpecs                                       --- // get latest sort specs for the table (NULL if not sorting).  Lifetime: don't hold on this pointer over multiple frames or past any subsequent call to BeginTable().
-	@(link_name="ImGui_TableGetColumnCount")   TableGetColumnCount   :: proc() -> c.int                                                 --- // return number of columns (value passed to BeginTable)
-	@(link_name="ImGui_TableGetColumnIndex")   TableGetColumnIndex   :: proc() -> c.int                                                 --- // return current column index.
-	@(link_name="ImGui_TableGetRowIndex")      TableGetRowIndex      :: proc() -> c.int                                                 --- // return current row index.
-	@(link_name="ImGui_TableGetColumnName")    TableGetColumnName    :: proc(column_n: c.int = -1) -> cstring                           --- // return "" if column didn't have a name declared by TableSetupColumn(). Pass -1 to use current column.
-	@(link_name="ImGui_TableGetColumnFlags")   TableGetColumnFlags   :: proc(column_n: c.int = -1) -> TableColumnFlags                  --- // return column flags so you can query their Enabled/Visible/Sorted/Hovered status flags. Pass -1 to use current column.
-	@(link_name="ImGui_TableSetColumnEnabled") TableSetColumnEnabled :: proc(column_n: c.int, v: bool)                                  --- // change user accessible enabled/disabled state of a column. Set to false to hide the column. User can use the context menu to change this themselves (right-click in headers, or right-click in columns body with ImGuiTableFlags_ContextMenuInBody)
-	@(link_name="ImGui_TableGetHoveredColumn") TableGetHoveredColumn :: proc() -> c.int                                                 --- // return hovered column. return -1 when table is not hovered. return columns_count if the unused space at the right of visible columns is hovered. Can also use (TableGetColumnFlags() & ImGuiTableColumnFlags_IsHovered) instead.
-	@(link_name="ImGui_TableSetBgColor")       TableSetBgColor       :: proc(target: TableBgTarget, color: u32, column_n: c.int = -1)   --- // change the color of a cell, row, or column. See ImGuiTableBgTarget_ flags for details.
-	@(link_name="ImGui_ColumnsEx")             Columns               :: proc(count: c.int = 1, id: cstring = nil, borders: bool = true) ---
-	@(link_name="ImGui_NextColumn")            NextColumn            :: proc()                                                          --- // next column, defaults to current row or next row if the current row is finished
-	@(link_name="ImGui_GetColumnIndex")        GetColumnIndex        :: proc() -> c.int                                                 --- // get current column index
-	@(link_name="ImGui_GetColumnWidth")        GetColumnWidth        :: proc(column_index: c.int = -1) -> f32                           --- // get column width (in pixels). pass -1 to use current column
-	@(link_name="ImGui_SetColumnWidth")        SetColumnWidth        :: proc(column_index: c.int, width: f32)                           --- // set column width (in pixels). pass -1 to use current column
-	@(link_name="ImGui_GetColumnOffset")       GetColumnOffset       :: proc(column_index: c.int = -1) -> f32                           --- // get position of column line (in pixels, from the left side of the contents region). pass -1 to use current column, otherwise 0..GetColumnsCount() inclusive. column 0 is typically 0.0f
-	@(link_name="ImGui_SetColumnOffset")       SetColumnOffset       :: proc(column_index: c.int, offset_x: f32)                        --- // set position of column line (in pixels, from the left side of the contents region). pass -1 to use current column
-	@(link_name="ImGui_GetColumnsCount")       GetColumnsCount       :: proc() -> c.int                                                 ---
+	@(link_name="ImGui_TableGetSortSpecs")     TableGetSortSpecs     :: proc() -> ^TableSortSpecs                                     --- // get latest sort specs for the table (NULL if not sorting).  Lifetime: don't hold on this pointer over multiple frames or past any subsequent call to BeginTable().
+	@(link_name="ImGui_TableGetColumnCount")   TableGetColumnCount   :: proc() -> c.int                                               --- // return number of columns (value passed to BeginTable)
+	@(link_name="ImGui_TableGetColumnIndex")   TableGetColumnIndex   :: proc() -> c.int                                               --- // return current column index.
+	@(link_name="ImGui_TableGetRowIndex")      TableGetRowIndex      :: proc() -> c.int                                               --- // return current row index.
+	@(link_name="ImGui_TableGetColumnName")    TableGetColumnName    :: proc(column_n: c.int = -1) -> cstring                         --- // return "" if column didn't have a name declared by TableSetupColumn(). Pass -1 to use current column.
+	@(link_name="ImGui_TableGetColumnFlags")   TableGetColumnFlags   :: proc(column_n: c.int = -1) -> TableColumnFlags                --- // return column flags so you can query their Enabled/Visible/Sorted/Hovered status flags. Pass -1 to use current column.
+	@(link_name="ImGui_TableSetColumnEnabled") TableSetColumnEnabled :: proc(column_n: c.int, v: bool)                                --- // change user accessible enabled/disabled state of a column. Set to false to hide the column. User can use the context menu to change this themselves (right-click in headers, or right-click in columns body with ImGuiTableFlags_ContextMenuInBody)
+	@(link_name="ImGui_TableGetHoveredColumn") TableGetHoveredColumn :: proc() -> c.int                                               --- // return hovered column. return -1 when table is not hovered. return columns_count if the unused space at the right of visible columns is hovered. Can also use (TableGetColumnFlags() & ImGuiTableColumnFlags_IsHovered) instead.
+	@(link_name="ImGui_TableSetBgColor")       TableSetBgColor       :: proc(target: TableBgTarget, color: u32, column_n: c.int = -1) --- // change the color of a cell, row, or column. See ImGuiTableBgTarget_ flags for details.
+	// Legacy Columns API (prefer using Tables!)
+	// - You can also use SameLine(pos_x) to mimic simplified columns.
+	@(link_name="ImGui_Columns")         Columns         :: proc(count: c.int = 1, id: cstring = nil, borders: bool = true) ---
+	@(link_name="ImGui_NextColumn")      NextColumn      :: proc()                                                          --- // next column, defaults to current row or next row if the current row is finished
+	@(link_name="ImGui_GetColumnIndex")  GetColumnIndex  :: proc() -> c.int                                                 --- // get current column index
+	@(link_name="ImGui_GetColumnWidth")  GetColumnWidth  :: proc(column_index: c.int = -1) -> f32                           --- // get column width (in pixels). pass -1 to use current column
+	@(link_name="ImGui_SetColumnWidth")  SetColumnWidth  :: proc(column_index: c.int, width: f32)                           --- // set column width (in pixels). pass -1 to use current column
+	@(link_name="ImGui_GetColumnOffset") GetColumnOffset :: proc(column_index: c.int = -1) -> f32                           --- // get position of column line (in pixels, from the left side of the contents region). pass -1 to use current column, otherwise 0..GetColumnsCount() inclusive. column 0 is typically 0.0f
+	@(link_name="ImGui_SetColumnOffset") SetColumnOffset :: proc(column_index: c.int, offset_x: f32)                        --- // set position of column line (in pixels, from the left side of the contents region). pass -1 to use current column
+	@(link_name="ImGui_GetColumnsCount") GetColumnsCount :: proc() -> c.int                                                 ---
 	// Tab Bars, Tabs
 	// - Note: Tabs are automatically created by the docking system (when in 'docking' branch). Use this to create tab bars/tabs yourself.
-	@(link_name="ImGui_BeginTabBar")             BeginTabBar           :: proc(str_id: cstring, flags: TabBarFlags = {}) -> bool                                                                    --- // create and append into a TabBar
-	@(link_name="ImGui_EndTabBar")               EndTabBar             :: proc()                                                                                                                    --- // only call EndTabBar() if BeginTabBar() returns true!
-	@(link_name="ImGui_BeginTabItem")            BeginTabItem          :: proc(label: cstring, p_open: ^bool = nil, flags: TabItemFlags = {}) -> bool                                               --- // create a Tab. Returns true if the Tab is selected.
-	@(link_name="ImGui_EndTabItem")              EndTabItem            :: proc()                                                                                                                    --- // only call EndTabItem() if BeginTabItem() returns true!
-	@(link_name="ImGui_TabItemButton")           TabItemButton         :: proc(label: cstring, flags: TabItemFlags = {}) -> bool                                                                    --- // create a Tab behaving like a button. return true when clicked. cannot be selected in the tab bar.
-	@(link_name="ImGui_SetTabItemClosed")        SetTabItemClosed      :: proc(tab_or_docked_window_label: cstring)                                                                                 --- // notify TabBar or Docking system of a closed tab/window ahead (useful to reduce visual flicker on reorderable tab bars). For tab-bar: call after BeginTabBar() and before Tab submissions. Otherwise call with a window name.
-	@(link_name="ImGui_DockSpaceEx")             DockSpace             :: proc(dockspace_id: ID, size: Vec2 = {0, 0}, flags: DockNodeFlags = {}, window_class: ^WindowClass = nil) -> ID            ---
-	@(link_name="ImGui_DockSpaceOverViewportEx") DockSpaceOverViewport :: proc(dockspace_id: ID = {}, viewport: ^Viewport = nil, flags: DockNodeFlags = {}, window_class: ^WindowClass = nil) -> ID ---
-	@(link_name="ImGui_SetNextWindowDockID")     SetNextWindowDockID   :: proc(dock_id: ID, cond: Cond = {})                                                                                        --- // set next window dock id
-	@(link_name="ImGui_SetNextWindowClass")      SetNextWindowClass    :: proc(window_class: ^WindowClass)                                                                                          --- // set next window class (control docking compatibility + provide hints to platform backend via custom viewport flags and platform parent/child relationship)
-	@(link_name="ImGui_GetWindowDockID")         GetWindowDockID       :: proc() -> ID                                                                                                              ---
-	@(link_name="ImGui_IsWindowDocked")          IsWindowDocked        :: proc() -> bool                                                                                                            --- // is current window docked into another window?
+	@(link_name="ImGui_BeginTabBar")      BeginTabBar      :: proc(str_id: cstring, flags: TabBarFlags = {}) -> bool                      --- // create and append into a TabBar
+	@(link_name="ImGui_EndTabBar")        EndTabBar        :: proc()                                                                      --- // only call EndTabBar() if BeginTabBar() returns true!
+	@(link_name="ImGui_BeginTabItem")     BeginTabItem     :: proc(label: cstring, p_open: ^bool = nil, flags: TabItemFlags = {}) -> bool --- // create a Tab. Returns true if the Tab is selected.
+	@(link_name="ImGui_EndTabItem")       EndTabItem       :: proc()                                                                      --- // only call EndTabItem() if BeginTabItem() returns true!
+	@(link_name="ImGui_TabItemButton")    TabItemButton    :: proc(label: cstring, flags: TabItemFlags = {}) -> bool                      --- // create a Tab behaving like a button. return true when clicked. cannot be selected in the tab bar.
+	@(link_name="ImGui_SetTabItemClosed") SetTabItemClosed :: proc(tab_or_docked_window_label: cstring)                                   --- // notify TabBar or Docking system of a closed tab/window ahead (useful to reduce visual flicker on reorderable tab bars). For tab-bar: call after BeginTabBar() and before Tab submissions. Otherwise call with a window name.
+	// Docking
+	// [BETA API] Enable with io.ConfigFlags |= ImGuiConfigFlags_DockingEnable.
+	// Note: You can use most Docking facilities without calling any API. You DO NOT need to call DockSpace() to use Docking!
+	// - Drag from window title bar or their tab to dock/undock. Hold SHIFT to disable docking.
+	// - Drag from window menu button (upper-left button) to undock an entire node (all windows).
+	// - When io.ConfigDockingWithShift == true, you instead need to hold SHIFT to enable docking.
+	// About dockspaces:
+	// - Use DockSpaceOverViewport() to create a window covering the screen or a specific viewport + a dockspace inside it.
+	//   This is often used with ImGuiDockNodeFlags_PassthruCentralNode to make it transparent.
+	// - Use DockSpace() to create an explicit dock node _within_ an existing window. See Docking demo for details.
+	// - Important: Dockspaces need to be submitted _before_ any window they can host. Submit it early in your frame!
+	// - Important: Dockspaces need to be kept alive if hidden, otherwise windows docked into it will be undocked.
+	//   e.g. if you have multiple tabs with a dockspace inside each tab: submit the non-visible dockspaces with ImGuiDockNodeFlags_KeepAliveOnly.
+	@(link_name="ImGui_DockSpace")             DockSpace             :: proc(dockspace_id: ID, size: Vec2 = {0, 0}, flags: DockNodeFlags = {}, window_class: ^WindowClass = nil) -> ID            ---
+	@(link_name="ImGui_DockSpaceOverViewport") DockSpaceOverViewport :: proc(dockspace_id: ID = {}, viewport: ^Viewport = nil, flags: DockNodeFlags = {}, window_class: ^WindowClass = nil) -> ID ---
+	@(link_name="ImGui_SetNextWindowDockID")   SetNextWindowDockID   :: proc(dock_id: ID, cond: Cond = {})                                                                                        --- // set next window dock id
+	@(link_name="ImGui_SetNextWindowClass")    SetNextWindowClass    :: proc(window_class: ^WindowClass)                                                                                          --- // set next window class (control docking compatibility + provide hints to platform backend via custom viewport flags and platform parent/child relationship)
+	@(link_name="ImGui_GetWindowDockID")       GetWindowDockID       :: proc() -> ID                                                                                                              ---
+	@(link_name="ImGui_IsWindowDocked")        IsWindowDocked        :: proc() -> bool                                                                                                            --- // is current window docked into another window?
 	// Logging/Capture
 	// - All text output from the interface can be captured into tty/file/clipboard. By default, tree nodes are automatically opened during logging.
 	@(link_name="ImGui_LogToTTY")       LogToTTY       :: proc(auto_open_depth: c.int = -1)                          --- // start logging to tty (stdout)
@@ -2409,8 +2539,8 @@ foreign lib {
 	@(link_name="ImGui_PushClipRect") PushClipRect :: proc(clip_rect_min: Vec2, clip_rect_max: Vec2, intersect_with_current_clip_rect: bool) ---
 	@(link_name="ImGui_PopClipRect")  PopClipRect  :: proc()                                                                                 ---
 	// Focus, Activation
-	@(link_name="ImGui_SetItemDefaultFocus")    SetItemDefaultFocus  :: proc()                   --- // make last item the default focused item of of a newly appearing window.
-	@(link_name="ImGui_SetKeyboardFocusHereEx") SetKeyboardFocusHere :: proc(offset: c.int = {}) --- // focus keyboard on the next widget. Use positive 'offset' to access sub components of a multiple component widget. Use -1 to access previous widget.
+	@(link_name="ImGui_SetItemDefaultFocus")  SetItemDefaultFocus  :: proc()                   --- // make last item the default focused item of of a newly appearing window.
+	@(link_name="ImGui_SetKeyboardFocusHere") SetKeyboardFocusHere :: proc(offset: c.int = {}) --- // focus keyboard on the next widget. Use positive 'offset' to access sub components of a multiple component widget. Use -1 to access previous widget.
 	// Keyboard/Gamepad Navigation
 	@(link_name="ImGui_SetNavCursorVisible") SetNavCursorVisible :: proc(visible: bool) --- // alter visibility of keyboard/gamepad cursor. by default: show when using an arrow key, hide when clicking with mouse.
 	// Overlapping mode
@@ -2421,7 +2551,7 @@ foreign lib {
 	@(link_name="ImGui_IsItemHovered")              IsItemHovered              :: proc(flags: HoveredFlags = {}) -> bool       --- // is the last item hovered? (and usable, aka not blocked by a popup, etc.). See ImGuiHoveredFlags for more options.
 	@(link_name="ImGui_IsItemActive")               IsItemActive               :: proc() -> bool                               --- // is the last item active? (e.g. button being held, text field being edited. This will continuously return true while holding mouse button on an item. Items that don't interact will always return false)
 	@(link_name="ImGui_IsItemFocused")              IsItemFocused              :: proc() -> bool                               --- // is the last item focused for keyboard/gamepad navigation?
-	@(link_name="ImGui_IsItemClickedEx")            IsItemClicked              :: proc(mouse_button: MouseButton = {}) -> bool --- // is the last item hovered and mouse clicked on? (**)  == IsMouseClicked(mouse_button) && IsItemHovered()Important. (**) this is NOT equivalent to the behavior of e.g. Button(). Read comments in function definition.
+	@(link_name="ImGui_IsItemClicked")              IsItemClicked              :: proc(mouse_button: MouseButton = {}) -> bool --- // is the last item hovered and mouse clicked on? (**)  == IsMouseClicked(mouse_button) && IsItemHovered()Important. (**) this is NOT equivalent to the behavior of e.g. Button(). Read comments in function definition.
 	@(link_name="ImGui_IsItemVisible")              IsItemVisible              :: proc() -> bool                               --- // is the last item visible? (items may be out of sight because of clipping/scrolling)
 	@(link_name="ImGui_IsItemEdited")               IsItemEdited               :: proc() -> bool                               --- // did the last item modify its underlying value this frame? or was pressed? This is generally the same as the "bool" return value of many widgets.
 	@(link_name="ImGui_IsItemActivated")            IsItemActivated            :: proc() -> bool                               --- // was the last item just made active (item was previously inactive).
@@ -2439,19 +2569,21 @@ foreign lib {
 	// - Currently represents the Platform Window created by the application which is hosting our Dear ImGui windows.
 	// - In 'docking' branch with multi-viewport enabled, we extend this concept to have multiple active viewports.
 	// - In the future we will extend this concept further to also represent Platform Monitor and support a "no main platform window" operation mode.
-	@(link_name="ImGui_GetMainViewport")         GetMainViewport       :: proc() -> ^Viewport                          --- // return primary/default viewport. This can never be NULL.
-	@(link_name="ImGui_GetBackgroundDrawListEx") GetBackgroundDrawList :: proc(viewport: ^Viewport = nil) -> ^DrawList --- // get background draw list for the given viewport or viewport associated to the current window. this draw list will be the first rendering one. Useful to quickly draw shapes/text behind dear imgui contents.
-	@(link_name="ImGui_GetForegroundDrawListEx") GetForegroundDrawList :: proc(viewport: ^Viewport = nil) -> ^DrawList --- // get foreground draw list for the given viewport or viewport associated to the current window. this draw list will be the top-most rendered one. Useful to quickly draw shapes/text over dear imgui contents.
+	@(link_name="ImGui_GetMainViewport") GetMainViewport :: proc() -> ^Viewport --- // return primary/default viewport. This can never be NULL.
+	// Background/Foreground Draw Lists
+	@(link_name="ImGui_GetBackgroundDrawList") GetBackgroundDrawList :: proc(viewport: ^Viewport = nil) -> ^DrawList --- // get background draw list for the given viewport or viewport associated to the current window. this draw list will be the first rendering one. Useful to quickly draw shapes/text behind dear imgui contents.
+	@(link_name="ImGui_GetForegroundDrawList") GetForegroundDrawList :: proc(viewport: ^Viewport = nil) -> ^DrawList --- // get foreground draw list for the given viewport or viewport associated to the current window. this draw list will be the top-most rendered one. Useful to quickly draw shapes/text over dear imgui contents.
 	// Miscellaneous Utilities
-	@(link_name="ImGui_IsRectVisibleBySize")   IsRectVisibleBySize   :: proc(size: Vec2) -> bool                                                                                                --- // test if rectangle (of given size, starting from cursor position) is visible / not clipped.
-	@(link_name="ImGui_IsRectVisible")         IsRectVisible         :: proc(rect_min: Vec2, rect_max: Vec2) -> bool                                                                            --- // test if rectangle (in screen space) is visible / not clipped. to perform coarse clipping on user's side.
-	@(link_name="ImGui_GetTime")               GetTime               :: proc() -> f64                                                                                                           --- // get global imgui time. incremented by io.DeltaTime every frame.
-	@(link_name="ImGui_GetFrameCount")         GetFrameCount         :: proc() -> c.int                                                                                                         --- // get global imgui frame count. incremented by 1 every frame.
-	@(link_name="ImGui_GetDrawListSharedData") GetDrawListSharedData :: proc() -> ^DrawListSharedData                                                                                           --- // you may use this when creating your own ImDrawList instances.
-	@(link_name="ImGui_GetStyleColorName")     GetStyleColorName     :: proc(idx: Col) -> cstring                                                                                               --- // get a string corresponding to the enum value (for display, saving, etc.).
-	@(link_name="ImGui_SetStateStorage")       SetStateStorage       :: proc(storage: ^Storage)                                                                                                 --- // replace current window storage with our own (if you want to manipulate it yourself, typically clear subsection of it)
-	@(link_name="ImGui_GetStateStorage")       GetStateStorage       :: proc() -> ^Storage                                                                                                      ---
-	@(link_name="ImGui_CalcTextSizeEx")        CalcTextSize          :: proc(text: cstring, text_end: cstring = nil, hide_text_after_double_hash: bool = false, wrap_width: f32 = -1.0) -> Vec2 ---
+	@(link_name="ImGui_IsRectVisibleBySize")   IsRectVisibleBySize   :: proc(size: Vec2) -> bool                     --- // test if rectangle (of given size, starting from cursor position) is visible / not clipped.
+	@(link_name="ImGui_IsRectVisible")         IsRectVisible         :: proc(rect_min: Vec2, rect_max: Vec2) -> bool --- // test if rectangle (in screen space) is visible / not clipped. to perform coarse clipping on user's side.
+	@(link_name="ImGui_GetTime")               GetTime               :: proc() -> f64                                --- // get global imgui time. incremented by io.DeltaTime every frame.
+	@(link_name="ImGui_GetFrameCount")         GetFrameCount         :: proc() -> c.int                              --- // get global imgui frame count. incremented by 1 every frame.
+	@(link_name="ImGui_GetDrawListSharedData") GetDrawListSharedData :: proc() -> ^DrawListSharedData                --- // you may use this when creating your own ImDrawList instances.
+	@(link_name="ImGui_GetStyleColorName")     GetStyleColorName     :: proc(idx: Col) -> cstring                    --- // get a string corresponding to the enum value (for display, saving, etc.).
+	@(link_name="ImGui_SetStateStorage")       SetStateStorage       :: proc(storage: ^Storage)                      --- // replace current window storage with our own (if you want to manipulate it yourself, typically clear subsection of it)
+	@(link_name="ImGui_GetStateStorage")       GetStateStorage       :: proc() -> ^Storage                           ---
+	// Text Utilities
+	@(link_name="ImGui_CalcTextSize") CalcTextSize :: proc(text: cstring, text_end: cstring = nil, hide_text_after_double_hash: bool = false, wrap_width: f32 = -1.0) -> Vec2 ---
 	// Color Utilities
 	@(link_name="ImGui_ColorConvertU32ToFloat4") ColorConvertU32ToFloat4 :: proc(_in: u32) -> Vec4                                              ---
 	@(link_name="ImGui_ColorConvertFloat4ToU32") ColorConvertFloat4ToU32 :: proc(_in: Vec4) -> u32                                              ---
@@ -2462,7 +2594,7 @@ foreign lib {
 	// - (legacy: before v1.87, we used ImGuiKey to carry native/user indices as defined by each backends. This was obsoleted in 1.87 (2022-02) and completely removed in 1.91.5 (2024-11). See https://github.com/ocornut/imgui/issues/4921)
 	// - (legacy: any use of ImGuiKey will assert when key < 512 to detect passing legacy native/user indices)
 	@(link_name="ImGui_IsKeyDown")                       IsKeyDown                       :: proc(key: Key) -> bool                                --- // is key being held.
-	@(link_name="ImGui_IsKeyPressedEx")                  IsKeyPressed                    :: proc(key: Key, repeat: bool = true) -> bool           --- // was key pressed (went from !Down to Down)? if repeat=true, uses io.KeyRepeatDelay / KeyRepeatRate
+	@(link_name="ImGui_IsKeyPressed")                    IsKeyPressed                    :: proc(key: Key, repeat: bool = true) -> bool           --- // was key pressed (went from !Down to Down)? if repeat=true, uses io.KeyRepeatDelay / KeyRepeatRate
 	@(link_name="ImGui_IsKeyReleased")                   IsKeyReleased                   :: proc(key: Key) -> bool                                --- // was key released (went from Down to !Down)?
 	@(link_name="ImGui_IsKeyChordPressed")               IsKeyChordPressed               :: proc(key_chord: KeyChord) -> bool                     --- // was key chord (mods + key) pressed, e.g. you can pass 'ImGuiMod_Ctrl | ImGuiKey_S' as a key-chord. This doesn't do any routing or focus check, please consider using Shortcut() function instead.
 	@(link_name="ImGui_GetKeyPressedAmount")             GetKeyPressedAmount             :: proc(key: Key, repeat_delay: f32, rate: f32) -> c.int --- // uses provided repeat rate/delay. return a count, most often 0 or 1 but might be >1 if RepeatRate is small enough that DeltaTime > RepeatRate
@@ -2497,18 +2629,18 @@ foreign lib {
 	// - You can also use regular integer: it is forever guaranteed that 0=Left, 1=Right, 2=Middle.
 	// - Dragging operations are only reported after mouse has moved a certain distance away from the initial clicking position (see 'lock_threshold' and 'io.MouseDraggingThreshold')
 	@(link_name="ImGui_IsMouseDown")                      IsMouseDown                      :: proc(button: MouseButton) -> bool                                  --- // is mouse button held?
-	@(link_name="ImGui_IsMouseClickedEx")                 IsMouseClicked                   :: proc(button: MouseButton, repeat: bool = false) -> bool            --- // did mouse button clicked? (went from !Down to Down). Same as GetMouseClickedCount() == 1.
+	@(link_name="ImGui_IsMouseClicked")                   IsMouseClicked                   :: proc(button: MouseButton, repeat: bool = false) -> bool            --- // did mouse button clicked? (went from !Down to Down). Same as GetMouseClickedCount() == 1.
 	@(link_name="ImGui_IsMouseReleased")                  IsMouseReleased                  :: proc(button: MouseButton) -> bool                                  --- // did mouse button released? (went from Down to !Down)
 	@(link_name="ImGui_IsMouseDoubleClicked")             IsMouseDoubleClicked             :: proc(button: MouseButton) -> bool                                  --- // did mouse button double-clicked? Same as GetMouseClickedCount() == 2. (note that a double-click will also report IsMouseClicked() == true)
 	@(link_name="ImGui_GetMouseClickedCount")             GetMouseClickedCount             :: proc(button: MouseButton) -> c.int                                 --- // return the number of successive mouse-clicks at the time where a click happen (otherwise 0).
-	@(link_name="ImGui_IsMouseHoveringRectEx")            IsMouseHoveringRect              :: proc(r_min: Vec2, r_max: Vec2, clip: bool = true) -> bool          --- // is mouse hovering given bounding rect (in screen space). clipped by current clipping settings, but disregarding of other consideration of focus/window ordering/popup-block.
+	@(link_name="ImGui_IsMouseHoveringRect")              IsMouseHoveringRect              :: proc(r_min: Vec2, r_max: Vec2, clip: bool = true) -> bool          --- // is mouse hovering given bounding rect (in screen space). clipped by current clipping settings, but disregarding of other consideration of focus/window ordering/popup-block.
 	@(link_name="ImGui_IsMousePosValid")                  IsMousePosValid                  :: proc(mouse_pos: ^Vec2 = nil) -> bool                               --- // by convention we use (-FLT_MAX,-FLT_MAX) to denote that there is no mouse available
 	@(link_name="ImGui_IsAnyMouseDown")                   IsAnyMouseDown                   :: proc() -> bool                                                     --- // [WILL OBSOLETE] is any mouse button held? This was designed for backends, but prefer having backend maintain a mask of held mouse buttons, because upcoming input queue system will make this invalid.
 	@(link_name="ImGui_GetMousePos")                      GetMousePos                      :: proc() -> Vec2                                                     --- // shortcut to ImGui::GetIO().MousePos provided by user, to be consistent with other calls
 	@(link_name="ImGui_GetMousePosOnOpeningCurrentPopup") GetMousePosOnOpeningCurrentPopup :: proc() -> Vec2                                                     --- // retrieve mouse position at the time of opening popup we have BeginPopup() into (helper to avoid user backing that value themselves)
 	@(link_name="ImGui_IsMouseDragging")                  IsMouseDragging                  :: proc(button: MouseButton, lock_threshold: f32 = -1.0) -> bool      --- // is mouse dragging? (uses io.MouseDraggingThreshold if lock_threshold < 0.0f)
 	@(link_name="ImGui_GetMouseDragDelta")                GetMouseDragDelta                :: proc(button: MouseButton = {}, lock_threshold: f32 = -1.0) -> Vec2 --- // return the delta from the initial clicking position while the mouse button is pressed or was just released. This is locked and return 0.0f until the mouse moves past a distance threshold at least once (uses io.MouseDraggingThreshold if lock_threshold < 0.0f)
-	@(link_name="ImGui_ResetMouseDragDeltaEx")            ResetMouseDragDelta              :: proc(button: MouseButton = {})                                     --- //
+	@(link_name="ImGui_ResetMouseDragDelta")              ResetMouseDragDelta              :: proc(button: MouseButton = {})                                     --- //
 	@(link_name="ImGui_GetMouseCursor")                   GetMouseCursor                   :: proc() -> MouseCursor                                              --- // get desired mouse cursor shape. Important: reset in ImGui::NewFrame(), this is updated during the frame. valid before Render(). If you use software rendering by setting io.MouseDrawCursor ImGui will render those for you
 	@(link_name="ImGui_SetMouseCursor")                   SetMouseCursor                   :: proc(cursor_type: MouseCursor)                                     --- // set desired mouse cursor shape
 	@(link_name="ImGui_SetNextFrameWantCaptureMouse")     SetNextFrameWantCaptureMouse     :: proc(want_capture_mouse: bool)                                     --- // Override io.WantCaptureMouse flag next frame (said flag is left for your application to handle, typical when true it instucts your app to ignore inputs). This is equivalent to setting "io.WantCaptureMouse = want_capture_mouse;" after the next NewFrame() call.
@@ -2542,14 +2674,14 @@ foreign lib {
 	// (Optional) Platform/OS interface for multi-viewport support
 	// Read comments around the ImGuiPlatformIO structure for more details.
 	// Note: You may use GetWindowViewport() to get the current viewport of the current window.
-	@(link_name="ImGui_UpdatePlatformWindows")          UpdatePlatformWindows        :: proc()                                                                     --- // call in main loop. will call CreateWindow/ResizeWindow/etc. platform functions for each secondary viewport, and DestroyWindow for each inactive viewport.
-	@(link_name="ImGui_RenderPlatformWindowsDefaultEx") RenderPlatformWindowsDefault :: proc(platform_render_arg: rawptr = nil, renderer_render_arg: rawptr = nil) --- // call in main loop. will call RenderWindow/SwapBuffers platform functions for each secondary viewport which doesn't have the ImGuiViewportFlags_Minimized flag set. May be reimplemented by user for custom rendering needs.
-	@(link_name="ImGui_DestroyPlatformWindows")         DestroyPlatformWindows       :: proc()                                                                     --- // call DestroyWindow platform functions for all viewports. call from backend Shutdown() if you need to close platform windows before imgui shutdown. otherwise will be called by DestroyContext().
-	@(link_name="ImGui_FindViewportByID")               FindViewportByID             :: proc(id: ID) -> ^Viewport                                                  --- // this is a helper for backends.
-	@(link_name="ImGui_FindViewportByPlatformHandle")   FindViewportByPlatformHandle :: proc(platform_handle: rawptr) -> ^Viewport                                 --- // this is a helper for backends. the type platform_handle is decided by the backend (e.g. HWND, MyWindow*, GLFWwindow* etc.)
-	@(link_name="ImVector_Construct")                   Vector_Construct             :: proc(vector: rawptr)                                                       --- // Construct a zero-size ImVector<> (of any type). This is primarily useful when calling ImFontGlyphRangesBuilder_BuildRanges()
-	@(link_name="ImVector_Destruct")                    Vector_Destruct              :: proc(vector: rawptr)                                                       --- // Destruct an ImVector<> (of any type). Important: Frees the vector memory but does not call destructors on contained objects (if they have them)
-	@(link_name="ImGuiStyle_ScaleAllSizes")             Style_ScaleAllSizes          :: proc(self: ^Style, scale_factor: f32)                                      ---
+	@(link_name="ImGui_UpdatePlatformWindows")        UpdatePlatformWindows        :: proc()                                                                     --- // call in main loop. will call CreateWindow/ResizeWindow/etc. platform functions for each secondary viewport, and DestroyWindow for each inactive viewport.
+	@(link_name="ImGui_RenderPlatformWindowsDefault") RenderPlatformWindowsDefault :: proc(platform_render_arg: rawptr = nil, renderer_render_arg: rawptr = nil) --- // call in main loop. will call RenderWindow/SwapBuffers platform functions for each secondary viewport which doesn't have the ImGuiViewportFlags_Minimized flag set. May be reimplemented by user for custom rendering needs.
+	@(link_name="ImGui_DestroyPlatformWindows")       DestroyPlatformWindows       :: proc()                                                                     --- // call DestroyWindow platform functions for all viewports. call from backend Shutdown() if you need to close platform windows before imgui shutdown. otherwise will be called by DestroyContext().
+	@(link_name="ImGui_FindViewportByID")             FindViewportByID             :: proc(id: ID) -> ^Viewport                                                  --- // this is a helper for backends.
+	@(link_name="ImGui_FindViewportByPlatformHandle") FindViewportByPlatformHandle :: proc(platform_handle: rawptr) -> ^Viewport                                 --- // this is a helper for backends. the type platform_handle is decided by the backend (e.g. HWND, MyWindow*, GLFWwindow* etc.)
+	@(link_name="ImVector_Construct")                 Vector_Construct             :: proc(vector: rawptr)                                                       --- // Construct a zero-size ImVector<> (of any type). This is primarily useful when calling ImFontGlyphRangesBuilder_BuildRanges()
+	@(link_name="ImVector_Destruct")                  Vector_Destruct              :: proc(vector: rawptr)                                                       --- // Destruct an ImVector<> (of any type). Important: Frees the vector memory but does not call destructors on contained objects (if they have them)
+	@(link_name="ImGuiStyle_ScaleAllSizes")           Style_ScaleAllSizes          :: proc(self: ^Style, scale_factor: f32)                                      ---
 	// Input Functions
 	@(link_name="ImGuiIO_AddKeyEvent")                       IO_AddKeyEvent                       :: proc(self: ^IO, key: Key, down: bool)                                                                     --- // Queue a new key down/up event. Key should be "translated" (as in, generally ImGuiKey_A matches the key end-user would use to emit an 'A' character)
 	@(link_name="ImGuiIO_AddKeyAnalogEvent")                 IO_AddKeyAnalogEvent                 :: proc(self: ^IO, key: Key, down: bool, v: f32)                                                             --- // Queue a new key down/up event for analog values (e.g. ImGuiKey_Gamepad_ values). Dead-zones should be handled by the backend.
@@ -2562,12 +2694,11 @@ foreign lib {
 	@(link_name="ImGuiIO_AddInputCharacter")                 IO_AddInputCharacter                 :: proc(self: ^IO, _c: c.uint)                                                                               --- // Queue a new character input
 	@(link_name="ImGuiIO_AddInputCharacterUTF16")            IO_AddInputCharacterUTF16            :: proc(self: ^IO, _c: Wchar16)                                                                              --- // Queue a new character input from a UTF-16 character, it can be a surrogate
 	@(link_name="ImGuiIO_AddInputCharactersUTF8")            IO_AddInputCharactersUTF8            :: proc(self: ^IO, str: cstring)                                                                             --- // Queue a new characters input from a UTF-8 string
-	@(link_name="ImGuiIO_SetKeyEventNativeDataEx")           IO_SetKeyEventNativeData             :: proc(self: ^IO, key: Key, native_keycode: c.int, native_scancode: c.int, native_legacy_index: c.int = -1) --- // [Optional] Specify index for legacy <1.87 IsKeyXXX() functions with native indices + specify native keycode, scancode.
+	@(link_name="ImGuiIO_SetKeyEventNativeData")             IO_SetKeyEventNativeData             :: proc(self: ^IO, key: Key, native_keycode: c.int, native_scancode: c.int, native_legacy_index: c.int = -1) --- // [Optional] Specify index for legacy <1.87 IsKeyXXX() functions with native indices + specify native keycode, scancode.
 	@(link_name="ImGuiIO_SetAppAcceptingEvents")             IO_SetAppAcceptingEvents             :: proc(self: ^IO, accepting_events: bool)                                                                   --- // Set master flag for accepting key/mouse/text events (default to true). Useful if you have native dialog boxes that are interrupting your application loop/refresh, and you want to disable events being queued while your app is frozen.
 	@(link_name="ImGuiIO_ClearEventsQueue")                  IO_ClearEventsQueue                  :: proc(self: ^IO)                                                                                           --- // Clear all incoming events.
 	@(link_name="ImGuiIO_ClearInputKeys")                    IO_ClearInputKeys                    :: proc(self: ^IO)                                                                                           --- // Clear current keyboard/gamepad state + current frame text input buffer. Equivalent to releasing all keys/buttons.
 	@(link_name="ImGuiIO_ClearInputMouse")                   IO_ClearInputMouse                   :: proc(self: ^IO)                                                                                           --- // Clear current mouse state.
-	@(link_name="ImGuiIO_ClearInputCharacters")              IO_ClearInputCharacters              :: proc(self: ^IO)                                                                                           --- // [Obsoleted in 1.89.8] Clear the current frame text input buffer. Now included within ClearInputKeys().
 	@(link_name="ImGuiInputTextCallbackData_DeleteChars")    InputTextCallbackData_DeleteChars    :: proc(self: ^InputTextCallbackData, pos: c.int, bytes_count: c.int)                                        ---
 	@(link_name="ImGuiInputTextCallbackData_InsertChars")    InputTextCallbackData_InsertChars    :: proc(self: ^InputTextCallbackData, pos: c.int, text: cstring, text_end: cstring = nil)                    ---
 	@(link_name="ImGuiInputTextCallbackData_SelectAll")      InputTextCallbackData_SelectAll      :: proc(self: ^InputTextCallbackData)                                                                        ---
@@ -2627,9 +2758,7 @@ foreign lib {
 	// Seek cursor toward given item. This is automatically called while stepping.
 	// - The only reason to call this is: you can use ImGuiListClipper::Begin(INT_MAX) if you don't know item count ahead of time.
 	// - In this case, after all steps are done, you'll want to call SeekCursorForItem(item_count).
-	@(link_name="ImGuiListClipper_SeekCursorForItem")          ListClipper_SeekCursorForItem          :: proc(self: ^ListClipper, item_index: c.int)                  ---
-	@(link_name="ImGuiListClipper_IncludeRangeByIndices")      ListClipper_IncludeRangeByIndices      :: proc(self: ^ListClipper, item_begin: c.int, item_end: c.int) --- // [renamed in 1.89.9]
-	@(link_name="ImGuiListClipper_ForceDisplayRangeByIndices") ListClipper_ForceDisplayRangeByIndices :: proc(self: ^ListClipper, item_begin: c.int, item_end: c.int) --- // [renamed in 1.89.6]
+	@(link_name="ImGuiListClipper_SeekCursorForItem") ListClipper_SeekCursorForItem :: proc(self: ^ListClipper, item_index: c.int) ---
 	// FIXME-OBSOLETE: May need to obsolete/cleanup those helpers.
 	@(link_name="ImColor_SetHSV")                                   Color_SetHSV                                :: proc(self: ^Color, h: f32, s: f32, v: f32, a: f32 = 1.0)                    ---
 	@(link_name="ImColor_HSV")                                      Color_HSV                                   :: proc(h: f32, s: f32, v: f32, a: f32 = 1.0) -> Color                         ---
@@ -2642,46 +2771,57 @@ foreign lib {
 	@(link_name="ImGuiSelectionBasicStorage_GetStorageIdFromIndex") SelectionBasicStorage_GetStorageIdFromIndex :: proc(self: ^SelectionBasicStorage, idx: c.int) -> ID                        --- // Convert index to item id based on provided adapter.
 	@(link_name="ImGuiSelectionExternalStorage_ApplyRequests")      SelectionExternalStorage_ApplyRequests      :: proc(self: ^SelectionExternalStorage, ms_io: ^MultiSelectIO)                --- // Apply selection requests by using AdapterSetItemSelected() calls
 	// Since 1.83: returns ImTextureID associated with this draw call. Warning: DO NOT assume this is always same as 'TextureId' (we will change this function for an upcoming feature)
-	@(link_name="ImDrawCmd_GetTexID")                   DrawCmd_GetTexID                   :: proc(self: ^DrawCmd) -> TextureID                                                                                                                                             ---
-	@(link_name="ImDrawListSplitter_Clear")             DrawListSplitter_Clear             :: proc(self: ^DrawListSplitter)                                                                                                                                                 --- // Do not clear Channels[] so our allocations are reused next frame
-	@(link_name="ImDrawListSplitter_ClearFreeMemory")   DrawListSplitter_ClearFreeMemory   :: proc(self: ^DrawListSplitter)                                                                                                                                                 ---
-	@(link_name="ImDrawListSplitter_Split")             DrawListSplitter_Split             :: proc(self: ^DrawListSplitter, draw_list: ^DrawList, count: c.int)                                                                                                             ---
-	@(link_name="ImDrawListSplitter_Merge")             DrawListSplitter_Merge             :: proc(self: ^DrawListSplitter, draw_list: ^DrawList)                                                                                                                           ---
-	@(link_name="ImDrawListSplitter_SetCurrentChannel") DrawListSplitter_SetCurrentChannel :: proc(self: ^DrawListSplitter, draw_list: ^DrawList, channel_idx: c.int)                                                                                                       ---
-	@(link_name="ImDrawList_PushClipRect")              DrawList_PushClipRect              :: proc(self: ^DrawList, clip_rect_min: Vec2, clip_rect_max: Vec2, intersect_with_current_clip_rect: bool = false)                                                               --- // Render-level scissoring. This is passed down to your render function but not used for CPU-side coarse clipping. Prefer using higher-level ImGui::PushClipRect() to affect logic (hit-testing and widget culling)
-	@(link_name="ImDrawList_PushClipRectFullScreen")    DrawList_PushClipRectFullScreen    :: proc(self: ^DrawList)                                                                                                                                                         ---
-	@(link_name="ImDrawList_PopClipRect")               DrawList_PopClipRect               :: proc(self: ^DrawList)                                                                                                                                                         ---
-	@(link_name="ImDrawList_PushTextureID")             DrawList_PushTextureID             :: proc(self: ^DrawList, texture_id: TextureID)                                                                                                                                  ---
-	@(link_name="ImDrawList_PopTextureID")              DrawList_PopTextureID              :: proc(self: ^DrawList)                                                                                                                                                         ---
-	@(link_name="ImDrawList_GetClipRectMin")            DrawList_GetClipRectMin            :: proc(self: ^DrawList) -> Vec2                                                                                                                                                 ---
-	@(link_name="ImDrawList_GetClipRectMax")            DrawList_GetClipRectMax            :: proc(self: ^DrawList) -> Vec2                                                                                                                                                 ---
-	@(link_name="ImDrawList_AddLineEx")                 DrawList_AddLine                   :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, col: u32, thickness: f32 = 1.0)                                                                                                     ---
-	@(link_name="ImDrawList_AddRectEx")                 DrawList_AddRect                   :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: u32, rounding: f32 = 0.0, flags: DrawFlags = {}, thickness: f32 = 1.0)                                                   --- // a: upper-left, b: lower-right (== upper-left + size)
-	@(link_name="ImDrawList_AddRectFilledEx")           DrawList_AddRectFilled             :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: u32, rounding: f32 = 0.0, flags: DrawFlags = {})                                                                         --- // a: upper-left, b: lower-right (== upper-left + size)
-	@(link_name="ImDrawList_AddRectFilledMultiColor")   DrawList_AddRectFilledMultiColor   :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col_upr_left: u32, col_upr_right: u32, col_bot_right: u32, col_bot_left: u32)                                                 ---
-	@(link_name="ImDrawList_AddQuadEx")                 DrawList_AddQuad                   :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32, thickness: f32 = 1.0)                                                                                 ---
-	@(link_name="ImDrawList_AddQuadFilled")             DrawList_AddQuadFilled             :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32)                                                                                                       ---
-	@(link_name="ImDrawList_AddTriangleEx")             DrawList_AddTriangle               :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32, thickness: f32 = 1.0)                                                                                           ---
-	@(link_name="ImDrawList_AddTriangleFilled")         DrawList_AddTriangleFilled         :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32)                                                                                                                 ---
-	@(link_name="ImDrawList_AddCircleEx")               DrawList_AddCircle                 :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int = {}, thickness: f32 = 1.0)                                                                    ---
-	@(link_name="ImDrawList_AddCircleFilled")           DrawList_AddCircleFilled           :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int = {})                                                                                          ---
-	@(link_name="ImDrawList_AddNgonEx")                 DrawList_AddNgon                   :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int, thickness: f32 = 1.0)                                                                         ---
-	@(link_name="ImDrawList_AddNgonFilled")             DrawList_AddNgonFilled             :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int)                                                                                               ---
-	@(link_name="ImDrawList_AddEllipseEx")              DrawList_AddEllipse                :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: u32, rot: f32 = 0.0, num_segments: c.int = {}, thickness: f32 = 1.0)                                                   ---
-	@(link_name="ImDrawList_AddEllipseFilledEx")        DrawList_AddEllipseFilled          :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: u32, rot: f32 = 0.0, num_segments: c.int = {})                                                                         ---
-	@(link_name="ImDrawList_AddTextEx")                 DrawList_AddText                   :: proc(self: ^DrawList, pos: Vec2, col: u32, text_begin: cstring, text_end: cstring = nil)                                                                                      ---
-	@(link_name="ImDrawList_AddTextImFontPtrEx")        DrawList_AddTextImFontPtr          :: proc(self: ^DrawList, font: ^Font, font_size: f32, pos: Vec2, col: u32, text_begin: cstring, text_end: cstring = nil, wrap_width: f32 = 0.0, cpu_fine_clip_rect: ^Vec4 = nil) ---
-	@(link_name="ImDrawList_AddBezierCubic")            DrawList_AddBezierCubic            :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32, thickness: f32, num_segments: c.int = {})                                                             --- // Cubic Bezier (4 control points)
-	@(link_name="ImDrawList_AddBezierQuadratic")        DrawList_AddBezierQuadratic        :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32, thickness: f32, num_segments: c.int = {})                                                                       --- // Quadratic Bezier (3 control points)
+	@(link_name="ImDrawCmd_GetTexID")                   DrawCmd_GetTexID                   :: proc(self: ^DrawCmd) -> TextureID                                                                               ---
+	@(link_name="ImDrawListSplitter_Clear")             DrawListSplitter_Clear             :: proc(self: ^DrawListSplitter)                                                                                   --- // Do not clear Channels[] so our allocations are reused next frame
+	@(link_name="ImDrawListSplitter_ClearFreeMemory")   DrawListSplitter_ClearFreeMemory   :: proc(self: ^DrawListSplitter)                                                                                   ---
+	@(link_name="ImDrawListSplitter_Split")             DrawListSplitter_Split             :: proc(self: ^DrawListSplitter, draw_list: ^DrawList, count: c.int)                                               ---
+	@(link_name="ImDrawListSplitter_Merge")             DrawListSplitter_Merge             :: proc(self: ^DrawListSplitter, draw_list: ^DrawList)                                                             ---
+	@(link_name="ImDrawListSplitter_SetCurrentChannel") DrawListSplitter_SetCurrentChannel :: proc(self: ^DrawListSplitter, draw_list: ^DrawList, channel_idx: c.int)                                         ---
+	@(link_name="ImDrawList_PushClipRect")              DrawList_PushClipRect              :: proc(self: ^DrawList, clip_rect_min: Vec2, clip_rect_max: Vec2, intersect_with_current_clip_rect: bool = false) --- // Render-level scissoring. This is passed down to your render function but not used for CPU-side coarse clipping. Prefer using higher-level ImGui::PushClipRect() to affect logic (hit-testing and widget culling)
+	@(link_name="ImDrawList_PushClipRectFullScreen")    DrawList_PushClipRectFullScreen    :: proc(self: ^DrawList)                                                                                           ---
+	@(link_name="ImDrawList_PopClipRect")               DrawList_PopClipRect               :: proc(self: ^DrawList)                                                                                           ---
+	@(link_name="ImDrawList_PushTextureID")             DrawList_PushTextureID             :: proc(self: ^DrawList, texture_id: TextureID)                                                                    ---
+	@(link_name="ImDrawList_PopTextureID")              DrawList_PopTextureID              :: proc(self: ^DrawList)                                                                                           ---
+	@(link_name="ImDrawList_GetClipRectMin")            DrawList_GetClipRectMin            :: proc(self: ^DrawList) -> Vec2                                                                                   ---
+	@(link_name="ImDrawList_GetClipRectMax")            DrawList_GetClipRectMax            :: proc(self: ^DrawList) -> Vec2                                                                                   ---
+	// Primitives
+	// - Filled shapes must always use clockwise winding order. The anti-aliasing fringe depends on it. Counter-clockwise shapes will have "inward" anti-aliasing.
+	// - For rectangular primitives, "p_min" and "p_max" represent the upper-left and lower-right corners.
+	// - For circle primitives, use "num_segments == 0" to automatically calculate tessellation (preferred).
+	//   In older versions (until Dear ImGui 1.77) the AddCircle functions defaulted to num_segments == 12.
+	//   In future versions we will use textures to provide cheaper and higher-quality circles.
+	//   Use AddNgon() and AddNgonFilled() functions if you need to guarantee a specific number of sides.
+	@(link_name="ImDrawList_AddLine")                 DrawList_AddLine                 :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, col: u32, thickness: f32 = 1.0)                                                                                                     ---
+	@(link_name="ImDrawList_AddRect")                 DrawList_AddRect                 :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: u32, rounding: f32 = 0.0, flags: DrawFlags = {}, thickness: f32 = 1.0)                                                   --- // a: upper-left, b: lower-right (== upper-left + size)
+	@(link_name="ImDrawList_AddRectFilled")           DrawList_AddRectFilled           :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: u32, rounding: f32 = 0.0, flags: DrawFlags = {})                                                                         --- // a: upper-left, b: lower-right (== upper-left + size)
+	@(link_name="ImDrawList_AddRectFilledMultiColor") DrawList_AddRectFilledMultiColor :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col_upr_left: u32, col_upr_right: u32, col_bot_right: u32, col_bot_left: u32)                                                 ---
+	@(link_name="ImDrawList_AddQuad")                 DrawList_AddQuad                 :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32, thickness: f32 = 1.0)                                                                                 ---
+	@(link_name="ImDrawList_AddQuadFilled")           DrawList_AddQuadFilled           :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32)                                                                                                       ---
+	@(link_name="ImDrawList_AddTriangle")             DrawList_AddTriangle             :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32, thickness: f32 = 1.0)                                                                                           ---
+	@(link_name="ImDrawList_AddTriangleFilled")       DrawList_AddTriangleFilled       :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32)                                                                                                                 ---
+	@(link_name="ImDrawList_AddCircle")               DrawList_AddCircle               :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int = {}, thickness: f32 = 1.0)                                                                    ---
+	@(link_name="ImDrawList_AddCircleFilled")         DrawList_AddCircleFilled         :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int = {})                                                                                          ---
+	@(link_name="ImDrawList_AddNgon")                 DrawList_AddNgon                 :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int, thickness: f32 = 1.0)                                                                         ---
+	@(link_name="ImDrawList_AddNgonFilled")           DrawList_AddNgonFilled           :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: c.int)                                                                                               ---
+	@(link_name="ImDrawList_AddEllipse")              DrawList_AddEllipse              :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: u32, rot: f32 = 0.0, num_segments: c.int = {}, thickness: f32 = 1.0)                                                   ---
+	@(link_name="ImDrawList_AddEllipseFilled")        DrawList_AddEllipseFilled        :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: u32, rot: f32 = 0.0, num_segments: c.int = {})                                                                         ---
+	@(link_name="ImDrawList_AddText")                 DrawList_AddText                 :: proc(self: ^DrawList, pos: Vec2, col: u32, text_begin: cstring, text_end: cstring = nil)                                                                                      ---
+	@(link_name="ImDrawList_AddTextImFontPtr")        DrawList_AddTextImFontPtr        :: proc(self: ^DrawList, font: ^Font, font_size: f32, pos: Vec2, col: u32, text_begin: cstring, text_end: cstring = nil, wrap_width: f32 = 0.0, cpu_fine_clip_rect: ^Vec4 = nil) ---
+	@(link_name="ImDrawList_AddBezierCubic")          DrawList_AddBezierCubic          :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32, thickness: f32, num_segments: c.int = {})                                                             --- // Cubic Bezier (4 control points)
+	@(link_name="ImDrawList_AddBezierQuadratic")      DrawList_AddBezierQuadratic      :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32, thickness: f32, num_segments: c.int = {})                                                                       --- // Quadratic Bezier (3 control points)
 	// General polygon
 	// - Only simple polygons are supported by filling functions (no self-intersections, no holes).
 	// - Concave polygon fill is more expensive than convex one: it has O(N^2) complexity. Provided as a convenience fo user but not used by main library.
-	@(link_name="ImDrawList_AddPolyline")          DrawList_AddPolyline          :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32, flags: DrawFlags, thickness: f32)                                                                                                 ---
-	@(link_name="ImDrawList_AddConvexPolyFilled")  DrawList_AddConvexPolyFilled  :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32)                                                                                                                                   ---
-	@(link_name="ImDrawList_AddConcavePolyFilled") DrawList_AddConcavePolyFilled :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32)                                                                                                                                   ---
-	@(link_name="ImDrawList_AddImageEx")           DrawList_AddImage             :: proc(self: ^DrawList, user_texture_id: TextureID, p_min: Vec2, p_max: Vec2, uv_min: Vec2 = {0, 0}, uv_max: Vec2 = {1, 1}, col: u32 = 0xff_ff_ff_ff)                                                 ---
-	@(link_name="ImDrawList_AddImageQuadEx")       DrawList_AddImageQuad         :: proc(self: ^DrawList, user_texture_id: TextureID, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, uv1: Vec2 = {0, 0}, uv2: Vec2 = {1, 0}, uv3: Vec2 = {1, 1}, uv4: Vec2 = {0, 1}, col: u32 = 0xff_ff_ff_ff) ---
-	@(link_name="ImDrawList_AddImageRounded")      DrawList_AddImageRounded      :: proc(self: ^DrawList, user_texture_id: TextureID, p_min: Vec2, p_max: Vec2, uv_min: Vec2, uv_max: Vec2, col: u32, rounding: f32, flags: DrawFlags = {})                                             ---
+	@(link_name="ImDrawList_AddPolyline")          DrawList_AddPolyline          :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32, flags: DrawFlags, thickness: f32) ---
+	@(link_name="ImDrawList_AddConvexPolyFilled")  DrawList_AddConvexPolyFilled  :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32)                                   ---
+	@(link_name="ImDrawList_AddConcavePolyFilled") DrawList_AddConcavePolyFilled :: proc(self: ^DrawList, points: ^Vec2, num_points: c.int, col: u32)                                   ---
+	// Image primitives
+	// - Read FAQ to understand what ImTextureID is.
+	// - "p_min" and "p_max" represent the upper-left and lower-right corners of the rectangle.
+	// - "uv_min" and "uv_max" represent the normalized texture coordinates to use for those corners. Using (0,0)->(1,1) texture coordinates will generally display the entire texture.
+	@(link_name="ImDrawList_AddImage")        DrawList_AddImage        :: proc(self: ^DrawList, user_texture_id: TextureID, p_min: Vec2, p_max: Vec2, uv_min: Vec2 = {0, 0}, uv_max: Vec2 = {1, 1}, col: u32 = 0xff_ff_ff_ff)                                                 ---
+	@(link_name="ImDrawList_AddImageQuad")    DrawList_AddImageQuad    :: proc(self: ^DrawList, user_texture_id: TextureID, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, uv1: Vec2 = {0, 0}, uv2: Vec2 = {1, 0}, uv3: Vec2 = {1, 1}, uv4: Vec2 = {0, 1}, col: u32 = 0xff_ff_ff_ff) ---
+	@(link_name="ImDrawList_AddImageRounded") DrawList_AddImageRounded :: proc(self: ^DrawList, user_texture_id: TextureID, p_min: Vec2, p_max: Vec2, uv_min: Vec2, uv_max: Vec2, col: u32, rounding: f32, flags: DrawFlags = {})                                             ---
 	// Stateful path API, add points then finish with PathFillConvex() or PathStroke()
 	// - Important: filled shapes must always use clockwise winding order! The anti-aliasing fringe depends on it. Counter-clockwise shapes will have "inward" anti-aliasing.
 	//   so e.g. 'PathArcTo(center, radius, PI * -0.5f, PI)' is ok, whereas 'PathArcTo(center, radius, PI, PI * -0.5f)' won't have correct anti-aliasing when followed by PathFillConvex().
@@ -2693,11 +2833,20 @@ foreign lib {
 	@(link_name="ImDrawList_PathStroke")                 DrawList_PathStroke                 :: proc(self: ^DrawList, col: u32, flags: DrawFlags = {}, thickness: f32 = 1.0)                                  ---
 	@(link_name="ImDrawList_PathArcTo")                  DrawList_PathArcTo                  :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min: f32, a_max: f32, num_segments: c.int = {})            ---
 	@(link_name="ImDrawList_PathArcToFast")              DrawList_PathArcToFast              :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min_of_12: c.int, a_max_of_12: c.int)                      --- // Use precomputed angles for a 12 steps circle
-	@(link_name="ImDrawList_PathEllipticalArcToEx")      DrawList_PathEllipticalArcTo        :: proc(self: ^DrawList, center: Vec2, radius: Vec2, rot: f32, a_min: f32, a_max: f32, num_segments: c.int = {}) --- // Ellipse
+	@(link_name="ImDrawList_PathEllipticalArcTo")        DrawList_PathEllipticalArcTo        :: proc(self: ^DrawList, center: Vec2, radius: Vec2, rot: f32, a_min: f32, a_max: f32, num_segments: c.int = {}) --- // Ellipse
 	@(link_name="ImDrawList_PathBezierCubicCurveTo")     DrawList_PathBezierCubicCurveTo     :: proc(self: ^DrawList, p2: Vec2, p3: Vec2, p4: Vec2, num_segments: c.int = {})                                 --- // Cubic Bezier (4 control points)
 	@(link_name="ImDrawList_PathBezierQuadraticCurveTo") DrawList_PathBezierQuadraticCurveTo :: proc(self: ^DrawList, p2: Vec2, p3: Vec2, num_segments: c.int = {})                                           --- // Quadratic Bezier (3 control points)
 	@(link_name="ImDrawList_PathRect")                   DrawList_PathRect                   :: proc(self: ^DrawList, rect_min: Vec2, rect_max: Vec2, rounding: f32 = 0.0, flags: DrawFlags = {})             ---
-	@(link_name="ImDrawList_AddCallbackEx")              DrawList_AddCallback                :: proc(self: ^DrawList, callback: DrawCallback, userdata: rawptr, userdata_size: c.size_t = {})                 ---
+	// Advanced: Draw Callbacks
+	// - May be used to alter render state (change sampler, blending, current shader). May be used to emit custom rendering commands (difficult to do correctly, but possible).
+	// - Use special ImDrawCallback_ResetRenderState callback to instruct backend to reset its render state to the default.
+	// - Your rendering loop must check for 'UserCallback' in ImDrawCmd and call the function instead of rendering triangles. All standard backends are honoring this.
+	// - For some backends, the callback may access selected render-states exposed by the backend in a ImGui_ImplXXXX_RenderState structure pointed to by platform_io.Renderer_RenderState.
+	// - IMPORTANT: please be mindful of the different level of indirection between using size==0 (copying argument) and using size>0 (copying pointed data into a buffer).
+	//   - If userdata_size == 0: we copy/store the 'userdata' argument as-is. It will be available unmodified in ImDrawCmd::UserCallbackData during render.
+	//   - If userdata_size > 0,  we copy/store 'userdata_size' bytes pointed to by 'userdata'. We store them in a buffer stored inside the drawlist. ImDrawCmd::UserCallbackData will point inside that buffer so you have to retrieve data from there. Your callback may need to use ImDrawCmd::UserCallbackDataSize if you expect dynamically-sized data.
+	//   - Support for userdata_size > 0 was added in v1.91.4, October 2024. So earlier code always only allowed to copy/store a simple void*.
+	@(link_name="ImDrawList_AddCallback") DrawList_AddCallback :: proc(self: ^DrawList, callback: DrawCallback, userdata: rawptr, userdata_size: c.size_t = {}) ---
 	// Advanced: Miscellaneous
 	@(link_name="ImDrawList_AddDrawCmd")  DrawList_AddDrawCmd  :: proc(self: ^DrawList)              --- // This is useful if you need to forcefully create a new draw call (to allow for dependent rendering / blending). Otherwise primitives are merged into the same draw-call as much as possible
 	@(link_name="ImDrawList_CloneOutput") DrawList_CloneOutput :: proc(self: ^DrawList) -> ^DrawList --- // Create a clone of the CmdBuffer/IdxBuffer/VtxBuffer.
@@ -2789,17 +2938,19 @@ foreign lib {
 	@(link_name="ImFontAtlas_AddCustomRectFontGlyph") FontAtlas_AddCustomRectFontGlyph :: proc(self: ^FontAtlas, font: ^Font, id: Wchar, width: c.int, height: c.int, advance_x: f32, offset: Vec2 = {0, 0}) -> c.int ---
 	@(link_name="ImFontAtlas_GetCustomRectByIndex")   FontAtlas_GetCustomRectByIndex   :: proc(self: ^FontAtlas, index: c.int) -> ^FontAtlasCustomRect                                                                ---
 	// [Internal]
-	@(link_name="ImFontAtlas_CalcCustomRectUV")      FontAtlas_CalcCustomRectUV      :: proc(self: ^FontAtlas, rect: ^FontAtlasCustomRect, out_uv_min: ^Vec2, out_uv_max: ^Vec2)                                                                                             ---
-	@(link_name="ImFontAtlas_GetMouseCursorTexData") FontAtlas_GetMouseCursorTexData :: proc(self: ^FontAtlas, cursor: MouseCursor, out_offset: ^Vec2, out_size: ^Vec2, out_uv_border: ^[2]Vec2, out_uv_fill: ^[2]Vec2) -> bool                                              ---
-	@(link_name="ImFont_FindGlyph")                  Font_FindGlyph                  :: proc(self: ^Font, _c: Wchar) -> ^FontGlyph                                                                                                                                           ---
-	@(link_name="ImFont_FindGlyphNoFallback")        Font_FindGlyphNoFallback        :: proc(self: ^Font, _c: Wchar) -> ^FontGlyph                                                                                                                                           ---
-	@(link_name="ImFont_GetCharAdvance")             Font_GetCharAdvance             :: proc(self: ^Font, _c: Wchar) -> f32                                                                                                                                                  ---
-	@(link_name="ImFont_IsLoaded")                   Font_IsLoaded                   :: proc(self: ^Font) -> bool                                                                                                                                                            ---
-	@(link_name="ImFont_GetDebugName")               Font_GetDebugName               :: proc(self: ^Font) -> cstring                                                                                                                                                         ---
-	@(link_name="ImFont_CalcTextSizeAEx")            Font_CalcTextSizeA              :: proc(self: ^Font, size: f32, max_width: f32, wrap_width: f32, text_begin: cstring, text_end: cstring = nil, remaining: ^cstring = nil) -> Vec2                                       --- // utf8
-	@(link_name="ImFont_CalcWordWrapPositionA")      Font_CalcWordWrapPositionA      :: proc(self: ^Font, scale: f32, text: cstring, text_end: cstring, wrap_width: f32) -> cstring                                                                                          ---
-	@(link_name="ImFont_RenderChar")                 Font_RenderChar                 :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, _c: Wchar)                                                                                                   ---
-	@(link_name="ImFont_RenderText")                 Font_RenderText                 :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, clip_rect: Vec4, text_begin: cstring, text_end: cstring, wrap_width: f32 = 0.0, cpu_fine_clip: bool = false) ---
+	@(link_name="ImFontAtlas_CalcCustomRectUV")      FontAtlas_CalcCustomRectUV      :: proc(self: ^FontAtlas, rect: ^FontAtlasCustomRect, out_uv_min: ^Vec2, out_uv_max: ^Vec2)                                                ---
+	@(link_name="ImFontAtlas_GetMouseCursorTexData") FontAtlas_GetMouseCursorTexData :: proc(self: ^FontAtlas, cursor: MouseCursor, out_offset: ^Vec2, out_size: ^Vec2, out_uv_border: ^[2]Vec2, out_uv_fill: ^[2]Vec2) -> bool ---
+	@(link_name="ImFont_FindGlyph")                  Font_FindGlyph                  :: proc(self: ^Font, _c: Wchar) -> ^FontGlyph                                                                                              ---
+	@(link_name="ImFont_FindGlyphNoFallback")        Font_FindGlyphNoFallback        :: proc(self: ^Font, _c: Wchar) -> ^FontGlyph                                                                                              ---
+	@(link_name="ImFont_GetCharAdvance")             Font_GetCharAdvance             :: proc(self: ^Font, _c: Wchar) -> f32                                                                                                     ---
+	@(link_name="ImFont_IsLoaded")                   Font_IsLoaded                   :: proc(self: ^Font) -> bool                                                                                                               ---
+	@(link_name="ImFont_GetDebugName")               Font_GetDebugName               :: proc(self: ^Font) -> cstring                                                                                                            ---
+	// 'max_width' stops rendering after a certain width (could be turned into a 2d size). FLT_MAX to disable.
+	// 'wrap_width' enable automatic word-wrapping across multiple lines to fit into given width. 0.0f to disable.
+	@(link_name="ImFont_CalcTextSizeA")         Font_CalcTextSizeA         :: proc(self: ^Font, size: f32, max_width: f32, wrap_width: f32, text_begin: cstring, text_end: cstring = nil, remaining: ^cstring = nil) -> Vec2                                       --- // utf8
+	@(link_name="ImFont_CalcWordWrapPositionA") Font_CalcWordWrapPositionA :: proc(self: ^Font, scale: f32, text: cstring, text_end: cstring, wrap_width: f32) -> cstring                                                                                          ---
+	@(link_name="ImFont_RenderChar")            Font_RenderChar            :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, _c: Wchar)                                                                                                   ---
+	@(link_name="ImFont_RenderText")            Font_RenderText            :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, clip_rect: Vec4, text_begin: cstring, text_end: cstring, wrap_width: f32 = 0.0, cpu_fine_clip: bool = false) ---
 	// [Internal] Don't use!
 	@(link_name="ImFont_BuildLookupTable")   Font_BuildLookupTable   :: proc(self: ^Font)                                                                                                                          ---
 	@(link_name="ImFont_ClearOutputData")    Font_ClearOutputData    :: proc(self: ^Font)                                                                                                                          ---
@@ -2811,26 +2962,6 @@ foreign lib {
 	// Helpers
 	@(link_name="ImGuiViewport_GetCenter")     Viewport_GetCenter     :: proc(self: ^Viewport) -> Vec2 ---
 	@(link_name="ImGuiViewport_GetWorkCenter") Viewport_GetWorkCenter :: proc(self: ^Viewport) -> Vec2 ---
-	// OBSOLETED in 1.91.0 (from July 2024)
-	@(link_name="ImGui_PushButtonRepeat")          PushButtonRepeat          :: proc(repeat: bool)                                               ---
-	@(link_name="ImGui_PopButtonRepeat")           PopButtonRepeat           :: proc()                                                           ---
-	@(link_name="ImGui_PushTabStop")               PushTabStop               :: proc(tab_stop: bool)                                             ---
-	@(link_name="ImGui_PopTabStop")                PopTabStop                :: proc()                                                           ---
-	@(link_name="ImGui_GetContentRegionMax")       GetContentRegionMax       :: proc() -> Vec2                                                   --- // Content boundaries max (e.g. window boundaries including scrolling, or current column boundaries). You should never need this. Always use GetCursorScreenPos() and GetContentRegionAvail()!
-	@(link_name="ImGui_GetWindowContentRegionMin") GetWindowContentRegionMin :: proc() -> Vec2                                                   --- // Content boundaries min for the window (roughly (0,0)-Scroll), in window-local coordinates. You should never need this. Always use GetCursorScreenPos() and GetContentRegionAvail()!
-	@(link_name="ImGui_GetWindowContentRegionMax") GetWindowContentRegionMax :: proc() -> Vec2                                                   --- // Content boundaries max for the window (roughly (0,0)+Size-Scroll), in window-local coordinates. You should never need this. Always use GetCursorScreenPos() and GetContentRegionAvail()!
-	@(link_name="ImGui_BeginChildFrameEx")         BeginChildFrame           :: proc(id: ID, size: Vec2, window_flags: WindowFlags = {}) -> bool ---
-	@(link_name="ImGui_EndChildFrame")             EndChildFrame             :: proc()                                                           ---
-	//static inline bool BeginChild(const char* str_id, const ImVec2& size_arg, bool borders, ImGuiWindowFlags window_flags){ return BeginChild(str_id, size_arg, borders ? ImGuiChildFlags_Borders : ImGuiChildFlags_None, window_flags); } // Unnecessary as true == ImGuiChildFlags_Borders
-	//static inline bool BeginChild(ImGuiID id, const ImVec2& size_arg, bool borders, ImGuiWindowFlags window_flags)        { return BeginChild(id, size_arg, borders ? ImGuiChildFlags_Borders : ImGuiChildFlags_None, window_flags);     } // Unnecessary as true == ImGuiChildFlags_Borders
-	@(link_name="ImGui_ShowStackToolWindow") ShowStackToolWindow :: proc(p_open: ^bool = nil)                                                                                                                                                                                            ---
-	@(link_name="ImGui_ComboObsoleteEx")     ComboObsolete       :: proc(label: cstring, current_item: ^c.int, old_callback: proc "c" (user_data: rawptr, idx: c.int, out_text: ^cstring) -> bool, user_data: rawptr, items_count: c.int, popup_max_height_in_items: c.int = -1) -> bool ---
-	@(link_name="ImGui_ListBoxObsoleteEx")   ListBoxObsolete     :: proc(label: cstring, current_item: ^c.int, old_callback: proc "c" (user_data: rawptr, idx: c.int, out_text: ^cstring) -> bool, user_data: rawptr, items_count: c.int, height_in_items: c.int = -1) -> bool           ---
-	// OBSOLETED in 1.89.7 (from June 2023)
-	@(link_name="ImGui_SetItemAllowOverlap") SetItemAllowOverlap :: proc() --- // Use SetNextItemAllowOverlap() before item.
-	// OBSOLETED in 1.89.4 (from March 2023)
-	@(link_name="ImGui_PushAllowKeyboardFocus") PushAllowKeyboardFocus :: proc(tab_stop: bool) ---
-	@(link_name="ImGui_PopAllowKeyboardFocus")  PopAllowKeyboardFocus  :: proc()               ---
 }
 
 ////////////////////////////////////////////////////////////
