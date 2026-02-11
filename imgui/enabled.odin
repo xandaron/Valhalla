@@ -2,7 +2,7 @@ package imgui
 
 // This is a generated helper file which you can use to know about the build configuration.
 
-DEBUG_ENABLED :: false
+DEBUG_ENABLED :: true
 WASM_ENABLED :: false
 
 BACKEND_ALLEGRO5_ENABLED :: false

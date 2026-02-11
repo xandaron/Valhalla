@@ -1143,12 +1143,6 @@ ViewportFlag :: enum c.int {
 // STRUCTS
 ////////////////////////////////////////////////////////////
 
-FontAtlasBuilder :: struct { // Opaque storage for building a ImFontAtlas
-}
-
-FontLoader :: struct { // Opaque interface to a font loading backend (stb_truetype, FreeType etc.).
-}
-
 Vec2 :: [2]f32
 Vec4 :: [4]f32
 TextureRef :: struct {
@@ -1994,6 +1988,8 @@ FontAtlasRect :: struct {
 	uv0: Vec2,     // UV coordinates (in current texture)
 	uv1: Vec2,     // UV coordinates (in current texture)
 }
+
+FontAtlasRectId :: u32
 
 // Load and rasterize multiple TTF/OTF fonts into a same texture. The font atlas will build a single texture holding:
 //  - One or more fonts.
