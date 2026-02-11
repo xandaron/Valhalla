@@ -1457,7 +1457,7 @@ Context :: struct {
 	ConfigFlagsLastFrame:               ConfigFlags,
 	FontAtlases:                        Vector_FontAtlasPtr, // List of font atlases used by the context (generally only contains g.IO.Fonts aka the main font atlas)
 	Font_:                              ^Font,               // Currently bound font. (== FontStack.back().Font)
-	FontBaked:                          ^FontBaked,          // Currently bound font at currently bound size. (== Font->GetFontBaked(FontSize))
+	FontBaked_:                          ^FontBaked,          // Currently bound font at currently bound size. (== Font->GetFontBaked(FontSize))
 	FontSize:                           f32,                 // Currently bound font size == line height (== FontSizeBase + externals scales applied in the UpdateCurrentFontSize() function).
 	FontSizeBase:                       f32,                 // Font size before scaling == style.FontSizeBase == value passed to PushFont() when specified.
 	FontBakedScale:                     f32,                 // == FontBaked->Size / FontSize. Scale factor over baked size. Rarely used nowadays, very often == 1.0f.
@@ -2339,7 +2339,7 @@ stbrp_node :: struct {
 Vector_stbrp_node_im :: struct { // Instantiation of ImVector<stbrp_node_im>
 	Size:     c.int,
 	Capacity: c.int,
-	Data:     ^stbrp_node_im,
+	Data:     rawptr,
 }
 
 stbrp_context_opaque :: struct {
