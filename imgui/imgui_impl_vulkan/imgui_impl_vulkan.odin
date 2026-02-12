@@ -18,7 +18,7 @@ PipelineInfo :: struct {
 	Subpass:                     u32, //
 	MSAASamples:                 vk.SampleCountFlags, // 0 defaults to VK_SAMPLE_COUNT_1_BIT
 	// #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
-	PipelineRenderingCreateInfo: vk.PipelineRenderingCreateInfoKHR, // Optional, valid if .sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR
+	PipelineRenderingCreateInfo: vk.PipelineRenderingCreateInfo, // Optional, valid if .sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR
 	// #endif
 
 	// For Secondary viewports only (created/managed by backend)

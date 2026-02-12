@@ -25,8 +25,8 @@ when ODIN_OS == .Windows {
 	@(require) foreign import "wasm/imgui_widgets.o"
 }
 
-CHECKVERSION :: proc() {
-	DebugCheckVersionAndDataLayout(VERSION, size_of(IO), size_of(Style), size_of(Vec2), size_of(Vec4), size_of(DrawVert), size_of(DrawIdx))
+CHECKVERSION :: proc() -> bool {
+	return DebugCheckVersionAndDataLayout(VERSION, size_of(IO), size_of(Style), size_of(Vec2), size_of(Vec4), size_of(DrawVert), size_of(DrawIdx))
 }
 
 ////////////////////////////////////////////////////////////
