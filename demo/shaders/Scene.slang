@@ -1,5 +1,4 @@
 import "Vertex.slang";
-import "Light.slang";
 import "Buffers.slang";
 import "Textures.slang";
 

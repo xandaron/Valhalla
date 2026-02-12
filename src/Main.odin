@@ -100,7 +100,7 @@ main :: proc() {
 				{file = "./shaders/Shadow.slang", entryPoint = "frag"},
 				{file = "./shaders/Scene.slang", entryPoint = "vert"},
 				{file = "./shaders/Scene.slang", entryPoint = "frag"},
-				{file = "./shaders/Post.slang", entryPoint = "comp"},
+				{file = "./shaders/PostProcess.slang", entryPoint = "comp"},
 			},
 			preComp = 0,
 			lightVert = 1,
