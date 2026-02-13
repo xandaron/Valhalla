@@ -437,17 +437,17 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							if imgui.BeginCombo(
 								fmt.ctprintf("Albedo%v", meshSuffix),
 								toCstring(
-									scene.textures[object.textureIdxs[meshIdx][TextureIndex.ALBEDO]].name,
+									scene.textures[object.textureIdxs[meshIdx][TextureIndex.Albedo]].name,
 								),
 							) {
 								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][TextureIndex.ALBEDO] ==
+									if object.textureIdxs[meshIdx][TextureIndex.Albedo] ==
 									   u32(textureIdx) {
 										continue
 									}
 
 									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][TextureIndex.ALBEDO] = u32(
+										object.textureIdxs[meshIdx][TextureIndex.Albedo] = u32(
 											textureIdx,
 										)
 										graphicsData.reloadBuffers = true
@@ -459,16 +459,16 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							if imgui.BeginCombo(
 								fmt.ctprintf("Normal Map%v", meshSuffix),
 								toCstring(
-									scene.textures[object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP]].name,
+									scene.textures[object.textureIdxs[meshIdx][TextureIndex.NormalMap]].name,
 								),
 							) {
 								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP] ==
+									if object.textureIdxs[meshIdx][TextureIndex.NormalMap] ==
 									   u32(textureIdx) {
 										continue
 									}
 									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][TextureIndex.NORMAL_MAP] = u32(
+										object.textureIdxs[meshIdx][TextureIndex.NormalMap] = u32(
 											textureIdx,
 										)
 										graphicsData.reloadBuffers = true

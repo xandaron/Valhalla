@@ -176,14 +176,14 @@ projection :: proc(camera: Camera) -> Mat4 {
 	case .PERSPECTIVE:
 		return perspective(
 			radians(camera.fov),
-			f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
+			getSwapcahainAspectRatio(&globals.graphicsData),
 			camera.near,
 			camera.far,
 		)
 	case .ORTHOGRAPHIC:
 		return orthographic(
 			radians(camera.fov),
-			f32(RENDER_SIZE.x) / f32(RENDER_SIZE.y),
+			getSwapcahainAspectRatio(&globals.graphicsData),
 			camera.near,
 			camera.far,
 		)

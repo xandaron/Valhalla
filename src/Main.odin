@@ -96,8 +96,8 @@ main :: proc() {
 			windowTitle = APP_NAME,
 			shaderFiles = {
 				{file = "./shaders/Transform.slang", entryPoint = "comp"},
-				{file = "./shaders/Shadow.slang", entryPoint = "vert"},
-				{file = "./shaders/Shadow.slang", entryPoint = "frag"},
+				{file = "./shaders/Light.slang", entryPoint = "vert"},
+				{file = "./shaders/Light.slang", entryPoint = "frag"},
 				{file = "./shaders/Scene.slang", entryPoint = "vert"},
 				{file = "./shaders/Scene.slang", entryPoint = "frag"},
 				{file = "./shaders/PostProcess.slang", entryPoint = "comp"},
@@ -126,7 +126,7 @@ main :: proc() {
 
 	fpsTimer = time.now()
 	lastFrameTime = time.now()
-	for updateWindow(&globals.graphicsData) {
+	gameLoop: for updateWindow(&globals.graphicsData) {
 		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
 		lastFrameTime = time.now()
 
@@ -177,8 +177,19 @@ main :: proc() {
 
 		update(delta)
 		if err = drawFrame(&globals.graphicsData); err != nil {
-			logf(.Error, "Failed to draw frame: %v", err)
-			break
+			#partial errorCheck: switch e in err {
+			case DrawError:
+				#partial switch e {
+				case .UpdateCommandBuffers:
+					break errorCheck
+				case:
+					logf(.Error, "Failed to draw frame: %v", err)
+					break gameLoop
+				}
+			case:
+				logf(.Error, "Failed to draw frame: %v", err)
+				break gameLoop
+			}
 		}
 		calcFrameRate()
 
