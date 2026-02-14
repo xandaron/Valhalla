@@ -3,9 +3,8 @@ package Valhalla
 import "../imgui"
 import tinyfd "../tinyfiledialogs"
 import "core:fmt"
-import "core:os/os2"
+import "core:os"
 import "core:path/filepath"
-import "core:reflect"
 import "core:strings"
 
 UIData :: struct {
@@ -65,10 +64,10 @@ saveAs :: proc(scene: ^Scene) {
 			)
 			relPath = string(str)
 		}
-		hasAlloc: bool
-		scene.path, hasAlloc = filepath.to_slash(relPath)
-		if !hasAlloc {
-			scene.path = strings.clone(scene.path)
+		oerr: os.Error
+		scene.path, oerr = os.replace_path_separators(relPath, '/', context.allocator)
+		if oerr != nil {
+			log(.Error, "Failed to replace path seperators!")
 		}
 		saveScene(scene)
 	}
@@ -108,9 +107,9 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						)
 						relPath = str
 					}
-					path, hasAlloc := filepath.to_slash(str)
-					if !hasAlloc {
-						path = strings.clone(path)
+					path, oerr := os.replace_path_separators(relPath, '/', context.allocator)
+					if oerr != nil {
+						log(.Error, "Failed to replace path seperators!")
 					}
 					append(&globals.scenes, Scene{path = path})
 					loadScene(&globals.scenes[len(globals.scenes) - 1])
@@ -143,7 +142,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					if imgui.MenuItem("Model") {
 						path := tinyfd.openFileDialog("Open Model", MODELS_PATH, 0, nil, nil, 0)
 						if str := string(path);
-						   str != "" && os2.exists(str) && filepath.ext(string(str)) == ".model" {
+						   str != "" && os.exists(str) && filepath.ext(string(str)) == ".model" {
 							relPath, err := filepath.rel(
 								globals.projectDir,
 								str,
@@ -159,9 +158,13 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								)
 								relPath = string(str)
 							}
-							finalPath, wasAlloc := filepath.to_slash(relPath)
-							if !wasAlloc {
-								finalPath = strings.clone(finalPath)
+							finalPath, oerr := os.replace_path_separators(
+								relPath,
+								'/',
+								context.allocator,
+							)
+							if oerr != nil {
+								log(.Error, "Failed to replace path seperators!")
 							}
 							append(&scene.models, Model{path = finalPath})
 							model := &scene.models[len(scene.models) - 1]
@@ -187,9 +190,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							0,
 						)
 						if str := string(path);
-						   str != "" &&
-						   os2.exists(str) &&
-						   filepath.ext(string(str)) == ".texture" {
+						   str != "" && os.exists(str) && filepath.ext(string(str)) == ".texture" {
 							relPath, err := filepath.rel(
 								globals.projectDir,
 								str,
@@ -205,9 +206,13 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								)
 								relPath = string(str)
 							}
-							path, wasAlloc := filepath.to_slash(relPath)
-							if !wasAlloc {
-								path = strings.clone(path)
+							path, oerr := os.replace_path_separators(
+								relPath,
+								'/',
+								context.allocator,
+							)
+							if oerr != nil {
+								log(.Error, "Failed to replace path seperators!")
 							}
 							append(&scene.textures, Texture{path = path})
 							texture := &scene.textures[len(scene.textures) - 1]
@@ -322,7 +327,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					if imgui.TreeNode("Flags:") {
 						for flag in ObjectFlag {
 							present := flag in object.flags
-							if imgui.Checkbox(toCstring(reflect.enum_string(flag)), &present) {
+							if imgui.Checkbox(fmt.ctprintf("%v", flag), &present) {
 								if present {
 									object.flags += {flag}
 								} else {
@@ -623,16 +628,24 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 			if createComponentInfo.name[0] != 0 && createComponentInfo.savePath[0] != 0 {
 				name, path: string
-				didAlloc: bool
+				oerr: os.Error
 
-				name, didAlloc = filepath.to_slash(string(createComponentInfo.name[:]))
-				if !didAlloc {
-					name = strings.clone_from_bytes(createComponentInfo.name[:])
+				name, oerr = os.replace_path_separators(
+					string(createComponentInfo.name[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
-				path, didAlloc = filepath.to_slash(string(createComponentInfo.savePath[:]))
-				if !didAlloc {
-					path = strings.clone_from_bytes(createComponentInfo.savePath[:])
+				path, oerr = os.replace_path_separators(
+					string(createComponentInfo.savePath[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
 				append(&globals.scenes, Scene{name = name, path = path})
@@ -785,24 +798,36 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			scene := &globals.scenes[globals.activeScene]
 
 			name, path, assetPath: string
-			didAlloc: bool
+			oerr: os.Error
 
 			if createComponentInfo.name[0] != 0 &&
 			   createComponentInfo.savePath[0] != 0 &&
 			   createComponentInfo.assetPath[0] != 0 {
-				name, didAlloc = filepath.to_slash(string(createComponentInfo.name[:]))
-				if !didAlloc {
-					name = strings.clone_from_bytes(createComponentInfo.name[:])
+				name, oerr = os.replace_path_separators(
+					string(createComponentInfo.name[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
-				path, didAlloc = filepath.to_slash(string(createComponentInfo.savePath[:]))
-				if !didAlloc {
-					path = strings.clone_from_bytes(createComponentInfo.savePath[:])
+				path, oerr = os.replace_path_separators(
+					string(createComponentInfo.savePath[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
-				assetPath, didAlloc = filepath.to_slash(string(createComponentInfo.assetPath[:]))
-				if !didAlloc {
-					assetPath = strings.clone_from_bytes(createComponentInfo.assetPath[:])
+				assetPath, oerr = os.replace_path_separators(
+					string(createComponentInfo.assetPath[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
 				append(&scene.models, Model{name = name, path = path, assetPath = assetPath})
@@ -899,24 +924,36 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			scene := &globals.scenes[globals.activeScene]
 
 			name, path, assetPath: string
-			didAlloc: bool
+			oerr: os.Error
 
 			if createComponentInfo.name[0] != 0 &&
 			   createComponentInfo.savePath[0] != 0 &&
 			   createComponentInfo.assetPath[0] != 0 {
-				name, didAlloc = filepath.to_slash(string(createComponentInfo.name[:]))
-				if !didAlloc {
-					name = strings.clone_from_bytes(createComponentInfo.name[:])
+				name, oerr = os.replace_path_separators(
+					string(createComponentInfo.name[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
-				path, didAlloc = filepath.to_slash(string(createComponentInfo.savePath[:]))
-				if !didAlloc {
-					path = strings.clone_from_bytes(createComponentInfo.savePath[:])
+				path, oerr = os.replace_path_separators(
+					string(createComponentInfo.savePath[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
-				assetPath, didAlloc = filepath.to_slash(string(createComponentInfo.assetPath[:]))
-				if !didAlloc {
-					assetPath = strings.clone_from_bytes(createComponentInfo.assetPath[:])
+				assetPath, oerr = os.replace_path_separators(
+					string(createComponentInfo.assetPath[:]),
+					'/',
+					context.allocator,
+				)
+				if oerr != nil {
+					log(.Error, "Failed to replace path seperators!")
 				}
 
 				append(&scene.textures, Texture{name = name, path = path, assetPath = assetPath})

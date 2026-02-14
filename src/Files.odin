@@ -1,7 +1,7 @@
 package Valhalla
 
 import ai "../assimp"
-import "core:os/os2"
+import "core:os"
 import "core:strings"
 
 SceneData :: struct {
@@ -80,11 +80,11 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 		}
 	}
 
-	file, err := os2.open(scene.path, {.Write, .Trunc, .Create})
+	file, err := os.open(scene.path, {.Write, .Trunc, .Create})
 	if err != nil {
 		return .IO
 	}
-	defer os2.close(file)
+	defer os.close(file)
 
 	saveData := SceneData {
 		nameLength   = u32(len(scene.name)),
@@ -96,25 +96,25 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 		lightCount   = u32(len(scene.lights)),
 		cameraCount  = u32(len(scene.cameras)),
 	}
-	_, err = os2.write_ptr(file, &saveData, size_of(SceneData))
+	_, err = os.write_ptr(file, &saveData, size_of(SceneData))
 	if err != nil {
 		return .IO
 	}
-	_, err = os2.write_string(file, scene.name)
+	_, err = os.write_string(file, scene.name)
 	if err != nil {
 		return .IO
 	}
 
 	for &model in scene.models {
 		length := u32(len(model.path))
-		os2.write_ptr(file, &length, size_of(u32))
-		os2.write_string(file, model.path)
+		os.write_ptr(file, &length, size_of(u32))
+		os.write_string(file, model.path)
 	}
 
 	for &texture in scene.textures {
 		length := u32(len(texture.path))
-		os2.write_ptr(file, &length, size_of(u32))
-		os2.write_string(file, texture.path)
+		os.write_ptr(file, &length, size_of(u32))
+		os.write_string(file, texture.path)
 	}
 
 	for &object in scene.objects {
@@ -133,9 +133,9 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 			},
 			attachment = object.attachment,
 		}
-		os2.write_ptr(file, &objectData, size_of(ObjectComponent))
-		os2.write_string(file, object.name)
-		os2.write_ptr(
+		os.write_ptr(file, &objectData, size_of(ObjectComponent))
+		os.write_string(file, object.name)
+		os.write_ptr(
 			file,
 			raw_data(object.textureIdxs),
 			len(object.textureIdxs) * size_of([len(TextureIndex)]u32),
@@ -150,8 +150,8 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 			brightness = light.brightness,
 			dropoff    = light.dropoff,
 		}
-		os2.write_ptr(file, &lightData, size_of(LightComponent))
-		os2.write_string(file, light.name)
+		os.write_ptr(file, &lightData, size_of(LightComponent))
+		os.write_string(file, light.name)
 	}
 
 	for &camera in scene.cameras {
@@ -165,8 +165,8 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 			near       = camera.near,
 			far        = camera.far,
 		}
-		os2.write_ptr(file, &cameraData, size_of(CameraComponent))
-		os2.write_string(file, camera.name)
+		os.write_ptr(file, &cameraData, size_of(CameraComponent))
+		os.write_string(file, camera.name)
 	}
 
 	return .None
@@ -184,14 +184,14 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 		return .InvalidArgument
 	}
 
-	file, err := os2.open(scene.path, {.Read})
+	file, err := os.open(scene.path, {.Read})
 	if err != nil {
 		return .IO
 	}
-	defer os2.close(file)
+	defer os.close(file)
 
 	sceneData: SceneData
-	os2.read_ptr(file, &sceneData, size_of(SceneData))
+	os.read_ptr(file, &sceneData, size_of(SceneData))
 
 	scene.name = string(make([]byte, sceneData.nameLength))
 	scene.ambientLight = sceneData.ambientLight
@@ -203,13 +203,13 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 	scene.cameras = make([dynamic]Camera, sceneData.cameraCount)
 	scene.boneCount = 1
 
-	os2.read(file, transmute([]byte)scene.name)
+	os.read(file, transmute([]byte)scene.name)
 
 	for &model in scene.models {
 		pathLength: u32
-		os2.read_ptr(file, &pathLength, size_of(u32))
+		os.read_ptr(file, &pathLength, size_of(u32))
 		modelPath := make([]byte, pathLength)
-		os2.read(file, modelPath)
+		os.read(file, modelPath)
 
 		model.path = string(modelPath)
 		lerr := loadModelComponent(&model)
@@ -229,9 +229,9 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 	defer delete(texPaths)
 	for &texture, idx in scene.textures {
 		pathLength: u32
-		os2.read_ptr(file, &pathLength, size_of(u32))
+		os.read_ptr(file, &pathLength, size_of(u32))
 		texturePath := make([]byte, pathLength)
-		os2.read(file, texturePath)
+		os.read(file, texturePath)
 
 		texture.path = string(texturePath)
 		lerr := loadTextureComponent(&texture)
@@ -250,7 +250,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 
 	for &object, objectIdx in scene.objects {
 		objectData: ObjectComponent
-		os2.read_ptr(file, &objectData, size_of(ObjectComponent))
+		os.read_ptr(file, &objectData, size_of(ObjectComponent))
 		object = {
 			name = string(make([]byte, objectData.nameLength)),
 			position = objectData.position,
@@ -272,8 +272,8 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			},
 			attachment = objectData.attachment,
 		}
-		os2.read(file, transmute([]byte)object.name)
-		os2.read_ptr(
+		os.read(file, transmute([]byte)object.name)
+		os.read_ptr(
 			file,
 			raw_data(object.textureIdxs),
 			int(objectData.texturesCount) * size_of([len(TextureIndex)]u32),
@@ -282,7 +282,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 
 	for &light in scene.lights {
 		lightData: LightComponent
-		os2.read_ptr(file, &lightData, size_of(LightComponent))
+		os.read_ptr(file, &lightData, size_of(LightComponent))
 		light = {
 			name       = string(make([]byte, lightData.nameLength)),
 			position   = lightData.position,
@@ -290,12 +290,12 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			brightness = lightData.brightness,
 			dropoff    = lightData.dropoff,
 		}
-		os2.read(file, transmute([]byte)light.name)
+		os.read(file, transmute([]byte)light.name)
 	}
 
 	for &camera in scene.cameras {
 		cameraData: CameraComponent
-		os2.read_ptr(file, &cameraData, size_of(CameraComponent))
+		os.read_ptr(file, &cameraData, size_of(CameraComponent))
 		camera = {
 			name   = string(make([]byte, cameraData.nameLength)),
 			eye    = cameraData.eye,
@@ -305,7 +305,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			near   = cameraData.near,
 			far    = cameraData.far,
 		}
-		os2.read(file, transmute([]byte)camera.name)
+		os.read(file, transmute([]byte)camera.name)
 	}
 
 	return .None
@@ -326,11 +326,11 @@ saveModelComponent :: proc(model: ^Model) -> SaveError {
 		return .InvalidSceneData
 	}
 
-	file, err := os2.open(model.path, {.Write, .Create, .Trunc})
+	file, err := os.open(model.path, {.Write, .Create, .Trunc})
 	if err != nil {
 		return .InvalidSceneData
 	}
-	defer os2.close(file)
+	defer os.close(file)
 
 	modelData := ModelComponent {
 		nameLength     = u32(len(model.name)),
@@ -340,10 +340,10 @@ saveModelComponent :: proc(model: ^Model) -> SaveError {
 		scale          = model.scale,
 		bindpointCount = u32(len(model.bindpoints)),
 	}
-	os2.write_ptr(file, &modelData, size_of(ModelComponent))
-	os2.write_string(file, model.name)
-	os2.write_string(file, model.assetPath)
-	os2.write_ptr(file, raw_data(model.bindpoints), len(model.bindpoints) * size_of(Bindpoint))
+	os.write_ptr(file, &modelData, size_of(ModelComponent))
+	os.write_string(file, model.name)
+	os.write_string(file, model.assetPath)
+	os.write_ptr(file, raw_data(model.bindpoints), len(model.bindpoints) * size_of(Bindpoint))
 
 	return .None
 }
@@ -353,13 +353,13 @@ loadModelComponent :: proc(model: ^Model) -> LoadError {
 		return .InvalidArgument
 	}
 
-	file, err := os2.open(model.path, {.Read})
+	file, err := os.open(model.path, {.Read})
 	if err != nil {
 		return .IO
 	}
 
 	modelData: ModelComponent
-	os2.read_ptr(file, &modelData, size_of(ModelComponent))
+	os.read_ptr(file, &modelData, size_of(ModelComponent))
 
 	model.assetPath = string(make([]byte, modelData.pathLength))
 	model.name = string(make([]byte, modelData.nameLength))
@@ -367,9 +367,9 @@ loadModelComponent :: proc(model: ^Model) -> LoadError {
 	model.rotation = modelData.rotation
 	model.scale = modelData.scale
 	model.bindpoints = make([dynamic]Bindpoint, modelData.bindpointCount)
-	os2.read(file, transmute([]byte)model.name)
-	os2.read(file, transmute([]byte)model.assetPath)
-	os2.read_ptr(
+	os.read(file, transmute([]byte)model.name)
+	os.read(file, transmute([]byte)model.assetPath)
+	os.read_ptr(
 		file,
 		raw_data(model.bindpoints),
 		int(modelData.bindpointCount * size_of(Bindpoint)),
@@ -773,19 +773,19 @@ saveTextureComponent :: proc(texture: ^Texture) -> SaveError {
 		return .InvalidSceneData
 	}
 
-	file, err := os2.open(texture.path, {.Write, .Create, .Trunc})
+	file, err := os.open(texture.path, {.Write, .Create, .Trunc})
 	if err != nil {
 		return .IO
 	}
-	defer os2.close(file)
+	defer os.close(file)
 
 	textureData := TextureComponent {
 		nameLength = u32(len(texture.name)),
 		pathLength = u32(len(texture.assetPath)),
 	}
-	os2.write_ptr(file, &textureData, size_of(TextureComponent))
-	os2.write_string(file, texture.name)
-	os2.write_string(file, texture.assetPath)
+	os.write_ptr(file, &textureData, size_of(TextureComponent))
+	os.write_string(file, texture.name)
+	os.write_string(file, texture.assetPath)
 
 	return .None
 }
@@ -795,20 +795,20 @@ loadTextureComponent :: proc(texture: ^Texture) -> LoadError {
 		return .InvalidArgument
 	}
 
-	file, err := os2.open(texture.path, {.Read})
+	file, err := os.open(texture.path, {.Read})
 	if err != nil {
 		return .IO
 	}
-	defer os2.close(file)
+	defer os.close(file)
 
 	textureData: TextureComponent
-	os2.read_ptr(file, &textureData, size_of(TextureComponent))
+	os.read_ptr(file, &textureData, size_of(TextureComponent))
 
 	texture.assetPath = string(make([]byte, textureData.pathLength))
 	texture.name = string(make([]byte, textureData.nameLength))
 
-	os2.read(file, transmute([]byte)texture.name)
-	os2.read(file, transmute([]byte)texture.assetPath)
+	os.read(file, transmute([]byte)texture.name)
+	os.read(file, transmute([]byte)texture.assetPath)
 
 	return .None
 }
