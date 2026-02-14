@@ -13,8 +13,19 @@ VK_DEBUG_MESSENGER_CREATE_INFO := vk.DebugUtilsMessengerCreateInfoEXT {
 	pUserData       = nil,
 }
 
-log :: logging.log
-logf :: logging.logf
+log :: proc(level: logging.Level, args: ..any, sep := " ", location := #caller_location) {
+	logging.log(level, args, sep, location)
+	if level == .Fatal {
+		panic("Fatal error! Check log for details.")
+	}
+}
+
+logf :: proc(level: logging.Level, fmt_str: string, args: ..any, location := #caller_location) {
+	logging.logf(level, fmt_str, args, location)
+	if level == .Fatal {
+		panic("Fatal error! Check log for details.")
+	}
+}
 
 // GLFW
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
