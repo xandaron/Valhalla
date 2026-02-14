@@ -63,8 +63,8 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	globals.projectDir, _ = filepath.abs(os.args[1])
-	os.set_current_directory(os.args[1])
+	globals.projectDir, _ = filepath.abs(os.args[1], context.allocator)
+	os.set_working_directory(os.args[1])
 
 	when ODIN_DEBUG {
 		tracker: mem.Tracking_Allocator
@@ -90,25 +90,30 @@ main :: proc() {
 	globals.runtimeContext = context
 
 	err: Error
+	transformComp, _ := compileShader("./shaders/Transform.slang", "comp", .COMPUTE)
+	defer delete(transformComp)
+	lightVert, _ := compileShader("./shaders/Light.slang", "vert", .VERTEX)
+	defer delete(lightVert)
+	lightFrag, _ := compileShader("./shaders/Light.slang", "frag", .FRAGMENT)
+	defer delete(lightFrag)
+	sceneVert, _ := compileShader("./shaders/Scene.slang", "vert", .VERTEX)
+	defer delete(sceneVert)
+	sceneFrag, _ := compileShader("./shaders/Scene.slang", "frag", .FRAGMENT)
+	defer delete(sceneFrag)
+	postProcessComp, _ := compileShader("./shaders/PostProcess.slang", "comp", .COMPUTE)
+	defer delete(postProcessComp)
 	globals.graphicsData, err = initVkGraphics(
-		InitInfo {
-			appVersion = APP_VERSION,
-			windowTitle = APP_NAME,
-			shaderFiles = {
-				{file = "./shaders/Transform.slang", entryPoint = "comp"},
-				{file = "./shaders/Light.slang", entryPoint = "vert"},
-				{file = "./shaders/Light.slang", entryPoint = "frag"},
-				{file = "./shaders/Scene.slang", entryPoint = "vert"},
-				{file = "./shaders/Scene.slang", entryPoint = "frag"},
-				{file = "./shaders/PostProcess.slang", entryPoint = "comp"},
-			},
-			preComp = 0,
-			lightVert = 1,
-			lightFrag = 2,
-			mainVert = 3,
-			mainFrag = 4,
-			postComp = 5,
-		},
+	InitGraphicsInfo {
+		appVersion      = APP_VERSION,
+		windowTitle     = APP_NAME,
+		// TODO: Sort this out. I need to load shader descriptor files like the model and texture files
+		transformComp   = transformComp,
+		lightVert       = lightVert,
+		lightFrag       = lightFrag,
+		sceneVert       = sceneVert,
+		sceneFrag       = sceneFrag,
+		postProcessComp = postProcessComp,
+	},
 	)
 	defer cleanupVkGraphics(&globals.graphicsData)
 

@@ -4,8 +4,6 @@ package Valhalla
 import "../imgui"
 import imguiGLFW "../imgui/imgui_impl_glfw"
 import imguiVulkan "../imgui/imgui_impl_vulkan"
-import "../slang"
-import "core:fmt"
 import "core:mem"
 import "core:strings"
 import "vendor:glfw"
@@ -337,7 +335,6 @@ GraphicsData :: struct {
 	swapchain:           Swapchain,
 
 	// Pipelines
-	shaderFiles:         [dynamic]Shader,
 	descriptorSets:      [len(DescriptorSetIndex)]DescriptorSet,
 	pipelines:           [len(PipelineIndex)]Pipeline,
 
@@ -400,11 +397,11 @@ DescriptorSetIndex :: enum {
 
 @(private = "file")
 Pipeline :: struct {
-	layout:     vk.PipelineLayout,
-	pipeline:   vk.Pipeline,
-	images:     []Image,
-	descriptor: vk.DescriptorImageInfo,
-	shaderIdxs: [2]u32,
+	handle:      vk.Pipeline,
+	layout:      vk.PipelineLayout,
+	images:      []Image,
+	descriptor:  vk.DescriptorImageInfo,
+	shaderCodes: [][]byte,
 }
 
 @(private = "file")
@@ -423,18 +420,17 @@ Image :: struct {
 	sampler: u32,
 }
 
-InitInfo :: struct {
-	appVersion:  u32,
-	windowTitle: cstring,
+InitGraphicsInfo :: struct {
+	appVersion:      u32,
+	windowTitle:     cstring,
 
 	// Shaders
-	shaderFiles: []Shader,
-	preComp:     u32,
-	lightVert:   u32,
-	lightFrag:   u32,
-	mainVert:    u32,
-	mainFrag:    u32,
-	postComp:    u32,
+	transformComp:   []byte,
+	lightVert:       []byte,
+	lightFrag:       []byte,
+	sceneVert:       []byte,
+	sceneFrag:       []byte,
+	postProcessComp: []byte,
 }
 
 InitError :: enum {
@@ -445,7 +441,7 @@ InitError :: enum {
 }
 
 @(require_results)
-initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: Error) {
+initVkGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData, err: Error) {
 	using graphicsData
 
 	if !glfw.Init() {
@@ -463,13 +459,13 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: 
 		nil,
 		&debugMessenger,
 	); res != .SUCCESS {
-		logf(.Warning, "Failed to create vulkan debug callback! vkResult: %v", res)
+		logf(.Error, "Failed to create vulkan debug callback! vkResult: %v", res)
 	}
 
 	initWindow(&graphicsData, initInfo.windowTitle) or_return
 	pickPhysicalDevice(&graphicsData) or_return
 	createLogicalDevice(&graphicsData) or_return
-	swapchain = createSwapchain(&graphicsData) or_return
+	createSwapchain(&graphicsData)
 	createCommandBuffers(&graphicsData) or_return
 
 	bufferSize := size_of(UniformBuffer)
@@ -511,15 +507,20 @@ initVkGraphics :: proc(initInfo: InitInfo) -> (graphicsData: GraphicsData, err: 
 	createBuffersDescriptorSets(&graphicsData) or_return
 	createTexturesDescriptorSets(&graphicsData) or_return
 
-	append(&shaderFiles, ..initInfo.shaderFiles)
+	createSceneImages(&graphicsData) or_return
+	pipelines[PipelineIndex.Light].shaderCodes = make([][]byte, 2)
+	pipelines[PipelineIndex.Light].shaderCodes[0] = initInfo.lightVert
+	pipelines[PipelineIndex.Light].shaderCodes[1] = initInfo.lightFrag
+	pipelines[PipelineIndex.Scene].shaderCodes = make([][]byte, 2)
+	pipelines[PipelineIndex.Scene].shaderCodes[0] = initInfo.sceneVert
+	pipelines[PipelineIndex.Scene].shaderCodes[1] = initInfo.sceneFrag
+	createGraphicsPipelines(&graphicsData) or_return
 
-	createGraphicsPipelines(
-		&graphicsData,
-		{initInfo.lightVert, initInfo.lightFrag},
-		{initInfo.mainVert, initInfo.mainFrag},
-	) or_return
-
-	createComputePipelines(&graphicsData, initInfo.preComp, initInfo.postComp) or_return
+	pipelines[PipelineIndex.Transform].shaderCodes = make([][]byte, 1)
+	pipelines[PipelineIndex.Transform].shaderCodes[0] = initInfo.transformComp
+	pipelines[PipelineIndex.PostProcess].shaderCodes = make([][]byte, 1)
+	pipelines[PipelineIndex.PostProcess].shaderCodes[0] = initInfo.postProcessComp
+	createComputePipelines(&graphicsData) or_return
 
 	initImgui(&graphicsData) or_return
 
@@ -598,12 +599,10 @@ cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
 		deleteBuffer(graphicsData, &uniformBuffers[index])
 	}
 
-	delete(shaderFiles)
-
 	cleanupSwapchain(graphicsData, swapchain)
-	cleanupPipelines(graphicsData)
-
 	for &pipeline in pipelines {
+		cleanupPipeline(graphicsData, &pipeline)
+
 		for &image in pipeline.images {
 			deleteImage(graphicsData, &image)
 		}
@@ -627,8 +626,6 @@ cleanupVkGraphics :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	vk.DestroyInstance(instance, nil)
-
-	slang.shutdown()
 
 	glfw.DestroyWindow(window)
 	glfw.Terminate()
@@ -1077,9 +1074,15 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		maintenance7 = true,
 	}
 
+	maintenance5: vk.PhysicalDeviceMaintenance5Features = {
+		sType        = .PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES,
+		pNext        = &maintenance7,
+		maintenance5 = true,
+	}
+
 	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR = {
 		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
-		pNext                        = &maintenance7,
+		pNext                        = &maintenance5,
 		computeDerivativeGroupQuads  = true,
 		computeDerivativeGroupLinear = false,
 	}
@@ -1159,8 +1162,7 @@ getSwapcahainAspectRatio :: proc(using graphicsData: ^GraphicsData) -> f32 {
 }
 
 @(private = "file")
-@(require_results)
-createSwapchain :: proc(graphicsData: ^GraphicsData) -> (Swapchain, SwapchainError) {
+createSwapchain :: proc(using graphicsData: ^GraphicsData) {
 	chooseFormat :: proc(formats: []vk.SurfaceFormatKHR) -> (fmt: vk.SurfaceFormatKHR) {
 		// TODO: improve this function
 		fmt = formats[0]
@@ -1221,7 +1223,7 @@ createSwapchain :: proc(graphicsData: ^GraphicsData) -> (Swapchain, SwapchainErr
 	min := swapchainSupport.capabilities.minImageCount
 	swapchainImageCount := max if max == 1 else (2 if 2 > min else min)
 
-	swapchain: Swapchain = {
+	swapchain = {
 		transform = swapchainSupport.capabilities.currentTransform,
 		format    = chooseFormat(swapchainSupport.formats),
 		mode      = choosePresentMode(swapchainSupport.modes),
@@ -1229,14 +1231,14 @@ createSwapchain :: proc(graphicsData: ^GraphicsData) -> (Swapchain, SwapchainErr
 	}
 
 	queueFamiliesArray := make([dynamic]u32, context.temp_allocator)
-	append(&queueFamiliesArray, graphicsData.queueFamilies.graphicsFamily)
-	if graphicsData.queueFamilies.graphicsFamily != graphicsData.queueFamilies.presentFamily {
-		append(&queueFamiliesArray, graphicsData.queueFamilies.presentFamily)
+	append(&queueFamiliesArray, queueFamilies.graphicsFamily)
+	if queueFamilies.graphicsFamily != queueFamilies.presentFamily {
+		append(&queueFamiliesArray, queueFamilies.presentFamily)
 	}
 
-	if graphicsData.queueFamilies.graphicsFamily != graphicsData.queueFamilies.computeFamily &&
-	   graphicsData.queueFamilies.presentFamily != graphicsData.queueFamilies.computeFamily {
-		append(&queueFamiliesArray, graphicsData.queueFamilies.computeFamily)
+	if queueFamilies.graphicsFamily != queueFamilies.computeFamily &&
+	   queueFamilies.presentFamily != queueFamilies.computeFamily {
+		append(&queueFamiliesArray, queueFamilies.computeFamily)
 	}
 
 	createInfo: vk.SwapchainCreateInfoKHR = {
@@ -1260,15 +1262,13 @@ createSwapchain :: proc(graphicsData: ^GraphicsData) -> (Swapchain, SwapchainErr
 		oldSwapchain          = graphicsData.swapchain.handle,
 	}
 
-	if res := vk.CreateSwapchainKHR(graphicsData.device, &createInfo, nil, &swapchain.handle);
-	   res != .SUCCESS {
+	if res := vk.CreateSwapchainKHR(device, &createInfo, nil, &swapchain.handle); res != .SUCCESS {
 		log(.Fatal, "Failed to create swapchain! vkResult: %v", res)
-		return swapchain, .FailedToCreateSwapchain
 	}
 
 	swapchain.images = make([]vk.Image, swapchainImageCount)
 	vk.GetSwapchainImagesKHR(
-		graphicsData.device,
+		device,
 		swapchain.handle,
 		&swapchainImageCount,
 		raw_data(swapchain.images),
@@ -1287,11 +1287,8 @@ createSwapchain :: proc(graphicsData: ^GraphicsData) -> (Swapchain, SwapchainErr
 		)
 		if err != .None {
 			log(.Fatal, "Failed to create swapchain image view! vkResult: %v", err)
-			return swapchain, .FailedToCreateSwapchainImageView
 		}
 	}
-
-	return swapchain, .None
 }
 
 @(private = "file")
@@ -1319,31 +1316,17 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 	vk.QueueWaitIdle(presentQueue)
 
 	oldSwapchain := swapchain
-	swapchain, err = createSwapchain(graphicsData)
-	if err != nil {
-		log(.Error, "Failed to recreate swapchain!")
-		return err
-	}
+	createSwapchain(graphicsData)
 	cleanupSwapchain(graphicsData, oldSwapchain)
 
-	err = recreateComputeImages(graphicsData)
-	if err != nil {
-		log(.Error, "Failed to update compute images!")
-		return err
-	}
+	deleteImage(graphicsData, &pipelines[PipelineIndex.PostProcess].images[0])
+	deleteImage(graphicsData, &pipelines[PipelineIndex.PostProcess].images[1])
+	createComputeImages(graphicsData) or_return
 
-	err = updateComputeDescriptorSets(graphicsData)
-	if err != nil {
-		log(.Error, "Failed to update compute descriptor sets!")
-		return err
-	}
+	updateComputeDescriptorSets(graphicsData)
 
 	cleanupImgui(graphicsData)
-	err = initImgui(graphicsData)
-	if err != nil {
-		log(.Fatal, "Failed to update Imgui!")
-		return err
-	}
+	initImgui(graphicsData) or_return
 
 	return nil
 }
@@ -3357,8 +3340,7 @@ updateDescriptorSets :: proc(
 }
 
 @(private = "file")
-@(require_results)
-updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) -> Error {
+updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) {
 	sceneDepthInfo: vk.DescriptorImageInfo = {
 		sampler     = samplers[pipelines[PipelineIndex.Scene].images[1].sampler],
 		imageView   = pipelines[PipelineIndex.Scene].images[1].view,
@@ -3423,8 +3405,6 @@ updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) -> Error 
 			nil,
 		)
 	}
-
-	return nil
 }
 
 SyncError :: enum {
@@ -3501,144 +3481,159 @@ PipelineError :: enum {
 
 @(private = "file")
 @(require_results)
-createShaderModules :: proc(
-	using graphicsData: ^GraphicsData,
-	shaderIdx: u32,
-	stage: slang.Stage,
-) -> (
-	vk.ShaderModule,
-	PipelineError,
-) {
-	blobToString :: proc(blob: ^slang.Blob) -> string {
-		if blob == nil {
-			return ""
-		}
-		size := slang.getBlobSize(blob)
-		if size == 0 {
-			return ""
-		}
-		return strings.clone_from_bytes(([^]u8)(slang.getBlobData(blob))[:size])
-	}
+createSceneImages :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
+	pipelines[PipelineIndex.Scene].images = make([]Image, 2)
+	pipelines[PipelineIndex.Scene].images[0].format = .R16G16B16A16_SFLOAT
 
-	diagnosticsBlob: ^slang.Blob
-	desc := slang.Global_Session_Desc {
-		searchPaths     = nil,
-		searchPathCount = 0,
-	}
-	globalSession := slang.createGlobalSessionWithDesc(&desc)
-	if globalSession == nil {
-		return 0, .FailedToCreateShaderModule
-	}
-
-	compileTargets := []slang.Compile_Target{.SPIRV}
-	sessionDesc := slang.Session_Desc {
-		targets                = raw_data(compileTargets),
-		targetCount            = i32(len(compileTargets)),
-		searchPaths            = nil,
-		searchPathCount        = 0,
-		preprocessorMacros     = nil,
-		preprocessorMacroCount = 0,
-		matrixLayoutMode       = .COLUMN_MAJOR,
-	}
-	session := slang.createSessionWithProfile(
-		globalSession,
-		slang.findProfile(globalSession, "spirv_1_6"),
-		&sessionDesc,
+	err = createImage(
+		graphicsData,
+		&pipelines[PipelineIndex.Scene].images[0],
+		{},
+		.D2,
+		RENDER_SIZE.x,
+		RENDER_SIZE.y,
+		1,
+		{._1},
+		.OPTIMAL,
+		{.COLOR_ATTACHMENT, .TRANSFER_SRC},
+		{.DEVICE_LOCAL},
+		.EXCLUSIVE,
+		0,
+		nil,
 	)
-	if session == nil {
-		return 0, .FailedToCreateShaderModule
+	if err != nil {
+		log(.Fatal, "Failed to create colour image!")
+		return
 	}
 
-	module := slang.loadModule(
-		session,
-		strings.clone_to_cstring(shaderFiles[shaderIdx].file, context.temp_allocator),
-		&diagnosticsBlob,
+	pipelines[PipelineIndex.Scene].images[0].view, err = createImageView(
+		graphicsData,
+		pipelines[PipelineIndex.Scene].images[0].vkImage,
+		.D2,
+		pipelines[PipelineIndex.Scene].images[0].format,
+		{.COLOR},
+		1,
 	)
-	if module == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
-		return 0, .FailedToCreateShaderModule
+	if err != nil {
+		log(.Fatal, "Failed to create colour image view!")
+		return
 	}
 
-	components: [2]slang.Component_Type
-	components[0] = {
-		kind   = .MODULE,
-		module = module,
-	}
+	pipelines[PipelineIndex.Scene].images[1].format = depthFormat
 
-	entryPoint := slang.findEntryPoint(
-		module,
-		strings.clone_to_cstring(shaderFiles[shaderIdx].entryPoint, context.temp_allocator),
-		stage,
-		&diagnosticsBlob,
+	err = createImage(
+		graphicsData,
+		&pipelines[PipelineIndex.Scene].images[1],
+		{},
+		.D2,
+		RENDER_SIZE.x,
+		RENDER_SIZE.y,
+		1,
+		{._1},
+		.OPTIMAL,
+		{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+		{.DEVICE_LOCAL},
+		.EXCLUSIVE,
+		0,
+		nil,
 	)
-	if entryPoint == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
-		return 0, .FailedToCreateShaderModule
-	}
-	components[1] = {
-		kind       = .ENTRY_POINT,
-		entryPoint = entryPoint,
+	if err != nil {
+		log(.Fatal, "Failed to create depth image!")
+		return
 	}
 
-	program := slang.createCompositeComponentType(
-		session,
-		&components[0],
-		i32(len(components)),
-		&diagnosticsBlob,
+	pipelines[PipelineIndex.Scene].images[1].view, err = createImageView(
+		graphicsData,
+		pipelines[PipelineIndex.Scene].images[1].vkImage,
+		.D2,
+		pipelines[PipelineIndex.Scene].images[1].format,
+		{.DEPTH},
+		1,
 	)
-	if program == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
-		return 0, .FailedToCreateShaderModule
+	if err != nil {
+		log(.Fatal, "Failed to create depth image view!")
+		return
 	}
 
-	linkedProgram := slang.linkComponentType(program, &diagnosticsBlob)
-	if linkedProgram == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
-		return 0, .FailedToCreateShaderModule
+	pipelines[PipelineIndex.Scene].images[1].sampler = 0
+
+	cmdBuffer: vk.CommandBuffer
+	cmdBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
+	if err != nil {
+		log(.Fatal, "Failed to start commands! %v", err)
+		return
 	}
 
-	codeBlob := slang.getEntryPointCode(linkedProgram, 0, 0, &diagnosticsBlob)
-	if codeBlob == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
-		return 0, .FailedToCreateShaderModule
+	imageBarriers := [?]vk.ImageMemoryBarrier2 {
+		{
+			sType = .IMAGE_MEMORY_BARRIER_2,
+			pNext = nil,
+			srcStageMask = nil,
+			srcAccessMask = nil,
+			dstStageMask = nil,
+			dstAccessMask = nil,
+			oldLayout = .UNDEFINED,
+			newLayout = .TRANSFER_SRC_OPTIMAL,
+			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			image = pipelines[PipelineIndex.Scene].images[0].vkImage,
+			subresourceRange = vk.ImageSubresourceRange {
+				aspectMask = {.COLOR},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		},
+		{
+			sType = .IMAGE_MEMORY_BARRIER_2,
+			pNext = nil,
+			srcStageMask = nil,
+			srcAccessMask = nil,
+			dstStageMask = nil,
+			dstAccessMask = nil,
+			oldLayout = .UNDEFINED,
+			newLayout = .SHADER_READ_ONLY_OPTIMAL,
+			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			image = pipelines[PipelineIndex.Scene].images[1].vkImage,
+			subresourceRange = vk.ImageSubresourceRange {
+				aspectMask = {.DEPTH},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		},
+	}
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = len(imageBarriers),
+			pImageMemoryBarriers = &imageBarriers[0],
+		},
+	)
+
+	err = endSingleTimeCommands(graphicsData, cmdBuffer, graphicsCommandPool)
+	if err != nil {
+		log(.Fatal, "Failed to submit commands! %v", err)
+		return
 	}
 
-	createInfo: vk.ShaderModuleCreateInfo = {
-		sType    = .SHADER_MODULE_CREATE_INFO,
-		pNext    = nil,
-		flags    = {},
-		codeSize = int(slang.getBlobSize(codeBlob)),
-		pCode    = (^u32)(slang.getBlobData(codeBlob)),
-	}
-	shaderModule: vk.ShaderModule
-	if res := vk.CreateShaderModule(device, &createInfo, nil, &shaderModule); res != .SUCCESS {
-		log(.Error, fmt.tprintln("Failed to create shader module! vkResult: %d", res))
-		return 0, .FailedToCreateShaderModule
-	}
-
-	slang.releaseBlob(codeBlob)
-
-	slang.releaseComponentType(linkedProgram)
-	slang.releaseComponentType(program)
-	slang.releaseEntryPoint(components[1].entryPoint)
-	slang.releaseModule(module)
-
-	slang.releaseSession(session)
-	slang.releaseGlobalSession(globalSession)
-
-	return shaderModule, .None
+	return
 }
 
 @(private = "file")
 @(require_results)
 createGraphicsPipelines :: proc(
 	using graphicsData: ^GraphicsData,
-	shadowShaderIndices, mainShaderIndices: [2]u32,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> Error {
 	PIPELINE_COUNT: u32 : 2
@@ -3649,11 +3644,9 @@ createGraphicsPipelines :: proc(
 		descriptorSets[DescriptorSetIndex.Textures].layout,
 	}
 
-	{
-		pipelines[PipelineIndex.Light].images = make([]Image, 2)
-		pipelines[PipelineIndex.Light].images[0].format = .R16G16B16A16_SFLOAT
-		pipelines[PipelineIndex.Light].images[1].format = depthFormat
-	}
+	pipelines[PipelineIndex.Light].images = make([]Image, 2)
+	pipelines[PipelineIndex.Light].images[0].format = .R16G16B16A16_SFLOAT
+	pipelines[PipelineIndex.Light].images[1].format = depthFormat
 
 	vertexBindingDescription := VERTEX_BINDING_DESCRIPTION
 
@@ -3684,31 +3677,37 @@ createGraphicsPipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shadowShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
-	for &info, index in shadowShaderStagesInfo {
-		module, err := createShaderModules(
-			graphicsData,
-			shadowShaderIndices[index],
-			index == 0 ? .VERTEX : .FRAGMENT,
-		)
-		if err != nil {
-			logf(.Fatal, "Failed to create shader module! vkResult: %d", err)
-			return err
-		}
-		info = {
-			sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-			pNext               = nil,
-			flags               = {},
-			stage               = {index == 0 ? .VERTEX : .FRAGMENT},
-			module              = module,
-			pName               = "main",
+	shadowShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo = {
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+				sType = .SHADER_MODULE_CREATE_INFO,
+				pNext = nil,
+				flags = nil,
+				codeSize = len(pipelines[PipelineIndex.Light].shaderCodes[0]),
+				pCode = transmute(^u32)raw_data(pipelines[PipelineIndex.Light].shaderCodes[0]),
+			},
+			flags = nil,
+			stage = {.VERTEX},
+			module = 0,
+			pName = "main",
 			pSpecializationInfo = nil,
-		}
-	}
-	defer {
-		for info in shadowShaderStagesInfo {
-			vk.DestroyShaderModule(device, info.module, nil)
-		}
+		},
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+				sType = .SHADER_MODULE_CREATE_INFO,
+				pNext = nil,
+				flags = nil,
+				codeSize = len(pipelines[PipelineIndex.Light].shaderCodes[1]),
+				pCode = transmute(^u32)raw_data(pipelines[PipelineIndex.Light].shaderCodes[1]),
+			},
+			flags = nil,
+			stage = {.FRAGMENT},
+			module = 0,
+			pName = "main",
+			pSpecializationInfo = nil,
+		},
 	}
 
 	pipelineInfos[0] = {
@@ -3722,30 +3721,30 @@ createGraphicsPipelines :: proc(
 			depthAttachmentFormat = pipelines[PipelineIndex.Light].images[1].format,
 			stencilAttachmentFormat = .UNDEFINED,
 		},
-		flags               = {},
+		flags               = nil,
 		stageCount          = u32(len(shadowShaderStagesInfo)),
 		pStages             = &shadowShaderStagesInfo[0],
-		pVertexInputState   = &{
+		pVertexInputState   = &vk.PipelineVertexInputStateCreateInfo {
 			sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 			pNext = nil,
-			flags = {},
+			flags = nil,
 			vertexBindingDescriptionCount = 1,
 			pVertexBindingDescriptions = &vertexBindingDescription,
 			vertexAttributeDescriptionCount = u32(len(VERTEX_ATTRIBUTE_DESCRIPTION)),
 			pVertexAttributeDescriptions = raw_data(VERTEX_ATTRIBUTE_DESCRIPTION),
 		},
-		pInputAssemblyState = &{
+		pInputAssemblyState = &vk.PipelineInputAssemblyStateCreateInfo {
 			sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 			pNext = nil,
-			flags = {},
+			flags = nil,
 			topology = .TRIANGLE_LIST,
 			primitiveRestartEnable = false,
 		},
 		pTessellationState  = nil,
-		pViewportState      = &{
+		pViewportState      = &vk.PipelineViewportStateCreateInfo {
 			sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 			pNext = nil,
-			flags = {},
+			flags = nil,
 			viewportCount = 1,
 			pViewports = &vk.Viewport {
 				x = 0,
@@ -3761,10 +3760,10 @@ createGraphicsPipelines :: proc(
 				extent = {SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y},
 			},
 		},
-		pRasterizationState = &{
+		pRasterizationState = &vk.PipelineRasterizationStateCreateInfo {
 			sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 			pNext = nil,
-			flags = {},
+			flags = nil,
 			depthClampEnable = false,
 			rasterizerDiscardEnable = false,
 			polygonMode = .FILL,
@@ -3776,10 +3775,10 @@ createGraphicsPipelines :: proc(
 			depthBiasSlopeFactor = DEPTH_BIAS_SLOPE,
 			lineWidth = 1.0,
 		},
-		pMultisampleState   = &{
+		pMultisampleState   = &vk.PipelineMultisampleStateCreateInfo {
 			sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
 			pNext = nil,
-			flags = {},
+			flags = nil,
 			rasterizationSamples = {._1},
 			sampleShadingEnable = false,
 			minSampleShading = 0.0,
@@ -3787,10 +3786,10 @@ createGraphicsPipelines :: proc(
 			alphaToCoverageEnable = false,
 			alphaToOneEnable = false,
 		},
-		pDepthStencilState  = &{
+		pDepthStencilState  = &vk.PipelineDepthStencilStateCreateInfo {
 			sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 			pNext = nil,
-			flags = {},
+			flags = nil,
 			depthTestEnable = true,
 			depthWriteEnable = true,
 			depthCompareOp = .LESS_OR_EQUAL,
@@ -3809,7 +3808,7 @@ createGraphicsPipelines :: proc(
 			minDepthBounds = 0,
 			maxDepthBounds = 1,
 		},
-		pColorBlendState    = &{
+		pColorBlendState    = &vk.PipelineColorBlendStateCreateInfo {
 			sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
 			pNext = nil,
 			flags = {},
@@ -3863,177 +3862,37 @@ createGraphicsPipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	mainShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo
-	for &info, index in mainShaderStagesInfo {
-		module, err := createShaderModules(
-			graphicsData,
-			mainShaderIndices[index],
-			index == 0 ? .VERTEX : .FRAGMENT,
-		)
-		if err != nil {
-			logf(.Fatal, "Failed to create shader module! vkResult: %d", err)
-			return err
-		}
-		info = {
-			sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-			pNext               = nil,
-			flags               = {},
-			stage               = {index == 0 ? .VERTEX : .FRAGMENT},
-			module              = module,
-			pName               = "main",
+	mainShaderStagesInfo: [2]vk.PipelineShaderStageCreateInfo = {
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+				sType = .SHADER_MODULE_CREATE_INFO,
+				pNext = nil,
+				flags = nil,
+				codeSize = len(pipelines[PipelineIndex.Scene].shaderCodes[0]),
+				pCode = transmute(^u32)raw_data(pipelines[PipelineIndex.Scene].shaderCodes[0]),
+			},
+			flags = nil,
+			stage = {.VERTEX},
+			module = 0,
+			pName = "main",
 			pSpecializationInfo = nil,
-		}
-	}
-	defer {
-		for &info in mainShaderStagesInfo {
-			vk.DestroyShaderModule(device, info.module, nil)
-		}
-	}
-
-	{
-		pipelines[PipelineIndex.Scene].images = make([]Image, 2)
-		pipelines[PipelineIndex.Scene].images[0].format = .R16G16B16A16_SFLOAT
-
-		err := createImage(
-			graphicsData,
-			&pipelines[PipelineIndex.Scene].images[0],
-			{},
-			.D2,
-			RENDER_SIZE.x,
-			RENDER_SIZE.y,
-			1,
-			{._1},
-			.OPTIMAL,
-			{.COLOR_ATTACHMENT, .TRANSFER_SRC},
-			{.DEVICE_LOCAL},
-			.EXCLUSIVE,
-			0,
-			nil,
-		)
-		if err != nil {
-			log(.Fatal, "Failed to create colour image!")
-			return err
-		}
-
-		pipelines[PipelineIndex.Scene].images[0].view, err = createImageView(
-			graphicsData,
-			pipelines[PipelineIndex.Scene].images[0].vkImage,
-			.D2,
-			pipelines[PipelineIndex.Scene].images[0].format,
-			{.COLOR},
-			1,
-		)
-		if err != nil {
-			log(.Fatal, "Failed to create colour image view!")
-			return err
-		}
-
-		pipelines[PipelineIndex.Scene].images[1].format = depthFormat
-
-		err = createImage(
-			graphicsData,
-			&pipelines[PipelineIndex.Scene].images[1],
-			{},
-			.D2,
-			RENDER_SIZE.x,
-			RENDER_SIZE.y,
-			1,
-			{._1},
-			.OPTIMAL,
-			{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-			{.DEVICE_LOCAL},
-			.EXCLUSIVE,
-			0,
-			nil,
-		)
-		if err != nil {
-			log(.Fatal, "Failed to create depth image!")
-			return err
-		}
-
-		pipelines[PipelineIndex.Scene].images[1].view, err = createImageView(
-			graphicsData,
-			pipelines[PipelineIndex.Scene].images[1].vkImage,
-			.D2,
-			pipelines[PipelineIndex.Scene].images[1].format,
-			{.DEPTH},
-			1,
-		)
-		if err != nil {
-			log(.Fatal, "Failed to create depth image view!")
-			return err
-		}
-
-		pipelines[PipelineIndex.Scene].images[1].sampler = 0
-
-		cmdBuffer, cerr := beginSingleTimeCommands(graphicsData, graphicsCommandPool)
-		if cerr != nil {
-			log(.Error, "Failed to start commands! %v", cerr)
-			return cerr
-		}
-
-		imageBarriers := [?]vk.ImageMemoryBarrier2 {
-			{
-				sType = .IMAGE_MEMORY_BARRIER_2,
+		},
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+				sType = .SHADER_MODULE_CREATE_INFO,
 				pNext = nil,
-				srcStageMask = nil,
-				srcAccessMask = nil,
-				dstStageMask = nil,
-				dstAccessMask = nil,
-				oldLayout = .UNDEFINED,
-				newLayout = .TRANSFER_SRC_OPTIMAL,
-				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				image = pipelines[PipelineIndex.Scene].images[0].vkImage,
-				subresourceRange = vk.ImageSubresourceRange {
-					aspectMask = {.COLOR},
-					baseMipLevel = 0,
-					levelCount = 1,
-					baseArrayLayer = 0,
-					layerCount = 1,
-				},
+				flags = nil,
+				codeSize = len(pipelines[PipelineIndex.Scene].shaderCodes[1]),
+				pCode = transmute(^u32)raw_data(pipelines[PipelineIndex.Scene].shaderCodes[1]),
 			},
-			{
-				sType = .IMAGE_MEMORY_BARRIER_2,
-				pNext = nil,
-				srcStageMask = nil,
-				srcAccessMask = nil,
-				dstStageMask = nil,
-				dstAccessMask = nil,
-				oldLayout = .UNDEFINED,
-				newLayout = .SHADER_READ_ONLY_OPTIMAL,
-				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				image = pipelines[PipelineIndex.Scene].images[1].vkImage,
-				subresourceRange = vk.ImageSubresourceRange {
-					aspectMask = {.DEPTH},
-					baseMipLevel = 0,
-					levelCount = 1,
-					baseArrayLayer = 0,
-					layerCount = 1,
-				},
-			},
-		}
-		vk.CmdPipelineBarrier2(
-			cmdBuffer,
-			&vk.DependencyInfo {
-				sType = .DEPENDENCY_INFO,
-				pNext = nil,
-				dependencyFlags = nil,
-				memoryBarrierCount = 0,
-				pMemoryBarriers = nil,
-				bufferMemoryBarrierCount = 0,
-				pBufferMemoryBarriers = nil,
-				imageMemoryBarrierCount = len(imageBarriers),
-				pImageMemoryBarriers = &imageBarriers[0],
-			},
-		)
-
-		cerr = endSingleTimeCommands(graphicsData, cmdBuffer, graphicsCommandPool)
-		if cerr != nil {
-			log(.Error, "Failed to submit commands! %v", cerr)
-			return cerr
-		}
+			flags = nil,
+			stage = {.FRAGMENT},
+			module = 0,
+			pName = "main",
+			pSpecializationInfo = nil,
+		},
 	}
 
 	pipelineInfos[1] = {
@@ -4163,20 +4022,13 @@ createGraphicsPipelines :: proc(
 		return .FailedToCreateGraphicsPipeline
 	}
 
-	pipelines[PipelineIndex.Light].pipeline = vkPipelines[0]
-	pipelines[PipelineIndex.Light].shaderIdxs = shadowShaderIndices
-
-	pipelines[PipelineIndex.Scene].pipeline = vkPipelines[1]
-	pipelines[PipelineIndex.Scene].shaderIdxs = mainShaderIndices
-
+	pipelines[PipelineIndex.Light].handle = vkPipelines[0]
+	pipelines[PipelineIndex.Scene].handle = vkPipelines[1]
 	return nil
 }
 
 @(private = "file")
-recreateComputeImages :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
-	deleteImage(graphicsData, &pipelines[PipelineIndex.PostProcess].images[0])
-	deleteImage(graphicsData, &pipelines[PipelineIndex.PostProcess].images[1])
-
+createComputeImages :: proc(using graphicsData: ^GraphicsData) -> (err: Error) {
 	err = createImage(
 		graphicsData,
 		&pipelines[PipelineIndex.PostProcess].images[0],
@@ -4248,7 +4100,7 @@ recreateComputeImages :: proc(using graphicsData: ^GraphicsData) -> (err: Error)
 	cmdBuffer: vk.CommandBuffer
 	cmdBuffer, err = beginSingleTimeCommands(graphicsData, computeCommandPool)
 	if err != nil {
-		log(.Error, "Failed to start commands! %v", err)
+		log(.Fatal, "Failed to start commands! %v", err)
 		return err
 	}
 
@@ -4311,7 +4163,7 @@ recreateComputeImages :: proc(using graphicsData: ^GraphicsData) -> (err: Error)
 
 	err = endSingleTimeCommands(graphicsData, cmdBuffer, computeCommandPool)
 	if err != nil {
-		log(.Error, "Failed to submit commands! %v", err)
+		log(.Fatal, "Failed to submit commands! %v", err)
 		return err
 	}
 
@@ -4322,7 +4174,6 @@ recreateComputeImages :: proc(using graphicsData: ^GraphicsData) -> (err: Error)
 @(require_results)
 createComputePipelines :: proc(
 	using graphicsData: ^GraphicsData,
-	transformShaderIndices, postShaderIndices: u32,
 	pipelineCache: vk.PipelineCache = 0,
 ) -> Error {
 	PIPELINE_COUNT: u32 : 2
@@ -4360,21 +4211,21 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shaderModule, err := createShaderModules(graphicsData, transformShaderIndices, .COMPUTE)
-	if err != nil {
-		logf(.Fatal, "Failed to create precompute shader module! Error: %d", err)
-		return err
-	}
 	transformShaderStageInfo: vk.PipelineShaderStageCreateInfo = {
 		sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-		pNext               = nil,
-		flags               = {},
+		pNext               = &vk.ShaderModuleCreateInfo {
+			sType = .SHADER_MODULE_CREATE_INFO,
+			pNext = nil,
+			flags = nil,
+			codeSize = len(pipelines[PipelineIndex.Transform].shaderCodes[0]),
+			pCode = transmute(^u32)raw_data(pipelines[PipelineIndex.Transform].shaderCodes[0]),
+		},
+		flags               = nil,
 		stage               = {.COMPUTE},
-		module              = shaderModule,
+		module              = 0,
 		pName               = "main",
 		pSpecializationInfo = nil,
 	}
-	defer vk.DestroyShaderModule(device, transformShaderStageInfo.module, nil)
 
 	pipelineInfos[0] = {
 		sType              = .COMPUTE_PIPELINE_CREATE_INFO,
@@ -4554,18 +4405,18 @@ createComputePipelines :: proc(
 		return .FailedToCreatePipelineLayout
 	}
 
-	shaderModule, err = createShaderModules(graphicsData, postShaderIndices, .COMPUTE)
-	if err != nil {
-		logf(.Fatal, "Failed to create precompute shader module! Error: %d", err)
-		return err
-	}
-
 	postShaderStageInfo: vk.PipelineShaderStageCreateInfo = {
 		sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-		pNext               = nil,
-		flags               = {},
+		pNext               = &vk.ShaderModuleCreateInfo {
+			sType = .SHADER_MODULE_CREATE_INFO,
+			pNext = nil,
+			flags = nil,
+			codeSize = len(pipelines[PipelineIndex.PostProcess].shaderCodes[0]),
+			pCode = transmute(^u32)raw_data(pipelines[PipelineIndex.PostProcess].shaderCodes[0]),
+		},
+		flags               = nil,
 		stage               = {.COMPUTE},
-		module              = shaderModule,
+		module              = 0,
 		pName               = "main",
 		pSpecializationInfo = nil,
 	}
@@ -4574,7 +4425,7 @@ createComputePipelines :: proc(
 	pipelineInfos[1] = {
 		sType              = .COMPUTE_PIPELINE_CREATE_INFO,
 		pNext              = nil,
-		flags              = {},
+		flags              = nil,
 		stage              = postShaderStageInfo,
 		layout             = pipelines[PipelineIndex.PostProcess].layout,
 		basePipelineHandle = {},
@@ -4594,47 +4445,16 @@ createComputePipelines :: proc(
 		return .FailedToCreateGraphicsPipeline
 	}
 
-	pipelines[PipelineIndex.Transform].pipeline = vkPipelines[0]
-	pipelines[PipelineIndex.Transform].shaderIdxs[0] = transformShaderIndices
-
-	pipelines[PipelineIndex.PostProcess].pipeline = vkPipelines[1]
-	pipelines[PipelineIndex.PostProcess].shaderIdxs[0] = postShaderIndices
-
+	pipelines[PipelineIndex.Transform].handle = vkPipelines[0]
+	pipelines[PipelineIndex.PostProcess].handle = vkPipelines[1]
 	return nil
 }
 
 @(private = "file")
-cleanupPipelines :: proc(using graphicsData: ^GraphicsData) {
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.Transform].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.Transform].layout, nil)
-
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.Light].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.Light].layout, nil)
-
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.Scene].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.Scene].layout, nil)
-
-	vk.DestroyPipeline(device, pipelines[PipelineIndex.PostProcess].pipeline, nil)
-	vk.DestroyPipelineLayout(device, pipelines[PipelineIndex.PostProcess].layout, nil)
-}
-
-@(require_results)
-reloadShaders :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) -> (err: Error) {
-	cleanupPipelines(graphicsData)
-	createGraphicsPipelines(
-		graphicsData,
-		pipelines[PipelineIndex.Light].shaderIdxs,
-		pipelines[PipelineIndex.Scene].shaderIdxs,
-	) or_return
-
-	createComputePipelines(
-		graphicsData,
-		pipelines[PipelineIndex.Transform].shaderIdxs[0],
-		pipelines[PipelineIndex.PostProcess].shaderIdxs[0],
-	) or_return
-
-	updateDescriptorSets(graphicsData, scene) or_return
-	return nil
+cleanupPipeline :: proc(using graphicsData: ^GraphicsData, pipeline: ^Pipeline) {
+	vk.DestroyPipeline(device, pipeline.handle, nil)
+	vk.DestroyPipelineLayout(device, pipeline.layout, nil)
+	delete(pipeline.shaderCodes)
 }
 
 changePipelineShader :: proc(
@@ -4656,7 +4476,7 @@ ImguiError :: enum {
 @(require_results)
 initImgui :: proc(using graphicsData: ^GraphicsData) -> Error {
 	if !imgui.CHECKVERSION() {
-		log(.Error, "Wrong imgui version!")
+		log(.Fatal, "Wrong imgui version!")
 		return ImguiError.Version
 	}
 
@@ -4939,7 +4759,7 @@ recordTransformCommands :: proc(
 		0,
 		nil,
 	)
-	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[PipelineIndex.Transform].pipeline)
+	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[PipelineIndex.Transform].handle)
 
 	pushConstants: Transform_PushConstants = {
 		instance        = 0,
@@ -5315,7 +5135,7 @@ recordLightCommands :: proc(
 		return .FailedToRecordCommandBuffer
 	}
 
-	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[PipelineIndex.Light].pipeline)
+	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[PipelineIndex.Light].handle)
 
 	sets: [len(DescriptorSetIndex)]vk.DescriptorSet = {
 		descriptorSets[DescriptorSetIndex.Buffers].sets[currentFrame],
@@ -5454,7 +5274,7 @@ recordSceneCommands :: proc(
 		0,
 		nil,
 	)
-	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[PipelineIndex.Scene].pipeline)
+	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[PipelineIndex.Scene].handle)
 
 	vk.CmdBindVertexBuffers(
 		cmdBuffer,
@@ -5664,7 +5484,7 @@ recordPostProcessCommands :: proc(
 		},
 	)
 
-	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[PipelineIndex.PostProcess].pipeline)
+	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[PipelineIndex.PostProcess].handle)
 
 	vk.CmdDispatch(
 		cmdBuffer,
