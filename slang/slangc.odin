@@ -5,20 +5,9 @@ import "core:c"
 _ :: c
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "gfx.lib",
-        "slang-rt.lib", 
-        "slang.lib",
-        "slangc.lib",
-    }
-}
-else {
-    foreign import lib {
-        "gfx.a",
-        "slang-rt.a",
-        "slang.a", 
-        "slangc.a",
-    }
+	foreign import lib {"gfx.lib", "slang-rt.lib", "slang.lib", "slangc.lib"}
+} else {
+	foreign import lib {"gfx.a", "slang-rt.a", "slang.a", "slangc.a"}
 }
 
 // Component type - can be either a module, entry point, or composite
@@ -30,7 +19,7 @@ Component_Type_Kind :: enum c.int {
 
 // Component type struct - exposed so users can access it directly
 Component_Type :: struct {
-	kind: Component_Type_Kind,
+	kind:    Component_Type_Kind,
 	using _: struct #raw_union {
 		module:     ^Module,
 		entryPoint: ^Entry_Point,
@@ -145,7 +134,7 @@ Global_Session_Desc :: struct {
 	enableGLSL:      bool,
 }
 
-@(default_calling_convention="c", link_prefix="slangc_")
+@(default_calling_convention = "c", link_prefix = "slangc_")
 foreign lib {
 	// Error handling - for functions that return pointers directly
 	/** Check if the last operation succeeded.
@@ -355,3 +344,4 @@ foreign lib {
 	*/
 	getLastErrorMessage :: proc() -> cstring ---
 }
+
