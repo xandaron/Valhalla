@@ -7,3 +7,4 @@ ols.json
 docs/
 dump/
 run.bat
+*.dbg

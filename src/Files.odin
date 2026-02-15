@@ -17,6 +17,7 @@ SceneData :: struct {
 
 ObjectComponent :: struct {
 	nameLength:    u32,
+	flags:         ObjectFlags,
 	position:      Vec3,
 	rotation:      Quat,
 	scale:         Vec3,
@@ -120,6 +121,7 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 	for &object in scene.objects {
 		objectData := ObjectComponent {
 			nameLength = u32(len(object.name)),
+			flags = object.flags,
 			position = object.position,
 			rotation = object.rotation,
 			scale = object.scale,
@@ -214,13 +216,13 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 		model.path = string(modelPath)
 		lerr := loadModelComponent(&model)
 		if lerr != .None {
-			logf(.Error, "Failed to load model \"%s\": %v", modelPath, lerr)
+			logf(.Error, "Failed to load model \"%s\": %v", model.path, lerr)
 			return lerr
 		}
 
 		lerr = loadModel(scene, &model)
 		if lerr != .None {
-			logf(.Error, "Failed to load model data \"%s\": %v", modelPath, lerr)
+			logf(.Error, "Failed to load model data \"%s\": %v", model.path, lerr)
 			return .Asset
 		}
 	}
@@ -253,6 +255,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 		os.read_ptr(file, &objectData, size_of(ObjectComponent))
 		object = {
 			name = string(make([]byte, objectData.nameLength)),
+			flags = objectData.flags,
 			position = objectData.position,
 			rotation = objectData.rotation,
 			scale = objectData.scale,
