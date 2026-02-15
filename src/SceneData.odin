@@ -2,10 +2,10 @@ package Valhalla
 
 Object :: struct {
 	name:        string,
+	flags:       ObjectFlags,
 	position:    Vec3,
 	rotation:    Quat,
 	scale:       Vec3,
-	flags:       ObjectFlags,
 	modelIdx:    u32,
 	instanceIdx: u32,
 	textureIdxs: [][len(TextureIndex)]u32,
