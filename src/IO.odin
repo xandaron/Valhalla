@@ -1,5 +1,6 @@
 package Valhalla
 
+import "core:bytes"
 import "vendor:glfw"
 
 
@@ -190,6 +191,15 @@ keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, ac
 	case glfw.KEY_M:
 		if action == glfw.PRESS {
 			globals.uiData.showMetrics = !globals.uiData.showMetrics
+		}
+	case glfw.KEY_R:
+		if action == glfw.PRESS {
+			shaders: [2][]byte
+			shaders[0], _ = compileShader("./shaders/Scene.slang", "vert", .VERTEX)
+			shaders[1], _ = compileShader("./shaders/Scene.slang", "norm", .FRAGMENT)
+			updatePipelineShaders(&globals.graphicsData, .Scene, shaders[:])
+			delete(shaders[0])
+			delete(shaders[1])
 		}
 	}
 }

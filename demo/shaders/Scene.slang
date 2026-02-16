@@ -142,6 +142,25 @@ FragOut frag(VertOut input) {
 																									uniformBuffer.ambientLight));
 
 	output.colour = float4(albedo * cumulativeColour, 1.0);
-	// output.colour = float4(normal, 1.0);
+	return output;
+}
+
+[shader("fragment")]
+FragOut norm(VertOut input) {
+	FragOut output;
+
+	const uint textureIndex =
+			(pushConstants.instanceOffset + input.instanceID) * TextureIndex.COUNT;
+	const float3 normal = normalize(mul(
+			input.TBN,
+			2.0 * textures
+									.Sample(float3(
+											input.uv,
+											textureIndexBuffer[textureIndex + TextureIndex.NORMAL]))
+									.xyz -
+					1.0));
+
+	const float3 outColour = (normal + 1) / 2;
+	output.colour = float4(outColour, 1.0);
 	return output;
 }

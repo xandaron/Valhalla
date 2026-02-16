@@ -91,31 +91,29 @@ main :: proc() {
 
 	err: Error
 	transformComp, _ := compileShader("./shaders/Transform.slang", "comp", .COMPUTE)
-	defer delete(transformComp)
 	lightVert, _ := compileShader("./shaders/Light.slang", "vert", .VERTEX)
-	defer delete(lightVert)
 	lightFrag, _ := compileShader("./shaders/Light.slang", "frag", .FRAGMENT)
-	defer delete(lightFrag)
 	sceneVert, _ := compileShader("./shaders/Scene.slang", "vert", .VERTEX)
-	defer delete(sceneVert)
 	sceneFrag, _ := compileShader("./shaders/Scene.slang", "frag", .FRAGMENT)
-	defer delete(sceneFrag)
 	postProcessComp, _ := compileShader("./shaders/PostProcess.slang", "comp", .COMPUTE)
+	defer delete(transformComp)
+	defer delete(lightVert)
+	defer delete(lightFrag)
+	defer delete(sceneVert)
+	defer delete(sceneFrag)
 	defer delete(postProcessComp)
-	globals.graphicsData, err = initVkGraphics(
+	globals.graphicsData, err = initGraphics(
 	InitGraphicsInfo {
-		appVersion      = APP_VERSION,
-		windowTitle     = APP_NAME,
+		appVersion        = APP_VERSION,
+		windowTitle       = APP_NAME,
 		// TODO: Sort this out. I need to load shader descriptor files like the model and texture files
-		transformComp   = transformComp,
-		lightVert       = lightVert,
-		lightFrag       = lightFrag,
-		sceneVert       = sceneVert,
-		sceneFrag       = sceneFrag,
-		postProcessComp = postProcessComp,
+		transformShader   = transformComp,
+		lightShaders      = {lightVert, lightFrag},
+		sceneShaders      = {sceneVert, sceneFrag},
+		postProcessShader = postProcessComp,
 	},
 	)
-	defer cleanupVkGraphics(&globals.graphicsData)
+	defer cleanupGraphics(&globals.graphicsData)
 
 	append(&globals.scenes, Scene{path = "./scenes/knight.scene"})
 	assert(loadScene(&globals.scenes[0]) == nil)
@@ -126,7 +124,7 @@ main :: proc() {
 		delete(globals.scenes)
 	}
 
-	assert(updateSceneBuffers(&globals.graphicsData, &globals.scenes[0]) == nil)
+	updateSceneBuffers(&globals.graphicsData, &globals.scenes[0])
 	free_all(context.temp_allocator)
 
 	fpsTimer = time.now()
@@ -181,20 +179,9 @@ main :: proc() {
 		}
 
 		update(delta)
-		if err = drawFrame(&globals.graphicsData); err != nil {
-			#partial errorCheck: switch e in err {
-			case DrawError:
-				#partial switch e {
-				case .UpdateCommandBuffers:
-					break errorCheck
-				case:
-					logf(.Error, "Failed to draw frame: %v", err)
-					break gameLoop
-				}
-			case:
-				logf(.Error, "Failed to draw frame: %v", err)
-				break gameLoop
-			}
+		if err = drawFrame(&globals.graphicsData); err != nil && err != .UpdateCommandBuffers {
+			logf(.Error, "Failed to draw frame: %v", err)
+			break gameLoop
 		}
 		calcFrameRate()
 
@@ -205,15 +192,13 @@ main :: proc() {
 update :: proc(delta: f32) {
 	scene := &globals.scenes[globals.activeScene]
 	updateAnimations(scene, delta)
-	if err := updateSceneData(
+	updateSceneData(
 		&globals.graphicsData,
 		scene,
 		view(scene.cameras[scene.activeCamera]),
 		projection(scene.cameras[scene.activeCamera]),
 		delta,
-	); err != nil {
-		panic("Failed to update scene data!")
-	}
+	)
 }
 
 calcFrameRate :: proc() {
