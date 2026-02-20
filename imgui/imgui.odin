@@ -33,7 +33,7 @@ CHECKVERSION :: proc() -> bool {
 // DEFINES
 ////////////////////////////////////////////////////////////
 
-VERSION                      :: "1.92.6-docking"
+VERSION                      :: "1.92.6"
 VERSION_NUM                  :: 19261
 PAYLOAD_TYPE_COLOR_3F        :: "_COL3F" // float[3]: Standard type for colors, without alpha. User code may use this type.
 PAYLOAD_TYPE_COLOR_4F        :: "_COL4F" // float[4]: Standard type for colors. User code may use this type.
