@@ -1062,22 +1062,17 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		maintenance7 = true,
 	}
 
-	maintenance5: vk.PhysicalDeviceMaintenance5Features = {
-		sType        = .PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES,
-		pNext        = &maintenance7,
-		maintenance5 = true,
-	}
-
 	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR = {
 		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
-		pNext                        = &maintenance5,
+		pNext                        = &maintenance7,
 		computeDerivativeGroupQuads  = true,
 		computeDerivativeGroupLinear = false,
 	}
 
 	features14: vk.PhysicalDeviceVulkan14Features = {
-		sType = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
-		pNext = &computeShaderDerivatives,
+		sType        = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+		pNext        = &computeShaderDerivatives,
+		maintenance5 = true,
 	}
 
 	features13: vk.PhysicalDeviceVulkan13Features = {
@@ -1315,7 +1310,7 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) {
 
 	cleanupImgui(graphicsData)
 	initImgui(graphicsData)
-	
+
 	graphicsData.rerecordCommands = true
 }
 
