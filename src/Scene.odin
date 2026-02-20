@@ -23,7 +23,7 @@ Scene :: struct {
 	boneCount:    int,
 
 	// Graphics Data
-	buffers:      SceneBuffers,
+	resources:    SceneResources,
 }
 
 deleteScene :: proc(scene: ^Scene) {
@@ -62,7 +62,7 @@ deleteScene :: proc(scene: ^Scene) {
 			panic("Failed to wait for device idle?")
 		}
 	}
-	deleteSceneBuffers(&globals.graphicsData, &scene.buffers)
+	deleteSceneRecources(&globals.graphicsData, &scene.resources)
 }
 
 addObject :: proc(scene: ^Scene, modelIdx: u32) {

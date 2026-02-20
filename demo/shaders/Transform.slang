@@ -1,5 +1,4 @@
-import "Vertex.slang";
-import "Buffers.slang";
+import "Resources.slang";
 
 struct PushConstants {
 	uint instance;

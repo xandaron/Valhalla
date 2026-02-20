@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import img "vendor:stb/image"
 
 UIData :: struct {
 	lockInput:           bool,
@@ -14,12 +15,14 @@ UIData :: struct {
 	showMetrics:         bool,
 }
 
+@(private = "file")
 CreateComponentData :: struct {
 	name:      [100]byte,
 	savePath:  [100]byte,
 	assetPath: [100]byte,
 }
 
+@(private = "file")
 overwriteBuffer :: proc(buffer: ^[100]byte, value: []byte) {
 	i := 0
 	for ; i < len(value); i += 1 {
@@ -34,6 +37,7 @@ overwriteBuffer :: proc(buffer: ^[100]byte, value: []byte) {
 	}
 }
 
+@(private = "file")
 clearBuffer :: proc(buffer: ^[100]byte) {
 	for i := 0; i < len(buffer); i += 1 {
 		if buffer[i] == 0 {
@@ -221,14 +225,26 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								delete(texture.path)
 								unordered_remove(&scene.textures, len(scene.textures) - 1)
 							} else {
-								err := addImages(
+								width, height, channels: i32
+								data := img.load(
+									strings.clone_to_cstring(texture.path, context.temp_allocator),
+									&width,
+									&height,
+									&channels,
+									4,
+								)
+								defer img.image_free(data)
+
+								err := addImage(
 									graphicsData,
-									&scene.buffers.textures,
-									u32(len(scene.textures)) - 1,
-									{texture.path},
+									scene,
+									u32(width),
+									u32(height),
+									.R8G8B8A8_SRGB,
+									data[:width * height * channels],
 								)
 								if err != nil {
-									panic("Failed to add texture image")
+									log(.Error, "Failed to add texture image!")
 								}
 							}
 						}

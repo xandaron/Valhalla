@@ -1,5 +1,4 @@
-import "Buffers.slang";
-import "Textures.slang";
+import "Resources.slang";
 
 enum ToneMapper : uint32_t {
 	None = 0,
@@ -42,12 +41,12 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 	float3 colour = renderedImage[int2(x, y)].xyz;
 
 	if (pushConstants.drawLights) {
-		for (uint i = 0; i < uniformBuffer.lightCount; i++) {
-			float4 lightPosition = mul(uniformBuffer.viewProjection,
+		for (uint i = 0; i < (*uniformBuffer).lightCount; i++) {
+			float4 lightPosition = mul((*uniformBuffer).viewProjection,
 																 float4(lightBuffer[i].position, 1.0));
 			lightPosition /= lightPosition.w;
 
-			float depth = sceneDepth.Sample(screenPosition).r;
+			float depth = sceneDepth.Sample(noAnisoSampler, screenPosition).r;
 			if (lightPosition.z <= depth && lightPosition.z >= 0) {
 				lightPosition.xy += 1.0;
 				lightPosition.xy /= 2.0;

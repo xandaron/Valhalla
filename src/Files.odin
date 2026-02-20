@@ -3,6 +3,7 @@ package Valhalla
 import ai "../assimp"
 import "core:os"
 import "core:strings"
+import img "vendor:stb/image"
 
 SceneData :: struct {
 	nameLength:   u32,
@@ -185,9 +186,10 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 	if scene == nil || scene.path == "" {
 		return .InvalidArgument
 	}
+	err: Error
 
-	file, err := os.open(scene.path, {.Read})
-	if err != nil {
+	file, oerr := os.open(scene.path, {.Read})
+	if oerr != nil {
 		return .IO
 	}
 	defer os.close(file)
@@ -215,20 +217,18 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 
 		model.path = string(modelPath)
 		lerr := loadModelComponent(&model)
-		if lerr != .None {
+		if lerr != nil {
 			logf(.Error, "Failed to load model \"%s\": %v", model.path, lerr)
 			return lerr
 		}
 
 		lerr = loadModel(scene, &model)
-		if lerr != .None {
+		if lerr != nil {
 			logf(.Error, "Failed to load model data \"%s\": %v", model.path, lerr)
 			return .Asset
 		}
 	}
 
-	texPaths := make([]string, sceneData.textureCount)
-	defer delete(texPaths)
 	for &texture, idx in scene.textures {
 		pathLength: u32
 		os.read_ptr(file, &pathLength, size_of(u32))
@@ -242,12 +242,28 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			return lerr
 		}
 
-		texPaths[idx] = texture.assetPath
-	}
-	lerr := loadImages(&globals.graphicsData, scene, texPaths)
-	if lerr != nil {
-		logf(.Error, "Failed to load images: %v", lerr)
-		return .Asset
+		width, height, channels: i32
+		data := img.load(
+			strings.clone_to_cstring(texture.path, context.temp_allocator),
+			&width,
+			&height,
+			&channels,
+			4,
+		)
+		defer img.image_free(data)
+
+		// TODO: I should check the number of channels and pick an appropriate format.
+		err = addImage(
+			&globals.graphicsData,
+			scene,
+			u32(width),
+			u32(height),
+			.R8G8B8A8_SRGB,
+			data[:width * height * channels],
+		)
+		if err != nil {
+			logf(.Fatal, "Failed to load images: %v", err)
+		}
 	}
 
 	for &object, objectIdx in scene.objects {

@@ -1,6 +1,4 @@
-import "Vertex.slang";
-import "Buffers.slang";
-import "Textures.slang";
+import "Resources.slang";
 
 struct PushConstants {
 	uint vertexOffset;
@@ -50,7 +48,7 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID,
 	const float4x4 vertexTransform = transformBufferRO[idx];
 	const float4 worldPosition =
 			mul(vertexTransform, float4(vertex.position, 1.0));
-	output.position = mul(uniformBuffer.viewProjection, worldPosition);
+	output.position = mul((*uniformBuffer).viewProjection, worldPosition);
 	output.worldPosition = worldPosition.xyz / worldPosition.w;
 
 	// I need to figue this out. I think the tangent and bitangent are not being
@@ -89,22 +87,19 @@ FragOut frag(VertOut input) {
 
 	const uint textureIndex =
 			(pushConstants.instanceOffset + input.instanceID) * TextureIndex.COUNT;
-	const float3 albedo = pow(
-			textures
-					.Sample(float3(
-							input.uv, textureIndexBuffer[textureIndex + TextureIndex.ALBEDO]))
-					.xyz,
-			1.0 / 2.2);
-	const float3 normal = normalize(mul(
-			input.TBN,
-			2.0 * textures
-									.Sample(float3(
-											input.uv,
-											textureIndexBuffer[textureIndex + TextureIndex.NORMAL]))
-									.xyz -
-					1.0));
+	const float3 albedo =
+			pow(images[textureIndexBuffer[textureIndex + TextureIndex.ALBEDO]]
+							.Sample(noAnisoSampler, input.uv)
+							.xyz,
+					1.0 / 2.2);
+	const float3 normal = normalize(
+			mul(input.TBN,
+					2.0 * images[textureIndexBuffer[textureIndex + TextureIndex.NORMAL]]
+											.Sample(noAnisoSampler, input.uv)
+											.xyz -
+							1.0));
 
-	for (uint index = 0; index < uniformBuffer.lightCount; index++) {
+	for (uint index = 0; index < (*uniformBuffer).lightCount; index++) {
 		const Light light = lightBuffer[index];
 
 		const float3 relativePosition = light.position.xyz - input.worldPosition;
@@ -119,7 +114,7 @@ FragOut frag(VertOut input) {
 			const float3 offsetDir =
 					DISK_RADIUS * sampleOffsetDirections[i] - relativePosition;
 			const float sampleDepth =
-					shadowMap.Sample(float4(offsetDir, float(index))).r;
+					shadowMap.Sample(noAnisoSampler, float4(offsetDir, float(index))).r;
 
 			static const float BIAS = 0.005;
 			if (lightSquaredDistance < sampleDepth + BIAS) {
@@ -137,9 +132,9 @@ FragOut frag(VertOut input) {
 												light.colourIntensity.xyz * scalingFactor;
 	}
 
-	cumulativeColour = max(cumulativeColour, float3(uniformBuffer.ambientLight,
-																									uniformBuffer.ambientLight,
-																									uniformBuffer.ambientLight));
+	cumulativeColour = max(cumulativeColour, float3((*uniformBuffer).ambientLight,
+																									(*uniformBuffer).ambientLight,
+																									(*uniformBuffer).ambientLight));
 
 	output.colour = float4(albedo * cumulativeColour, 1.0);
 	return output;
@@ -151,14 +146,12 @@ FragOut norm(VertOut input) {
 
 	const uint textureIndex =
 			(pushConstants.instanceOffset + input.instanceID) * TextureIndex.COUNT;
-	const float3 normal = normalize(mul(
-			input.TBN,
-			2.0 * textures
-									.Sample(float3(
-											input.uv,
-											textureIndexBuffer[textureIndex + TextureIndex.NORMAL]))
-									.xyz -
-					1.0));
+	const float3 normal = normalize(
+			mul(input.TBN,
+					2.0 * images[textureIndexBuffer[textureIndex + TextureIndex.NORMAL]]
+											.Sample(noAnisoSampler, input.uv)
+											.xyz -
+							1.0));
 
 	const float3 outColour = (normal + 1) / 2;
 	output.colour = float4(outColour, 1.0);
