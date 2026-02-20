@@ -12,11 +12,11 @@ Vector :: struct($T: typeid) {
 Vector_Push_Back :: proc(vector: ^Vector($T), value: T) {
 	if vector.Size == vector.Capacity {
 		if vector.Capacity == 0 {
-			vector.Data = MemAlloc(size_of(T))
+			vector.Data = transmute([^]T)MemAlloc(size_of(T))
 			vector.Capacity = 1
 		} else {
 			newCap := vector.Capacity * 2
-			newPtr := MemAlloc(uint(newCap) * size_of(T))
+			newPtr := transmute([^]T)MemAlloc(uint(newCap) * size_of(T))
 
 			mem.copy(newPtr, vector.Data, int(vector.Size) * size_of(T))
 			MemFree(vector.Data)
