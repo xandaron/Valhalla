@@ -2,7 +2,7 @@
 package Valhalla
 
 import "../imgui"
-import imguiGLFW "../imgui/imgui_impl_glfw"
+import imguiGLFW "../imgui/glfw"
 import imguiVulkan "../imgui/imgui_impl_vulkan"
 import "core:mem"
 import "core:strings"
@@ -4311,7 +4311,7 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 		instance,
 	)
 
-	if !imguiGLFW.InitForVulkan(window, true) {
+	if !imguiGLFW.Init(window, true) {
 		log(.Fatal, "Failed to initialize imgui for vulkan.")
 	}
 
