@@ -5,13 +5,12 @@ import imgui ".."
 import "base:runtime"
 import "core:fmt"
 import "core:math"
+import "core:mem"
 import "core:time"
 import "vendor:glfw"
 import glfwBindings "vendor:glfw/bindings"
 import vk "vendor:vulkan"
 
-import "core:sys/linux"
-import "core:sys/posix"
 import "core:sys/windows"
 
 GLFW_VERSION_COMBINED ::
@@ -186,13 +185,19 @@ SetCallbacksChainForAllWindows :: proc(chain_for_all_windows: bool) {
 	GetBackendData().CallbacksChainForAllWindows = chain_for_all_windows
 }
 
-Init :: proc(window: glfw.WindowHandle, install_callbacks: bool) -> bool {
+Init :: proc(
+	window: glfw.WindowHandle,
+	install_callbacks: bool,
+	allocator := context.allocator,
+) -> bool {
+	my_allocator = allocator
+
 	io := imgui.GetIO()
 	imgui.CHECKVERSION()
 	assert(io.BackendPlatformUserData == nil, "Already initialized a platform backend!")
 
 	// Setup backend capabilities flags
-	bd := new(Data)
+	bd := new(Data, my_allocator)
 	fmt.bprintf(bd.BackendPlatformName[:], "imgui_impl_glfw (%d)", GLFW_VERSION_COMBINED)
 	io.BackendPlatformUserData = bd
 	io.BackendPlatformName = transmute(cstring)(&bd.BackendPlatformName[0])
@@ -351,7 +356,7 @@ Shutdown :: proc() {
 	imgui.PlatformIO_ClearPlatformHandlers(platform_io)
 	imgui.DestroyContext(bd.Context)
 	ContextMap[bd.Window] = nil
-	free(bd)
+	free(bd, my_allocator)
 }
 
 NewFrame :: proc() {
@@ -387,6 +392,9 @@ NewFrame :: proc() {
 Sleep :: proc(milliseconds: i32) {
 	time.sleep(time.Duration(milliseconds) * time.Millisecond)
 }
+
+@(private = "package")
+my_allocator: mem.Allocator
 
 @(private = "package")
 DataBase :: struct {
@@ -1089,7 +1097,7 @@ WindowSizeCallback :: proc "c" (window: glfw.WindowHandle, _, _: i32) {
 CreateWindow :: proc "cdecl" (viewport: ^imgui.Viewport) {
 	context = runtime.default_context()
 	bd := GetBackendData()
-	vd := new(ViewportData)
+	vd := new(ViewportData, my_allocator)
 	viewport.PlatformUserData = vd
 
 	// Workaround for Linux: ignore mouse up events corresponding to losing focus of the previously focused window (#7733, #3158, #7922)
@@ -1164,12 +1172,12 @@ DestroyWindow :: proc "cdecl" (viewport: ^imgui.Viewport) {
 				}
 			}
 
-			free(ContextMap[vd.Window])
+			free(ContextMap[vd.Window], my_allocator)
 			ContextMap[vd.Window] = nil
 			glfw.DestroyWindow(vd.Window)
 		}
 		vd.Window = nil
-		free(vd)
+		free(vd, my_allocator)
 	}
 	viewport.PlatformUserData = nil
 	viewport.PlatformHandle = nil
@@ -1326,7 +1334,7 @@ InitMultiViewportSupport :: proc() {
 	// Register main window handle (which is owned by the main application, not by us)
 	// This is mostly for simplicity and consistency, so that our code (e.g. mouse handling etc.) can use same logic for main and secondary viewports.
 	main_viewport := imgui.GetMainViewport()
-	vd := new(ViewportData)
+	vd := new(ViewportData, my_allocator)
 	vd.Window = bd.Window
 	vd.WindowOwned = false
 	main_viewport.PlatformUserData = vd

@@ -4300,8 +4300,9 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	imguiContext = imgui.CreateContext()
+	imgui.SetUpAllocator()
 	io := imgui.GetIO()
-	imgui.StyleColorsClassic()
+	imgui.StyleColorsDark()
 
 	imguiVulkan.LoadFunctions(
 		vk.API_VERSION_1_4,
@@ -4370,6 +4371,7 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 cleanupImgui :: proc(using graphicsData: ^GraphicsData) {
 	imguiVulkan.Shutdown()
 	imguiGLFW.Shutdown()
+	imgui.CleanUpAllocator()
 	imgui.DestroyContext(imguiContext)
 }
 
