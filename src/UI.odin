@@ -997,13 +997,15 @@ ImguiAllocatorData :: mem.Allocator
 // Using a tracking allocator we wont know eactly which line allocated the leaked memory
 // but we will know that something was allocated that wasn't freed.
 imguiAlloc :: proc "c" (sz: c.size_t, user_data: rawptr) -> rawptr {
-	context = (^runtime.Context)(user_data)^
-	ptr, _ := mem.alloc(int(sz))
+	context = runtime.default_context()
+	allocator := (^ImguiAllocatorData)(user_data)^
+	ptr, _ := mem.alloc(int(sz), allocator = allocator)
 	return ptr
 }
 
 imguiFree :: proc "c" (ptr: rawptr, user_data: rawptr) {
-	context = (^runtime.Context)(user_data)^
-	mem.free(ptr)
+	context = runtime.default_context()
+	allocator := (^ImguiAllocatorData)(user_data)^
+	mem.free(ptr, allocator = allocator)
 }
 
