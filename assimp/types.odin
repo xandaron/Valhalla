@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,31 +38,28 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file types.h
-*  Basic data types and primitives, such as vectors or colors.
-*/
-package assimp
-
-
+ *  Basic data types and primitives, such as vectors or colors.
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// TYPES_H_INC :: 
 
-Int32 :: i32
-
-Uint32 :: u32
+_Int32  :: i32
+_Uint32 :: u32
 
 MAXLEN :: 1024
 
@@ -71,7 +68,7 @@ MAXLEN :: 1024
 */
 Plane :: struct {
 	//! Plane equation
-	a, b, _c, d: Real,
+	a, b, _c, d: f32,
 }
 
 // ----------------------------------------------------------------------------------
@@ -116,7 +113,7 @@ String :: struct {
 	/** Binary length of the string excluding the terminal 0. This is NOT the
 	*  logical length of strings containing UTF-8 multi-byte sequences! It's
 	*  the number of bytes from the beginning of the string to its end.*/
-	length: Uint32,
+	length: _Uint32,
 
 	/** String buffer. Size limit is AI_MAXLEN */
 	data: [1024]i8,
@@ -128,15 +125,15 @@ String :: struct {
 */
 Return :: enum i32 {
 	/** Indicates that a function was successful */
-	aiReturn_SUCCESS = 0,
+	aiReturn_SUCCESS      = 0,
 
 	/** Indicates that a function failed */
-	aiReturn_FAILURE = -1,
+	aiReturn_FAILURE      = -1,
 
 	/** Indicates that not enough memory was available
 	* to perform the requested operation
 	*/
-	aiReturn_OUTOFMEMORY = -3,
+	aiReturn_OUTOFMEMORY  = -3,
 
 	/** @cond never
 	*  Force 32-bit size enum
@@ -144,24 +141,19 @@ Return :: enum i32 {
 	_AI_ENFORCE_ENUM_SIZE = 2147483647,
 }
 
-// just for backwards compatibility, don't use these constants anymore
-// SUCCESS :: aiReturn_SUCCESS
-// FAILURE :: aiReturn_FAILURE
-// OUTOFMEMORY :: aiReturn_OUTOFMEMORY
-
 // ----------------------------------------------------------------------------------
 /** Seek origins (for the virtual file system API).
 *  Much cooler than using SEEK_SET, SEEK_CUR or SEEK_END.
 */
 Origin :: enum i32 {
 	/** Beginning of the file */
-	aiOrigin_SET = 0,
+	aiOrigin_SET                 = 0,
 
 	/** Current position of the file pointer */
-	aiOrigin_CUR = 1,
+	aiOrigin_CUR                 = 1,
 
 	/** End of the file, offsets must be negative */
-	aiOrigin_END = 2,
+	aiOrigin_END                 = 2,
 
 	/**  @cond never
 	*   Force 32-bit size enum
@@ -169,36 +161,29 @@ Origin :: enum i32 {
 	_AI_ORIGIN_ENFORCE_ENUM_SIZE = 2147483647,
 }
 
+Default_Log_Stream_Flags :: enum i32 {
+	/** Stream the log to a file */
+	FILE     = 0,
+
+	/** Stream the log to std::cout */
+	STDOUT   = 1,
+
+	/** Stream the log to std::cerr */
+	STDERR   = 2,
+
+	/** MSVC only: Stream the log the the debugger
+	* (this relies on OutputDebugString from the Win32 SDK)
+	*/
+	DEBUGGER = 3,
+}
+
 // ----------------------------------------------------------------------------------
 /** @brief Enumerates predefined log streaming destinations.
 *  Logging to these streams can be enabled with a single call to
 *   #LogStream::createDefaultStream.
 */
-Default_Log_Stream_Flag :: enum i32 {
-	/** Stream the log to a file */
-	FILE,
-
-	/** Stream the log to std::cout */
-	STDOUT,
-
-	/** Stream the log to std::cerr */
-	STDERR,
-
-	/** MSVC only: Stream the log the the debugger
-	* (this relies on OutputDebugString from the Win32 SDK)
-	*/
-	DEBUGGER,
-}
-
-Default_Log_Stream_Flags :: distinct bit_set[Default_Log_Stream_Flag; i32]
-
-AI_DLS_ENFORCE_ENUM_SIZE :: Default_Log_Stream_Flags { .FILE, .STDOUT, .STDERR, .DEBUGGER }
-
-// just for backwards compatibility, don't use these constants anymore
-// DLS_FILE :: aiDefaultLogStream_FILE
-// DLS_STDOUT :: aiDefaultLogStream_STDOUT
-// DLS_STDERR :: aiDefaultLogStream_STDERR
-// DLS_DEBUGGER :: aiDefaultLogStream_DEBUGGER
+Default_Log_Stream_Flag   :: bit_set[Default_Log_Stream_Flags; i32]
+_AI_DLS_ENFORCE_ENUM_SIZE :: Default_Log_Stream_Flag {.FILE, .STDOUT, .STDERR, .DEBUGGER}
 
 // ----------------------------------------------------------------------------------
 /** Stores the memory requirements for different components (e.g. meshes, materials,

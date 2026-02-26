@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -38,24 +38,21 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
-package assimp
-
-
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// AABB_H_INC :: 
 
 // ---------------------------------------------------------------------------
 /**

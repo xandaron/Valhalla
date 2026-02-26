@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,45 +38,43 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /**
-* @file   anim.h
-* @brief  Defines the data structures in which the imported animations
-*         are returned.
-*/
-package assimp
-
-
+  * @file   anim.h
+  * @brief  Defines the data structures in which the imported animations
+  *         are returned.
+  */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// ANIM_H_INC :: 
 
 // ---------------------------------------------------------------------------
 /**
 */
 Anim_Interpolation :: enum i32 {
 	/** */
-	Step,
+	Step             = 0,
 
 	/** */
-	Linear,
+	Linear           = 1,
 
 	/** */
-	Spherical_Linear,
+	Spherical_Linear = 2,
 
 	/** */
-	Cubic_Spline,
+	Cubic_Spline     = 3,
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +127,7 @@ Mesh_Morph_Key :: struct {
 	*   - mValues: index of attachment mesh to apply weight at the same position in mWeights
 	*   - mWeights: weight to apply to the blend shape index at the same position in mValues
 	*/
-	mValues: [^]u32,
+	mValues:  [^]u32,
 	mWeights: [^]f64,
 
 	/** The number of values and weights */
@@ -142,20 +140,20 @@ Mesh_Morph_Key :: struct {
 *  aiNodeAnim::mPostState.*/
 Anim_Behaviour :: enum i32 {
 	/** The value from the default node transformation is taken*/
-	DEFAULT,
+	DEFAULT  = 0,
 
 	/** The nearest key value is used without interpolation */
-	CONSTANT,
+	CONSTANT = 1,
 
 	/** The value of the nearest two keys is linearly
 	*  extrapolated for the current time value.*/
-	LINEAR,
+	LINEAR   = 2,
 
 	/** The animation is repeated.
 	*
 	*  If the animation key go from n to m and the current
 	*  time is t, use the value at (t-n) % (|m-n|).*/
-	REPEAT,
+	REPEAT   = 3,
 }
 
 // ---------------------------------------------------------------------------

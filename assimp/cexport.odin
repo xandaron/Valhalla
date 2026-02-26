@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -38,29 +38,27 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file  cexport.h
 *  @brief Defines the C-API for the Assimp export interface
 */
-package assimp
+package Assimp
 
 import "core:c"
 
-_ :: c
-
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// EXPORT_H_INC :: 
 
 // --------------------------------------------------------------------------------
 /**
@@ -82,47 +80,6 @@ Export_Format_Desc :: struct {
 
 	/// Recommended file extension for the exported file in lower case.
 	fileExtension: cstring,
-}
-
-// --------------------------------------------------------------------------------
-/** Describes a blob of exported scene data. Use #aiExportSceneToBlob() to create a blob containing an
-* exported scene. The memory referred by this structure is owned by Assimp.
-* to free its resources. Don't try to free the memory on your side - it will crash for most build configurations
-* due to conflicting heaps.
-*
-* Blobs can be nested - each blob may reference another blob, which may in turn reference another blob and so on.
-* This is used when exporters write more than one output file for a given #aiScene. See the remarks for
-* #aiExportDataBlob::name for more information.
-*/
-Export_Data_Blob :: struct {
-	/// Size of the data in bytes
-	size: c.size_t,
-
-	/// The data.
-	data: rawptr,
-
-	/** Name of the blob. An empty string always
-	* indicates the first (and primary) blob,
-	* which contains the actual file data.
-	* Any other blobs are auxiliary files produced
-	* by exporters (i.e. material files). Existence
-	* of such files depends on the file format. Most
-	* formats don't split assets across multiple files.
-	*
-	* If used, blob names usually contain the file
-	* extension that should be used when writing
-	* the data to disc.
-	*
-	* The blob names generated can be influenced by
-	* setting the #AI_CONFIG_EXPORT_BLOB_NAME export
-	* property to the name that is used for the master
-	* blob. All other names are typically derived from
-	* the base name, by the file format exporter.
-	*/
-	name: String,
-
-	/** Pointer to the next blob in the chain or NULL if there is none. */
-	next: ^Export_Data_Blob,
 }
 
 @(default_calling_convention="c", link_prefix="ai")
@@ -222,7 +179,51 @@ foreign lib {
 	*   imported scene.
 	*/
 	ExportSceneEx :: proc(pScene: ^Scene, pFormatId: cstring, pFileName: cstring, pIO: ^File_Io, pPreprocessing: u32) -> Return ---
+}
 
+// --------------------------------------------------------------------------------
+/** Describes a blob of exported scene data. Use #aiExportSceneToBlob() to create a blob containing an
+* exported scene. The memory referred by this structure is owned by Assimp.
+* to free its resources. Don't try to free the memory on your side - it will crash for most build configurations
+* due to conflicting heaps.
+*
+* Blobs can be nested - each blob may reference another blob, which may in turn reference another blob and so on.
+* This is used when exporters write more than one output file for a given #aiScene. See the remarks for
+* #aiExportDataBlob::name for more information.
+*/
+Export_Data_Blob :: struct {
+	/// Size of the data in bytes
+	size: c.size_t,
+
+	/// The data.
+	data: rawptr,
+
+	/** Name of the blob. An empty string always
+	* indicates the first (and primary) blob,
+	* which contains the actual file data.
+	* Any other blobs are auxiliary files produced
+	* by exporters (i.e. material files). Existence
+	* of such files depends on the file format. Most
+	* formats don't split assets across multiple files.
+	*
+	* If used, blob names usually contain the file
+	* extension that should be used when writing
+	* the data to disc.
+	*
+	* The blob names generated can be influenced by
+	* setting the #AI_CONFIG_EXPORT_BLOB_NAME export
+	* property to the name that is used for the master
+	* blob. All other names are typically derived from
+	* the base name, by the file format exporter.
+	*/
+	name: String,
+
+	/** Pointer to the next blob in the chain or NULL if there is none. */
+	next: ^Export_Data_Blob,
+}
+
+@(default_calling_convention="c", link_prefix="ai")
+foreign lib {
 	// --------------------------------------------------------------------------------
 	/** Exports the given scene to a chosen file format. Returns the exported data as a binary blob which
 	* you can write into a file or something. When you're done with the data, use #aiReleaseExportBlob()
@@ -242,3 +243,4 @@ foreign lib {
 	*/
 	ReleaseExportBlob :: proc(pData: ^Export_Data_Blob) ---
 }
+

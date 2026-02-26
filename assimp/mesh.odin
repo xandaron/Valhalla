@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,39 +38,32 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file mesh.h
-*  @brief Declares the data structures in which the imported geometry is
-returned by ASSIMP: aiMesh, aiFace and aiBone data structures.
-*/
-package assimp
-
-
+ *  @brief Declares the data structures in which the imported geometry is
+    returned by ASSIMP: aiMesh, aiFace and aiBone data structures.
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// MESH_H_INC :: 
 
-MAX_FACE_INDICES :: 0x7fff
-
-MAX_BONE_WEIGHTS :: 0x7fffffff
-
-MAX_VERTICES :: 0x7fffffff
-
-MAX_FACES :: 0x7fffffff
-
-MAX_NUMBER_OF_COLOR_SETS :: 0x8
-
+MAX_FACE_INDICES            :: 0x7fff
+MAX_BONE_WEIGHTS            :: 0x7fffffff
+MAX_VERTICES                :: 0x7fffffff
+MAX_FACES                   :: 0x7fffffff
+MAX_NUMBER_OF_COLOR_SETS    :: 0x8
 MAX_NUMBER_OF_TEXTURECOORDS :: 0x8
 
 // ---------------------------------------------------------------------------
@@ -114,7 +107,7 @@ Vertex_Weight :: struct {
 
 	//! The strength of the influence in the range (0...1).
 	//! The influence from all bones at one vertex amounts to 1.
-	mWeight: Real,
+	mWeight: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -169,14 +162,6 @@ Bone :: struct {
 	mOffsetMatrix: Matrix4x4,
 }
 
-// ---------------------------------------------------------------------------
-/** @brief Enumerates the types of geometric primitives supported by Assimp.
-*
-*  @see aiFace Face data structure
-*  @see aiProcess_SortByPType Per-primitive sorting of meshes
-*  @see aiProcess_Triangulate Automatic triangulation
-*  @see AI_CONFIG_PP_SBP_REMOVE Removal of specific primitive types.
-*/
 Primitive_Type_Flag :: enum i32 {
 	/**
 	* @brief A point primitive.
@@ -184,7 +169,7 @@ Primitive_Type_Flag :: enum i32 {
 	* This is just a single vertex in the virtual world,
 	* #aiFace contains just one index for such a primitive.
 	*/
-	POINT,
+	POINT            = 0,
 
 	/**
 	* @brief A line primitive.
@@ -192,14 +177,14 @@ Primitive_Type_Flag :: enum i32 {
 	* This is a line defined through a start and an end position.
 	* #aiFace contains exactly two indices for such a primitive.
 	*/
-	LINE,
+	LINE             = 1,
 
 	/**
 	* @brief A triangular primitive.
 	*
 	* A triangle consists of three indices.
 	*/
-	TRIANGLE,
+	TRIANGLE         = 2,
 
 	/**
 	* @brief A higher-level polygon with more than 3 edges.
@@ -209,7 +194,7 @@ Primitive_Type_Flag :: enum i32 {
 	* is provided for your convenience, it splits all polygons in
 	* triangles (which are much easier to handle).
 	*/
-	POLYGON,
+	POLYGON          = 3,
 
 	/**
 	* @brief A flag to determine whether this triangles only mesh is NGON encoded.
@@ -227,10 +212,18 @@ Primitive_Type_Flag :: enum i32 {
 	* @see aiProcess_Triangulate
 	* @link https://github.com/KhronosGroup/glTF/pull/1620
 	*/
-	NGONEncodingFlag,
+	NGONEncodingFlag = 4,
 }
 
-Primitive_Type_Flags :: distinct bit_set[Primitive_Type_Flag; i32]
+// ---------------------------------------------------------------------------
+/** @brief Enumerates the types of geometric primitives supported by Assimp.
+*
+*  @see aiFace Face data structure
+*  @see aiProcess_SortByPType Per-primitive sorting of meshes
+*  @see aiProcess_Triangulate Automatic triangulation
+*  @see AI_CONFIG_PP_SBP_REMOVE Removal of specific primitive types.
+*/
+Primitive_Type_Flags :: bit_set[Primitive_Type_Flag; i32]
 
 // ---------------------------------------------------------------------------
 /** @brief An AnimMesh is an attachment to an #aiMesh stores per-vertex
@@ -265,10 +258,10 @@ Anim_Mesh :: struct {
 	mBitangents: [^]Vector3D,
 
 	/** Replacement for aiMesh::mColors */
-	mColors: [8][^]Color4D,
+	mColors: [8]^Color4D,
 
 	/** Replacement for aiMesh::mTextureCoords */
-	mTextureCoords: [8][^]Vector3D,
+	mTextureCoords: [8]^Vector3D,
 
 	/** The number of vertices in the aiAnimMesh, and thus the length of all
 	* the member arrays.
@@ -291,16 +284,16 @@ Anim_Mesh :: struct {
 */
 Morphing_Method :: enum i32 {
 	/** Morphing method to be determined */
-	UNKNOWN,
+	UNKNOWN          = 0,
 
 	/** Interpolation between morph targets */
-	VERTEX_BLEND,
+	VERTEX_BLEND     = 1,
 
 	/** Normalized morphing between morph targets  */
-	MORPH_NORMALIZED,
+	MORPH_NORMALIZED = 2,
 
 	/** Relative morphing between morph targets  */
-	MORPH_RELATIVE,
+	MORPH_RELATIVE   = 3,
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,42 +38,37 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file cfileio.h
-*  @brief Defines generic C routines to access memory-mapped files
-*/
-package assimp
+ *  @brief Defines generic C routines to access memory-mapped files
+ */
+package Assimp
 
 import "core:c"
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// FILEIO_H_INC :: 
 
 // aiFile callbacks
 File_Write_Proc :: proc "c" (^File, cstring, c.size_t, c.size_t) -> c.size_t
-
-File_Read_Proc :: proc "c" (^File, cstring, c.size_t, c.size_t) -> c.size_t
-
-File_Tell_Proc :: proc "c" (^File) -> c.size_t
-
+File_Read_Proc  :: proc "c" (^File, cstring, c.size_t, c.size_t) -> c.size_t
+File_Tell_Proc  :: proc "c" (^File) -> c.size_t
 File_Flush_Proc :: proc "c" (^File)
-
-File_Seek :: proc "c" (^File, c.size_t, Origin) -> Return
+File_Seek       :: proc "c" (^File, c.size_t, Origin) -> Return
 
 // aiFileIO callbacks
-File_Open_Proc :: struct {}
-
+File_Open_Proc  :: proc "c" (^File_Io, cstring, cstring) -> ^File
 File_Close_Proc :: proc "c" (^File_Io, ^File)
 
 // Represents user-defined data

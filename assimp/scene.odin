@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,27 +38,25 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file scene.h
-*  @brief Defines the data structures in which the imported scene is returned.
-*/
-package assimp
-
-
+ *  @brief Defines the data structures in which the imported scene is returned.
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// SCENE_H_INC :: 
 
 // -------------------------------------------------------------------------------
 /**
@@ -125,58 +123,58 @@ Node :: struct {
 
 // -------------------------------------------------------------------------------
 /**
- * Specifies that the scene data structure that was imported is not complete.
- * This flag bypasses some internal validations and allows the import
- * of animation skeletons, material libraries or camera animation paths
- * using Assimp. Most applications won't support such data.
- */
+* Specifies that the scene data structure that was imported is not complete.
+* This flag bypasses some internal validations and allows the import
+* of animation skeletons, material libraries or camera animation paths
+* using Assimp. Most applications won't support such data.
+*/
 SCENE_FLAGS_INCOMPLETE   :: 0x1
 
 /**
- * This flag is set by the validation postprocess-step (aiPostProcess_ValidateDS)
- * if the validation is successful. In a validated scene you can be sure that
- * any cross references in the data structure (e.g. vertex indices) are valid.
- */
+* This flag is set by the validation postprocess-step (aiPostProcess_ValidateDS)
+* if the validation is successful. In a validated scene you can be sure that
+* any cross references in the data structure (e.g. vertex indices) are valid.
+*/
 SCENE_FLAGS_VALIDATED    :: 0x2
 
 /**
- * This flag is set by the validation postprocess-step (aiPostProcess_ValidateDS)
- * if the validation is successful but some issues have been found.
- * This can for example mean that a texture that does not exist is referenced
- * by a material or that the bone weights for a vertex don't sum to 1.0 ... .
- * In most cases you should still be able to use the import. This flag could
- * be useful for applications which don't capture Assimp's log output.
- */
+* This flag is set by the validation postprocess-step (aiPostProcess_ValidateDS)
+* if the validation is successful but some issues have been found.
+* This can for example mean that a texture that does not exist is referenced
+* by a material or that the bone weights for a vertex don't sum to 1.0 ... .
+* In most cases you should still be able to use the import. This flag could
+* be useful for applications which don't capture Assimp's log output.
+*/
 SCENE_FLAGS_VALIDATION_WARNING   :: 0x4
 
 /**
- * This flag is currently only set by the aiProcess_JoinIdenticalVertices step.
- * It indicates that the vertices of the output meshes aren't in the internal
- * verbose format anymore. In the verbose format all vertices are unique,
- * no vertex is ever referenced by more than one face.
- */
+* This flag is currently only set by the aiProcess_JoinIdenticalVertices step.
+* It indicates that the vertices of the output meshes aren't in the internal
+* verbose format anymore. In the verbose format all vertices are unique,
+* no vertex is ever referenced by more than one face.
+*/
 SCENE_FLAGS_NON_VERBOSE_FORMAT   :: 0x8
 
 /**
- * Denotes pure height-map terrain data. Pure terrains usually consist of quads,
- * sometimes triangles, in a regular grid. The x,y coordinates of all vertex
- * positions refer to the x,y coordinates on the terrain height map, the z-axis
- * stores the elevation at a specific point.
- *
- * TER (Terragen) and HMP (3D Game Studio) are height map formats.
- * @note Assimp is probably not the best choice for loading *huge* terrains -
- * fully triangulated data takes extremely much free store and should be avoided
- * as long as possible (typically you'll do the triangulation when you actually
- * need to render it).
- */
+* Denotes pure height-map terrain data. Pure terrains usually consist of quads,
+* sometimes triangles, in a regular grid. The x,y coordinates of all vertex
+* positions refer to the x,y coordinates on the terrain height map, the z-axis
+* stores the elevation at a specific point.
+*
+* TER (Terragen) and HMP (3D Game Studio) are height map formats.
+* @note Assimp is probably not the best choice for loading *huge* terrains -
+* fully triangulated data takes extremely much free store and should be avoided
+* as long as possible (typically you'll do the triangulation when you actually
+* need to render it).
+*/
 SCENE_FLAGS_TERRAIN :: 0x10
 
 /**
- * Specifies that the scene data can be shared between structures. For example:
- * one vertex in few faces. \ref AI_SCENE_FLAGS_NON_VERBOSE_FORMAT can not be
- * used for this because \ref AI_SCENE_FLAGS_NON_VERBOSE_FORMAT has internal
- * meaning about postprocessing steps.
- */
+* Specifies that the scene data can be shared between structures. For example:
+* one vertex in few faces. \ref AI_SCENE_FLAGS_NON_VERBOSE_FORMAT can not be
+* used for this because \ref AI_SCENE_FLAGS_NON_VERBOSE_FORMAT has internal
+* meaning about postprocessing steps.
+*/
 SCENE_FLAGS_ALLOW_SHARED   :: 0x20
 
 // -------------------------------------------------------------------------------
@@ -298,6 +296,6 @@ Scene :: struct {
 	*
 	*/
 	mSkeletons: [^]^Skeleton,
-	mPrivate: cstring,
+	mPrivate:   cstring,
 }
 

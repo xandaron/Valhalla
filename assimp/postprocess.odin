@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -11,18 +11,18 @@ with or without modification, are permitted provided that the
 following conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,40 +38,26 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ----------------------------------------------------------------------
 */
+
 /** @file postprocess.h
-*  @brief Definitions for import post processing steps
-*/
-package assimp
-
-
+ *  @brief Definitions for import post processing steps
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// POSTPROCESS_H_INC :: 
 
-// -----------------------------------------------------------------------------------
-/** @enum  aiPostProcessSteps
-*  @brief Defines the flags for all possible post processing steps.
-*
-*  @note Some steps are influenced by properties set on the Assimp::Importer itself
-*
-*  @see Assimp::Importer::ReadFile()
-*  @see Assimp::Importer::SetPropertyInteger()
-*  @see aiImportFile
-*  @see aiImportFileEx
-*/
-// -----------------------------------------------------------------------------------
 Post_Process_Step_Flag :: enum i32 {
 	// -------------------------------------------------------------------------
 	/** <hr>Calculates the tangents and bitangents for the imported meshes.
@@ -83,7 +69,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* a maximum smoothing angle for the algorithm. However, usually you'll
 	* want to leave it at the default value.
 	*/
-	CalcTangentSpace,
+	CalcTangentSpace         = 0,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Identifies and joins identical vertex data sets within all
@@ -97,7 +83,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* more than one face and <b>no index buffer is required</b> for rendering.
 	* Unless the importer (like ply) had to split vertices. Then you need one regardless.
 	*/
-	JoinIdenticalVertices,
+	JoinIdenticalVertices    = 1,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Converts all the imported data to a left-handed coordinate space.
@@ -113,7 +99,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* setting and bundles all conversions typically required for D3D-based
 	* applications.
 	*/
-	MakeLeftHanded,
+	MakeLeftHanded           = 2,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Triangulates all faces of all meshes.
@@ -129,7 +115,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* <li>Ignore all point and line meshes when you process assimp's output</li>
 	* </ul>
 	*/
-	Triangulate,
+	Triangulate              = 3,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Removes some parts of the data structure (animations, materials,
@@ -155,7 +141,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* this step, unneeded components are excluded as early as possible
 	* thus opening more room for internal optimizations.
 	*/
-	RemoveComponent,
+	RemoveComponent          = 4,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Generates normals for all faces of all meshes.
@@ -169,7 +155,7 @@ Post_Process_Step_Flag :: enum i32 {
 	*
 	* This flag may not be specified together with #aiProcess_GenSmoothNormals.
 	*/
-	GenNormals,
+	GenNormals               = 5,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Generates smooth normals for all vertices in the mesh.
@@ -186,7 +172,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* Using a decent angle here (e.g. 80 degrees) results in very good visual
 	* appearance.
 	*/
-	GenSmoothNormals,
+	GenSmoothNormals         = 6,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Splits large meshes into smaller sub-meshes.
@@ -205,7 +191,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* Note that splitting is generally a time-consuming task, but only if there's
 	* something to split. The use of this step is recommended for most users.
 	*/
-	SplitLargeMeshes,
+	SplitLargeMeshes         = 7,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Removes the node graph and pre-transforms all vertices with
@@ -231,7 +217,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* can be set to normalize the scene's spatial dimension to the -1...1
 	* range.
 	*/
-	PreTransformVertices,
+	PreTransformVertices     = 8,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Limits the number of bones simultaneously affecting a single vertex
@@ -247,7 +233,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* If you intend to perform the skinning in hardware, this post processing
 	* step might be of interest to you.
 	*/
-	LimitBoneWeights,
+	LimitBoneWeights         = 9,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Validates the imported scene data structure.
@@ -275,7 +261,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* This post-processing step is not time-consuming. Its use is not
 	* compulsory, but recommended.
 	*/
-	ValidateDataStructure,
+	ValidateDataStructure    = 10,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Reorders triangles for better vertex cache locality.
@@ -290,7 +276,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* be of interest to you. The <tt>#AI_CONFIG_PP_ICL_PTCACHE_SIZE</tt>
 	* importer property can be used to fine-tune the cache optimization.
 	*/
-	ImproveCacheLocality,
+	ImproveCacheLocality     = 11,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Searches for redundant/unreferenced materials and removes them.
@@ -311,7 +297,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* specify this flag. Alternatively take a look at the
 	* <tt>#AI_CONFIG_PP_RRM_EXCLUDE_LIST</tt> importer property.
 	*/
-	RemoveRedundantMaterials,
+	RemoveRedundantMaterials = 12,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step tries to determine which meshes have normal vectors
@@ -325,7 +311,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* The step inverts all in-facing normals. Generally it is recommended
 	* to enable this step, although the result is not always correct.
 	*/
-	FixInfacingNormals,
+	FixInfacingNormals       = 13,
 
 	// -------------------------------------------------------------------------
 	/**
@@ -336,7 +322,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* Instead of writing your own multi-root, multi-armature lookups we have done the
 	* hard work for you :)
 	*/
-	PopulateArmatureData,
+	PopulateArmatureData     = 14,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step splits meshes with more than one primitive type in
@@ -350,7 +336,7 @@ Post_Process_Step_Flag :: enum i32 {
 	*  specify which primitive types you need. This can be used to easily
 	*  exclude lines and points, which are rarely used, from the import.
 	*/
-	SortByPType,
+	SortByPType              = 15,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step searches all meshes for degenerate primitives and
@@ -393,7 +379,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* don't support lines or points, and some exporters bypass the
 	* format specification and write them as degenerate triangles instead.
 	*/
-	FindDegenerates,
+	FindDegenerates          = 16,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step searches all meshes for invalid data, such as zeroed
@@ -408,7 +394,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* key. The <tt>AI_CONFIG_PP_FID_ANIM_ACCURACY</tt> config property decides
 	* the accuracy of the check for duplicate animation tracks.
 	*/
-	FindInvalidData,
+	FindInvalidData          = 17,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step converts non-UV mappings (such as spherical or
@@ -425,7 +411,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* <tt>#AI_MATKEY_MAPPING</tt> material property in order to display all assets
 	* properly.
 	*/
-	GenUVCoords,
+	GenUVCoords              = 18,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step applies per-texture UV transformations and bakes
@@ -442,7 +428,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* transforming texture coordinates at vertex shader stage with a 3x3
 	* (homogeneous) transformation matrix.
 	*/
-	TransformUVCoords,
+	TransformUVCoords        = 19,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step searches for duplicate meshes and replaces them
@@ -457,7 +443,7 @@ Post_Process_Step_Flag :: enum i32 {
 	*  different materials are currently *not* joined, although this is
 	*  planned for future versions.
 	*/
-	FindInstances,
+	FindInstances            = 20,
 
 	// -------------------------------------------------------------------------
 	/** <hr>A post-processing step to reduce the number of meshes.
@@ -468,7 +454,7 @@ Post_Process_Step_Flag :: enum i32 {
 	*  together with #aiProcess_OptimizeGraph, if possible. The flag is fully
 	*  compatible with both #aiProcess_SplitLargeMeshes and #aiProcess_SortByPType.
 	*/
-	OptimizeMeshes,
+	OptimizeMeshes           = 21,
 
 	// -------------------------------------------------------------------------
 	/** <hr>A post-processing step to optimize the scene hierarchy.
@@ -496,7 +482,7 @@ Post_Process_Step_Flag :: enum i32 {
 	*  #aiProcess_OptimizeMeshes in combination with #aiProcess_OptimizeGraph
 	*  usually fixes them all and makes them renderable.
 	*/
-	OptimizeGraph,
+	OptimizeGraph            = 22,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step flips all UV coordinates along the y-axis and adjusts
@@ -516,7 +502,7 @@ Post_Process_Step_Flag :: enum i32 {
 	* setting and bundles all conversions typically required for D3D-based
 	* applications.
 	*/
-	FlipUVs,
+	FlipUVs                  = 23,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step adjusts the output face winding order to be CW.
@@ -531,13 +517,13 @@ Post_Process_Step_Flag :: enum i32 {
 	*  x1
 	* @endcode
 	*/
-	FlipWindingOrder,
+	FlipWindingOrder         = 24,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step splits meshes with many bones into sub-meshes so that each
 	* sub-mesh has fewer or as many bones as a given limit.
 	*/
-	SplitByBoneCount,
+	SplitByBoneCount         = 25,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step removes bones losslessly or according to some threshold.
@@ -552,7 +538,7 @@ Post_Process_Step_Flag :: enum i32 {
 	*  Use <tt>#AI_CONFIG_PP_DB_ALL_OR_NONE</tt> if you want bones removed if and
 	*  only if all bones within the scene qualify for removal.
 	*/
-	Debone,
+	Debone                   = 26,
 
 	// -------------------------------------------------------------------------
 	/** <hr>This step will perform a global scale of the model.
@@ -564,7 +550,7 @@ Post_Process_Step_Flag :: enum i32 {
 	*
 	*  Use <tt>#AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY</tt> to setup the global scaling factor.
 	*/
-	GlobalScale,
+	GlobalScale              = 27,
 
 	// -------------------------------------------------------------------------
 	/** <hr>A postprocessing step to embed of textures.
@@ -575,12 +561,12 @@ Post_Process_Step_Flag :: enum i32 {
 	*  it will check if a file with the same name exists at the root folder
 	*  of the imported model. And if so, it uses that.
 	*/
-	EmbedTextures,
+	EmbedTextures            = 28,
 
 	// aiProcess_GenEntityMeshes = 0x100000,
 	// aiProcess_OptimizeAnimations = 0x200000
 	// aiProcess_FixTexturePaths = 0x200000
-	ForceGenNormals,
+	ForceGenNormals          = 29,
 
 	// -------------------------------------------------------------------------
 	/** <hr>Drops normals for all faces of all meshes.
@@ -592,72 +578,21 @@ Post_Process_Step_Flag :: enum i32 {
 	* #aiProcess_JoinIdenticalVertices is *senseless* then.
 	* This process gives sense back to aiProcess_JoinIdenticalVertices
 	*/
-	DropNormals,
-	GenBoundingBoxes,
+	DropNormals              = 30,
+	GenBoundingBoxes         = 31,
 }
 
-Post_Process_Step_Flags :: distinct bit_set[Post_Process_Step_Flag; i32]
+// -----------------------------------------------------------------------------------
+/** @enum  aiPostProcessSteps
+*  @brief Defines the flags for all possible post processing steps.
+*
+*  @note Some steps are influenced by properties set on the Assimp::Importer itself
+*
+*  @see Assimp::Importer::ReadFile()
+*  @see Assimp::Importer::SetPropertyInteger()
+*  @see aiImportFile
+*  @see aiImportFileEx
+*/
+// -----------------------------------------------------------------------------------
+Post_Process_Step_Flags   :: bit_set[Post_Process_Step_Flag; i32]
 
-// ---------------------------------------------------------------------------------------
-/** @def aiProcess_ConvertToLeftHanded
- *  @brief Shortcut flag for Direct3D-based applications.
- *
- *  Supersedes the #aiProcess_MakeLeftHanded and #aiProcess_FlipUVs and
- *  #aiProcess_FlipWindingOrder flags.
- *  The output data matches Direct3D's conventions: left-handed geometry, upper-left
- *  origin for UV coordinates and finally clockwise face order, suitable for CCW culling.
- *
- *  @deprecated
- */
-// aiProcess_ConvertToLeftHanded :: (aiProcess_MakeLeftHanded|aiProcess_FlipUVs|aiProcess_FlipWindingOrder|0)
-
-// ---------------------------------------------------------------------------------------
-/** @def aiProcessPreset_TargetRealtime_Fast
- *  @brief Default postprocess configuration optimizing the data for real-time rendering.
- *
- *  Applications would want to use this preset to load models on end-user PCs,
- *  maybe for direct use in game.
- *
- * If you're using DirectX, don't forget to combine this value with
- * the #aiProcess_ConvertToLeftHanded step. If you don't support UV transformations
- * in your application apply the #aiProcess_TransformUVCoords step, too.
- *  @note Please take the time to read the docs for the steps enabled by this preset.
- *  Some of them offer further configurable properties, while some of them might not be of
- *  use for you so it might be better to not specify them.
- */
-// aiProcessPreset_TargetRealtime_Fast :: (aiProcess_CalcTangentSpace|aiProcess_GenNormals|aiProcess_JoinIdenticalVertices|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_SortByPType|0)
-
-// ---------------------------------------------------------------------------------------
- /** @def aiProcessPreset_TargetRealtime_Quality
-  *  @brief Default postprocess configuration optimizing the data for real-time rendering.
-  *
-  *  Unlike #aiProcessPreset_TargetRealtime_Fast, this configuration
-  *  performs some extra optimizations to improve rendering speed and
-  *  to minimize memory usage. It could be a good choice for a level editor
-  *  environment where import speed is not so important.
-  *
-  *  If you're using DirectX, don't forget to combine this value with
-  *  the #aiProcess_ConvertToLeftHanded step. If you don't support UV transformations
-  *  in your application apply the #aiProcess_TransformUVCoords step, too.
-  *  @note Please take the time to read the docs for the steps enabled by this preset.
-  *  Some of them offer further configurable properties, while some of them might not be
-  *  of use for you so it might be better to not specify them.
-  */
-// aiProcessPreset_TargetRealtime_Quality :: (aiProcess_CalcTangentSpace|aiProcess_GenSmoothNormals|aiProcess_JoinIdenticalVertices|aiProcess_ImproveCacheLocality|aiProcess_LimitBoneWeights|aiProcess_RemoveRedundantMaterials|aiProcess_SplitLargeMeshes|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_SortByPType|aiProcess_FindDegenerates|aiProcess_FindInvalidData|0)
-
-// ---------------------------------------------------------------------------------------
- /** @def aiProcessPreset_TargetRealtime_MaxQuality
-  *  @brief Default postprocess configuration optimizing the data for real-time rendering.
-  *
-  *  This preset enables almost every optimization step to achieve perfectly
-  *  optimized data. It's your choice for level editor environments where import speed
-  *  is not important.
-  *
-  *  If you're using DirectX, don't forget to combine this value with
-  *  the #aiProcess_ConvertToLeftHanded step. If you don't support UV transformations
-  *  in your application, apply the #aiProcess_TransformUVCoords step, too.
-  *  @note Please take the time to read the docs for the steps enabled by this preset.
-  *  Some of them offer further configurable properties, while some of them might not be
-  *  of use for you so it might be better to not specify them.
-  */
-// aiProcessPreset_TargetRealtime_MaxQuality :: (aiProcessPreset_TargetRealtime_Quality|aiProcess_FindInstances|aiProcess_ValidateDataStructure|aiProcess_OptimizeMeshes|0)

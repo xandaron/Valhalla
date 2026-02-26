@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,27 +38,25 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file material.h
-*  @brief Defines the material system of the library
-*/
-package assimp
-
-
+ *  @brief Defines the material system of the library
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// MATERIAL_H_INC :: 
 
 // Name for default materials (2nd is used if meshes have UV coords)
 DEFAULT_MATERIAL_NAME :: "DefaultMaterial"
@@ -84,22 +82,22 @@ DEFAULT_MATERIAL_NAME :: "DefaultMaterial"
 */
 Texture_Op :: enum i32 {
 	/** T = T1 * T2 */
-	Multiply,
+	Multiply  = 0,
 
 	/** T = T1 + T2 */
-	Add,
+	Add       = 1,
 
 	/** T = T1 - T2 */
-	Subtract,
+	Subtract  = 2,
 
 	/** T = T1 / T2 */
-	Divide,
+	Divide    = 3,
 
 	/** T = (T1 + T2) - (T1 * T2) */
-	SmoothAdd,
+	SmoothAdd = 4,
 
 	/** T = T1 + (T2-0.5) */
-	SignedAdd,
+	SignedAdd = 5,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,17 +108,17 @@ Texture_Op :: enum i32 {
 Texture_Map_Mode :: enum i32 {
 	/** A texture coordinate u|v is translated to u%1|v%1
 	*/
-	Wrap = 0,
+	Wrap   = 0,
 
 	/** Texture coordinates outside [0...1]
 	*  are clamped to the nearest valid value.
 	*/
-	Clamp = 1,
+	Clamp  = 1,
 
 	/** If the texture coordinates for a pixel are outside [0...1]
 	*  the texture is not applied to that pixel
 	*/
-	Decal = 3,
+	Decal  = 3,
 
 	/** A texture coordinate u|v becomes u%1|v%1 if (u-(u%1))%2 is zero and
 	*  1-(u%1)|1-(v%1) otherwise
@@ -144,22 +142,22 @@ Texture_Mapping :: enum i32 {
 	*  the texture coordinates are to be taken from (remember,
 	*  meshes can have more than one UV channel).
 	*/
-	UV,
+	UV       = 0,
 
 	/** Spherical mapping */
-	SPHERE,
+	SPHERE   = 1,
 
 	/** Cylindrical mapping */
-	CYLINDER,
+	CYLINDER = 2,
 
 	/** Cubic mapping */
-	BOX,
+	BOX      = 3,
 
 	/** Planar mapping */
-	PLANE,
+	PLANE    = 4,
 
 	/** Undefined mapping. Have fun. */
-	OTHER,
+	OTHER    = 5,
 }
 
 // ---------------------------------------------------------------------------
@@ -184,38 +182,44 @@ Texture_Type :: enum i32 {
 	*  (#aiMaterialProperty::mSemantic) for all material properties
 	*  *not* related to textures.
 	*/
-	NONE,
+	NONE                    = 0,
 
+	/** LEGACY API MATERIALS
+	* Legacy refers to materials which
+	* Were originally implemented in the specifications around 2000.
+	* These must never be removed, as most engines support them.
+	*/
+	
 	/** The texture is combined with the result of the diffuse
 	*  lighting equation.
 	*  OR
 	*  PBR Specular/Glossiness
 	*/
-	DIFFUSE,
+	DIFFUSE                 = 1,
 
 	/** The texture is combined with the result of the specular
 	*  lighting equation.
 	*  OR
 	*  PBR Specular/Glossiness
 	*/
-	SPECULAR,
+	SPECULAR                = 2,
 
 	/** The texture is combined with the result of the ambient
 	*  lighting equation.
 	*/
-	AMBIENT,
+	AMBIENT                 = 3,
 
 	/** The texture is added to the result of the lighting
 	*  calculation. It isn't influenced by incoming light.
 	*/
-	EMISSIVE,
+	EMISSIVE                = 4,
 
 	/** The texture is a height map.
 	*
 	*  By convention, higher gray-scale values stand for
 	*  higher elevations from the base height.
 	*/
-	HEIGHT,
+	HEIGHT                  = 5,
 
 	/** The texture is a (tangent space) normal-map.
 	*
@@ -223,7 +227,7 @@ Texture_Type :: enum i32 {
 	*  normal maps. Assimp does (intentionally) not
 	*  distinguish here.
 	*/
-	NORMALS,
+	NORMALS                 = 6,
 
 	/** The texture defines the glossiness of the material.
 	*
@@ -232,21 +236,21 @@ Texture_Type :: enum i32 {
 	*  function defined to map the linear color values in the
 	*  texture to a suitable exponent. Have fun.
 	*/
-	SHININESS,
+	SHININESS               = 7,
 
 	/** The texture defines per-pixel opacity.
 	*
 	*  Usually 'white' means opaque and 'black' means
 	*  'transparency'. Or quite the opposite. Have fun.
 	*/
-	OPACITY,
+	OPACITY                 = 8,
 
 	/** Displacement texture
 	*
 	*  The exact purpose and format is application-dependent.
 	*  Higher color values stand for higher vertex displacements.
 	*/
-	DISPLACEMENT,
+	DISPLACEMENT            = 9,
 
 	/** Lightmap texture (aka Ambient Occlusion)
 	*
@@ -255,14 +259,14 @@ Texture_Type :: enum i32 {
 	*  scaling value for the final color value of a pixel. Its
 	*  intensity is not affected by incoming light.
 	*/
-	LIGHTMAP,
+	LIGHTMAP                = 10,
 
 	/** Reflection texture
 	*
 	* Contains the color of a perfect mirror reflection.
 	* Rarely used, almost never for real-time applications.
 	*/
-	REFLECTION,
+	REFLECTION              = 11,
 
 	/** PBR Materials
 	* PBR definitions from maya and other modelling packages now use this standard.
@@ -270,47 +274,12 @@ Texture_Type :: enum i32 {
 	* Support for this is in game engines like Godot, Unreal or Unity3D.
 	* Modelling packages which use this are very common now.
 	*/
-	BASE_COLOR,
-
-	/** PBR Materials
-	* PBR definitions from maya and other modelling packages now use this standard.
-	* This was originally introduced around 2012.
-	* Support for this is in game engines like Godot, Unreal or Unity3D.
-	* Modelling packages which use this are very common now.
-	*/
-	NORMAL_CAMERA,
-
-	/** PBR Materials
-	* PBR definitions from maya and other modelling packages now use this standard.
-	* This was originally introduced around 2012.
-	* Support for this is in game engines like Godot, Unreal or Unity3D.
-	* Modelling packages which use this are very common now.
-	*/
-	EMISSION_COLOR,
-
-	/** PBR Materials
-	* PBR definitions from maya and other modelling packages now use this standard.
-	* This was originally introduced around 2012.
-	* Support for this is in game engines like Godot, Unreal or Unity3D.
-	* Modelling packages which use this are very common now.
-	*/
-	METALNESS,
-
-	/** PBR Materials
-	* PBR definitions from maya and other modelling packages now use this standard.
-	* This was originally introduced around 2012.
-	* Support for this is in game engines like Godot, Unreal or Unity3D.
-	* Modelling packages which use this are very common now.
-	*/
-	DIFFUSE_ROUGHNESS,
-
-	/** PBR Materials
-	* PBR definitions from maya and other modelling packages now use this standard.
-	* This was originally introduced around 2012.
-	* Support for this is in game engines like Godot, Unreal or Unity3D.
-	* Modelling packages which use this are very common now.
-	*/
-	AMBIENT_OCCLUSION,
+	BASE_COLOR              = 12,
+	NORMAL_CAMERA           = 13,
+	EMISSION_COLOR          = 14,
+	METALNESS               = 15,
+	DIFFUSE_ROUGHNESS       = 16,
+	AMBIENT_OCCLUSION       = 17,
 
 	/** Unknown texture
 	*
@@ -318,52 +287,46 @@ Texture_Type :: enum i32 {
 	*  above is considered to be 'unknown'. It is still imported,
 	*  but is excluded from any further post-processing.
 	*/
-	UNKNOWN,
+	UNKNOWN                 = 18,
 
+	/** PBR Material Modifiers
+	* Some modern renderers have further PBR modifiers that may be overlaid
+	* on top of the 'base' PBR materials for additional realism.
+	* These use multiple texture maps, so only the base type is directly defined
+	*/
+	
 	/** Sheen
 	* Generally used to simulate textiles that are covered in a layer of microfibers
 	* eg velvet
 	* https://github.com/KhronosGroup/glTF/tree/master/extensions/2.0/Khronos/KHR_materials_sheen
 	*/
-	SHEEN,
+	SHEEN                   = 19,
 
 	/** Clearcoat
 	* Simulates a layer of 'polish' or 'lacquer' layered on top of a PBR substrate
 	* https://autodesk.github.io/standard-surface/#closures/coating
 	* https://github.com/KhronosGroup/glTF/tree/master/extensions/2.0/Khronos/KHR_materials_clearcoat
 	*/
-	CLEARCOAT,
+	CLEARCOAT               = 20,
 
 	/** Transmission
 	* Simulates transmission through the surface
 	* May include further information such as wall thickness
 	*/
-	TRANSMISSION,
+	TRANSMISSION            = 21,
 
 	/**
 	* Maya material declarations
 	*/
-	MAYA_BASE,
-
-	/**
-	* Maya material declarations
-	*/
-	MAYA_SPECULAR,
-
-	/**
-	* Maya material declarations
-	*/
-	MAYA_SPECULAR_COLOR,
-
-	/**
-	* Maya material declarations
-	*/
-	MAYA_SPECULAR_ROUGHNESS,
+	MAYA_BASE               = 22,
+	MAYA_SPECULAR           = 23,
+	MAYA_SPECULAR_COLOR     = 24,
+	MAYA_SPECULAR_ROUGHNESS = 25,
 
 	/** Anisotropy
 	* Simulates a surface with directional properties
 	*/
-	ANISOTROPY,
+	ANISOTROPY              = 26,
 
 	/**
 	* gltf material declarations
@@ -375,10 +338,20 @@ Texture_Type :: enum i32 {
 	*           "The metalness values are sampled from the B channel. The roughness values are
 	*           sampled from the G channel..."
 	*/
-	GLTF_METALLIC_ROUGHNESS,
+	GLTF_METALLIC_ROUGHNESS = 27,
 }
 
-// TEXTURE_TYPE_MAX :: aiTextureType_GLTF_METALLIC_ROUGHNESS
+@(default_calling_convention="c", link_prefix="ai")
+foreign lib {
+	// -------------------------------------------------------------------------------
+	/**
+	* @brief  Get a string for a given aiTextureType
+	*
+	* @param  in  The texture type
+	* @return The description string for the texture type.
+	*/
+	TextureTypeToString :: proc(_in: Texture_Type) -> cstring ---
+}
 
 // ---------------------------------------------------------------------------
 /** @brief Defines all shading models supported by the library
@@ -399,39 +372,39 @@ Shading_Mode :: enum i32 {
 	/** Flat shading. Shading is done on per-face base,
 	*  diffuse only. Also known as 'faceted shading'.
 	*/
-	Flat = 1,
+	Flat         = 1,
 
 	/** Simple Gouraud shading.
 	*/
-	Gouraud = 2,
+	Gouraud      = 2,
 
 	/** Phong-Shading -
 	*/
-	Phong = 3,
+	Phong        = 3,
 
 	/** Phong-Blinn-Shading
 	*/
-	Blinn = 4,
+	Blinn        = 4,
 
 	/** Toon-Shading per pixel
 	*
 	*  Also known as 'comic' shader.
 	*/
-	Toon = 5,
+	Toon         = 5,
 
 	/** OrenNayar-Shading per pixel
 	*
 	*  Extension to standard Lambertian shading, taking the
 	*  roughness of the material into account
 	*/
-	OrenNayar = 6,
+	OrenNayar    = 6,
 
 	/** Minnaert-Shading per pixel
 	*
 	*  Extension to standard Lambertian shading, taking the
 	*  "darkness" of the material into account
 	*/
-	Minnaert = 7,
+	Minnaert     = 7,
 
 	/** CookTorrance-Shading per pixel
 	*
@@ -442,12 +415,12 @@ Shading_Mode :: enum i32 {
 	/** No shading at all. Constant light influence of 1.0.
 	* Also known as "Unlit"
 	*/
-	NoShading = 9,
+	NoShading    = 9,
 	Unlit        = 9, // Alias
 
 	/** Fresnel shading
 	*/
-	Fresnel = 10,
+	Fresnel      = 10,
 
 	/** Physically-Based Rendering (PBR) shading using
 	* Bidirectional scattering/reflectance distribution function (BSDF/BRDF)
@@ -460,7 +433,31 @@ Shading_Mode :: enum i32 {
 	* - If AI_MATKEY_GLOSSINESS_FACTOR is set, then a Specular/Glossiness is available
 	* Note that some PBR methods allow layering of techniques
 	*/
-	PBR_BRDF = 11,
+	PBR_BRDF     = 11,
+}
+
+Texture_Flags :: enum i32 {
+	/** The texture's color values have to be inverted (component-wise 1-n)
+	*/
+	Invert      = 0,
+
+	/** Explicit request to the application to process the alpha channel
+	*  of the texture.
+	*
+	*  Mutually exclusive with #aiTextureFlags_IgnoreAlpha. These
+	*  flags are set if the library can say for sure that the alpha
+	*  channel is used/is not used. If the model format does not
+	*  define this, it is left to the application to decide whether
+	*  the texture alpha channel - if any - is evaluated or not.
+	*/
+	UseAlpha    = 1,
+
+	/** Explicit request to the application to ignore the alpha channel
+	*  of the texture.
+	*
+	*  Mutually exclusive with #aiTextureFlags_UseAlpha.
+	*/
+	IgnoreAlpha = 2,
 }
 
 // ---------------------------------------------------------------------------
@@ -475,31 +472,7 @@ Shading_Mode :: enum i32 {
 *
 *  This corresponds to the #AI_MATKEY_TEXFLAGS property.
 */
-Texture_Flag :: enum i32 {
-	/** The texture's color values have to be inverted (component-wise 1-n)
-	*/
-	Invert,
-
-	/** Explicit request to the application to process the alpha channel
-	*  of the texture.
-	*
-	*  Mutually exclusive with #aiTextureFlags_IgnoreAlpha. These
-	*  flags are set if the library can say for sure that the alpha
-	*  channel is used/is not used. If the model format does not
-	*  define this, it is left to the application to decide whether
-	*  the texture alpha channel - if any - is evaluated or not.
-	*/
-	UseAlpha,
-
-	/** Explicit request to the application to ignore the alpha channel
-	*  of the texture.
-	*
-	*  Mutually exclusive with #aiTextureFlags_UseAlpha.
-	*/
-	IgnoreAlpha,
-}
-
-Texture_Flags :: distinct bit_set[Texture_Flag; i32]
+Texture_Flag :: bit_set[Texture_Flags; i32]
 
 // ---------------------------------------------------------------------------
 /**
@@ -525,7 +498,7 @@ Blend_Mode :: enum i32 {
 	*  SourceColor*SourceAlpha + DestColor*(1-SourceAlpha)
 	*  @endcode
 	*/
-	Default,
+	Default  = 0,
 
 	/** Additive blending
 	*
@@ -534,7 +507,7 @@ Blend_Mode :: enum i32 {
 	*  SourceColor*1 + DestColor*1
 	*  @endcode
 	*/
-	Additive,
+	Additive = 1,
 }
 
 // ---------------------------------------------------------------------------
@@ -567,7 +540,7 @@ Uvtransform :: struct {
 	*  rotation center is 0.5f|0.5f. The default value
 	*  0.f.
 	*/
-	mRotation: Real,
+	mRotation: f32,
 }
 
 //! @cond AI_DOX_INCLUDE_INTERNAL
@@ -582,7 +555,7 @@ Property_Type_Info :: enum i32 {
 	*  aiMaterial::Get()) to query properties stored in floating-point format.
 	*  The material system performs the type conversion automatically.
 	*/
-	Float = 1,
+	Float   = 1,
 
 	/** Array of double-precision (64 Bit) floats
 	*
@@ -590,14 +563,14 @@ Property_Type_Info :: enum i32 {
 	*  aiMaterial::Get()) to query properties stored in floating-point format.
 	*  The material system performs the type conversion automatically.
 	*/
-	Double = 2,
+	Double  = 2,
 
 	/** The material property is an aiString.
 	*
 	*  Arrays of strings aren't possible, aiGetMaterialString() (or the
 	*  C++-API aiMaterial::Get()) *must* be used to query a string property.
 	*/
-	String = 3,
+	String  = 3,
 
 	/** Array of (32 Bit) integers
 	*
@@ -609,7 +582,7 @@ Property_Type_Info :: enum i32 {
 
 	/** Simple binary buffer, content undefined. Not convertible to anything.
 	*/
-	Buffer = 5,
+	Buffer  = 5,
 }
 
 // ---------------------------------------------------------------------------
@@ -681,148 +654,21 @@ Material :: struct {
 }
 
 // ---------------------------------------------------------------------------
-// MATKEY_NAME :: "?mat.name", 0, 0
-// MATKEY_TWOSIDED :: "$mat.twosided", 0, 0
-// MATKEY_SHADING_MODEL :: "$mat.shadingm", 0, 0
-// MATKEY_ENABLE_WIREFRAME :: "$mat.wireframe", 0, 0
-// MATKEY_BLEND_FUNC :: "$mat.blend", 0, 0
-// MATKEY_OPACITY :: "$mat.opacity", 0, 0
-// MATKEY_TRANSPARENCYFACTOR :: "$mat.transparencyfactor", 0, 0
-// MATKEY_BUMPSCALING :: "$mat.bumpscaling", 0, 0
-// MATKEY_SHININESS :: "$mat.shininess", 0, 0
-// MATKEY_REFLECTIVITY :: "$mat.reflectivity", 0, 0
-// MATKEY_SHININESS_STRENGTH :: "$mat.shinpercent", 0, 0
-// MATKEY_REFRACTI :: "$mat.refracti", 0, 0
-// MATKEY_COLOR_DIFFUSE :: "$clr.diffuse", 0, 0
-// MATKEY_COLOR_AMBIENT :: "$clr.ambient", 0, 0
-// MATKEY_COLOR_SPECULAR :: "$clr.specular", 0, 0
-// MATKEY_COLOR_EMISSIVE :: "$clr.emissive", 0, 0
-// MATKEY_COLOR_TRANSPARENT :: "$clr.transparent", 0, 0
-// MATKEY_COLOR_REFLECTIVE :: "$clr.reflective", 0, 0
-// MATKEY_GLOBAL_BACKGROUND_IMAGE :: "?bg.global", 0, 0
-// MATKEY_GLOBAL_SHADERLANG :: "?sh.lang", 0, 0
-// MATKEY_SHADER_VERTEX :: "?sh.vs", 0, 0
-// MATKEY_SHADER_FRAGMENT :: "?sh.fs", 0, 0
-// MATKEY_SHADER_GEO :: "?sh.gs", 0, 0
-// MATKEY_SHADER_TESSELATION :: "?sh.ts", 0, 0
-// MATKEY_SHADER_PRIMITIVE :: "?sh.ps", 0, 0
-// MATKEY_SHADER_COMPUTE :: "?sh.cs", 0, 0
-
-// ---------------------------------------------------------------------------
-// PBR material support
-// --------------------
-// Properties defining PBR rendering techniques
-// MATKEY_USE_COLOR_MAP :: "$mat.useColorMap", 0, 0
-
-// Metallic/Roughness Workflow
-// ---------------------------
-// Base RGBA color factor. Will be multiplied by final base color texture values if extant
-// Note: Importers may choose to copy this into AI_MATKEY_COLOR_DIFFUSE for compatibility
-// with renderers and formats that do not support Metallic/Roughness PBR
-// MATKEY_BASE_COLOR :: "$clr.base", 0, 0
-// MATKEY_BASE_COLOR_TEXTURE :: aiTextureType_BASE_COLOR, 0
-// MATKEY_USE_METALLIC_MAP :: "$mat.useMetallicMap", 0, 0
-
-// Metallic factor. 0.0 = Full Dielectric, 1.0 = Full Metal
-// MATKEY_METALLIC_FACTOR :: "$mat.metallicFactor", 0, 0
-// MATKEY_METALLIC_TEXTURE :: aiTextureType_METALNESS, 0
-// MATKEY_USE_ROUGHNESS_MAP :: "$mat.useRoughnessMap", 0, 0
-
-// Roughness factor. 0.0 = Perfectly Smooth, 1.0 = Completely Rough
-// MATKEY_ROUGHNESS_FACTOR :: "$mat.roughnessFactor", 0, 0
-// MATKEY_ROUGHNESS_TEXTURE :: aiTextureType_DIFFUSE_ROUGHNESS, 0
-
-// Anisotropy factor. 0.0 = isotropic, 1.0 = anisotropy along tangent direction,
-// -1.0 = anisotropy along bitangent direction
-// MATKEY_ANISOTROPY_FACTOR :: "$mat.anisotropyFactor", 0, 0
-
-// Specular/Glossiness Workflow
-// ---------------------------
-// Diffuse/Albedo Color. Note: Pure Metals have a diffuse of {0,0,0}
-// AI_MATKEY_COLOR_DIFFUSE
-// Specular Color.
-// Note: Metallic/Roughness may also have a Specular Color
-// AI_MATKEY_COLOR_SPECULAR
-// MATKEY_SPECULAR_FACTOR :: "$mat.specularFactor", 0, 0
-
-// Glossiness factor. 0.0 = Completely Rough, 1.0 = Perfectly Smooth
-// MATKEY_GLOSSINESS_FACTOR :: "$mat.glossinessFactor", 0, 0
-
-// Sheen
-// -----
-// Sheen base RGB color. Default {0,0,0}
-// MATKEY_SHEEN_COLOR_FACTOR :: "$clr.sheen.factor", 0, 0
-
-// Sheen Roughness Factor.
-// MATKEY_SHEEN_ROUGHNESS_FACTOR :: "$mat.sheen.roughnessFactor", 0, 0
-// MATKEY_SHEEN_COLOR_TEXTURE :: aiTextureType_SHEEN, 0
-// MATKEY_SHEEN_ROUGHNESS_TEXTURE :: aiTextureType_SHEEN, 1
-
-// Clearcoat
-// ---------
-// Clearcoat layer intensity. 0.0 = none (disabled)
-// MATKEY_CLEARCOAT_FACTOR           :: "$mat.clearcoat.factor", 0, 0
-// MATKEY_CLEARCOAT_ROUGHNESS_FACTOR :: "$mat.clearcoat.roughnessFactor", 0, 0
-// MATKEY_CLEARCOAT_TEXTURE :: aiTextureType_CLEARCOAT, 0
-// MATKEY_CLEARCOAT_ROUGHNESS_TEXTURE :: aiTextureType_CLEARCOAT, 1
-// MATKEY_CLEARCOAT_NORMAL_TEXTURE :: aiTextureType_CLEARCOAT, 2
-
-// Base percentage of light transmitted through the surface. 0.0 = Opaque, 1.0 = Fully transparent
-// MATKEY_TRANSMISSION_FACTOR :: "$mat.transmission.factor", 0, 0
-
-// Texture defining percentage of light transmitted through the surface.
-// Multiplied by AI_MATKEY_TRANSMISSION_FACTOR
-// MATKEY_TRANSMISSION_TEXTURE :: aiTextureType_TRANSMISSION, 0
-
-// The thickness of the volume beneath the surface. If the value is 0 the material is thin-walled. Otherwise the material is a volume boundary.
-// MATKEY_VOLUME_THICKNESS_FACTOR :: "$mat.volume.thicknessFactor", 0, 0
-
-// Texture that defines the thickness.
-// Multiplied by AI_MATKEY_THICKNESS_FACTOR
-// MATKEY_VOLUME_THICKNESS_TEXTURE :: aiTextureType_TRANSMISSION, 1
-
-// Density of the medium given as the average distance that light travels in the medium before interacting with a particle.
-// MATKEY_VOLUME_ATTENUATION_DISTANCE :: "$mat.volume.attenuationDistance", 0, 0
-
-// The color that white light turns into due to absorption when reaching the attenuation distance.
-// MATKEY_VOLUME_ATTENUATION_COLOR :: "$mat.volume.attenuationColor", 0, 0
-
-// Emissive
-// --------
-// MATKEY_USE_EMISSIVE_MAP   :: "$mat.useEmissiveMap", 0, 0
-// MATKEY_EMISSIVE_INTENSITY :: "$mat.emissiveIntensity", 0, 0
-// MATKEY_USE_AO_MAP         :: "$mat.useAOMap", 0, 0
-
-// Anisotropy
-// ----------
-// MATKEY_ANISOTROPY_ROTATION :: "$mat.anisotropyRotation", 0, 0
-// MATKEY_ANISOTROPY_TEXTURE :: aiTextureType_ANISOTROPY, 0
-
-// ---------------------------------------------------------------------------
 // Pure key names for all texture-related properties
 //! @cond MATS_DOC_FULL
-AI_MATKEY_TEXTURE_BASE       :: "$tex.file"
-AI_MATKEY_UVWSRC_BASE        :: "$tex.uvwsrc"
-AI_MATKEY_TEXOP_BASE         :: "$tex.op"
-AI_MATKEY_MAPPING_BASE       :: "$tex.mapping"
-AI_MATKEY_TEXBLEND_BASE      :: "$tex.blend"
-AI_MATKEY_MAPPINGMODE_U_BASE :: "$tex.mapmodeu"
-AI_MATKEY_MAPPINGMODE_V_BASE :: "$tex.mapmodev"
-AI_MATKEY_TEXMAP_AXIS_BASE   :: "$tex.mapaxis"
-AI_MATKEY_UVTRANSFORM_BASE   :: "$tex.uvtrafo"
-AI_MATKEY_TEXFLAGS_BASE      :: "$tex.flags"
+_AI_MATKEY_TEXTURE_BASE       :: "$tex.file"
+_AI_MATKEY_UVWSRC_BASE        :: "$tex.uvwsrc"
+_AI_MATKEY_TEXOP_BASE         :: "$tex.op"
+_AI_MATKEY_MAPPING_BASE       :: "$tex.mapping"
+_AI_MATKEY_TEXBLEND_BASE      :: "$tex.blend"
+_AI_MATKEY_MAPPINGMODE_U_BASE :: "$tex.mapmodeu"
+_AI_MATKEY_MAPPINGMODE_V_BASE :: "$tex.mapmodev"
+_AI_MATKEY_TEXMAP_AXIS_BASE   :: "$tex.mapaxis"
+_AI_MATKEY_UVTRANSFORM_BASE   :: "$tex.uvtrafo"
+_AI_MATKEY_TEXFLAGS_BASE      :: "$tex.flags"
 
 @(default_calling_convention="c", link_prefix="ai")
 foreign lib {
-	// -------------------------------------------------------------------------------
-	/**
-	* @brief  Get a string for a given aiTextureType
-	*
-	* @param  in  The texture type
-	* @return The description string for the texture type.
-	*/
-	TextureTypeToString :: proc(_in: Texture_Type) -> cstring ---
-
 	//! @endcond
 	//!
 	// ---------------------------------------------------------------------------
@@ -864,7 +710,7 @@ foreign lib {
 	* @return Specifies whether the key has been found. If not, the output
 	*   arrays remains unmodified and pMax is set to 0.*/
 	// ---------------------------------------------------------------------------
-	GetMaterialFloatArray :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^Real, pMax: ^u32) -> Return ---
+	GetMaterialFloatArray :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^f32, pMax: ^u32) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Retrieve an array of integer values with a specific key
@@ -902,5 +748,6 @@ foreign lib {
 	*  @note A texture can be easily queried using #aiGetMaterialTexture() */
 	// ---------------------------------------------------------------------------
 	GetMaterialTextureCount :: proc(pMat: ^Material, type: Texture_Type) -> u32 ---
-	GetMaterialTexture      :: proc(mat: ^Material, type: Texture_Type, index: u32, path: ^String, mapping: ^Texture_Mapping, uvindex: ^u32, blend: ^Real, op: ^Texture_Op, mapmode: ^Texture_Map_Mode, flags: ^u32) -> Return ---
+	GetMaterialTexture      :: proc(mat: ^Material, type: Texture_Type, index: u32, path: ^String, mapping: ^Texture_Mapping /*= NULL*/, uvindex: ^u32 /*= NULL*/, blend: ^f32 /*= NULL*/, op: ^Texture_Op /*= NULL*/, mapmode: ^Texture_Map_Mode /*= NULL*/, flags: ^u32 /*= NULL*/) -> Return ---
 }
+

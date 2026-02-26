@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,32 +38,30 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file texture.h
-*  @brief Defines texture helper structures for the library
-*
-* Used for file formats which embed their textures into the model file.
-* Supported are both normal textures, which are stored as uncompressed
-* pixels, and "compressed" textures, which are stored in a file format
-* such as PNG or TGA.
-*/
-package assimp
-
-
+ *  @brief Defines texture helper structures for the library
+ *
+ * Used for file formats which embed their textures into the model file.
+ * Supported are both normal textures, which are stored as uncompressed
+ * pixels, and "compressed" textures, which are stored in a file format
+ * such as PNG or TGA.
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// TEXTURE_H_INC :: 
 
 EMBEDDED_TEXNAME_PREFIX :: "*"
 
@@ -107,6 +105,26 @@ Texture :: struct {
 	* in any format (e.g. JPEG).
 	*/
 	mHeight: u32,
+
+	/** A hint from the loader to make it easier for applications
+	*  to determine the type of embedded textures.
+	*
+	* If mHeight != 0 this member is show how data is packed. Hint will consist of
+	* two parts: channel order and channel bitness (count of the bits for every
+	* color channel). For simple parsing by the viewer it's better to not omit
+	* absent color channel and just use 0 for bitness. For example:
+	* 1. Image contain RGBA and 8 bit per channel, achFormatHint == "rgba8888";
+	* 2. Image contain ARGB and 8 bit per channel, achFormatHint == "argb8888";
+	* 3. Image contain RGB and 5 bit for R and B channels and 6 bit for G channel, achFormatHint == "rgba5650";
+	* 4. One color image with B channel and 1 bit for it, achFormatHint == "rgba0010";
+	* If mHeight == 0 then achFormatHint is set set to '\\0\\0\\0\\0' if the loader has no additional
+	* information about the texture file format used OR the
+	* file extension of the format without a trailing dot. If there
+	* are multiple file extensions for a format, the shortest
+	* extension is chosen (JPEG maps to 'jpg', not to 'jpeg').
+	* E.g. 'dds\\0', 'pcx\\0', 'jpg\\0'.  All characters are lower-case.
+	* The fourth character will always be '\\0'.
+	*/
 	achFormatHint: [9]i8, // 8 for string + 1 for terminator.
 
 	/** Data of the texture.

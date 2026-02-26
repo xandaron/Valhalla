@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,61 +38,59 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file light.h
-*  @brief Defines the aiLight data structure
-*/
-package assimp
-
-
+ *  @brief Defines the aiLight data structure
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// LIGHT_H_INC :: 
 
 // ---------------------------------------------------------------------------
 /** Enumerates all supported types of light sources.
 */
 Light_Source_Type :: enum i32 {
-	UNDEFINED,
+	UNDEFINED   = 0,
 
 	//! A directional light source has a well-defined direction
 	//! but is infinitely far away. That's quite a good
 	//! approximation for sun light.
-	DIRECTIONAL,
+	DIRECTIONAL = 1,
 
 	//! A point light source has a well-defined position
 	//! in space but no direction - it emits light in all
 	//! directions. A normal bulb is a point light.
-	POINT,
+	POINT       = 2,
 
 	//! A spot light source emits light in a specific
 	//! angle. It has a position and a direction it is pointing to.
 	//! A good example for a spot light is a light spot in
 	//! sport arenas.
-	SPOT,
+	SPOT        = 3,
 
 	//! The generic light level of the world, including the bounces
 	//! of all other light sources.
 	//! Typically, there's at most one ambient light in a scene.
 	//! This light type doesn't have a valid position, direction, or
 	//! other properties, just a color.
-	AMBIENT,
+	AMBIENT     = 4,
 
 	//! An area light is a rectangle with predefined size that uniformly
 	//! emits light from one of its sides. The position is center of the
 	//! rectangle and direction is its normal vector.
-	AREA,
+	AREA        = 5,
 }
 
 // ---------------------------------------------------------------------------

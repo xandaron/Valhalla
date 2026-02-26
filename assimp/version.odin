@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,46 +38,26 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file  version.h
-*  @brief Functions to query the version of the Assimp runtime, check
-*    compile flags, ...
-*/
-package assimp
-
-
+ *  @brief Functions to query the version of the Assimp runtime, check
+ *    compile flags, ...
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// VERSION_H_INC :: 
-
-//! Assimp was compiled as a shared object (Windows: DLL)
-ASSIMP_CFLAGS_SHARED  :: 0x1
-
-//! Assimp was compiled against STLport
-ASSIMP_CFLAGS_STLPORT :: 0x2
-
-//! Assimp was compiled as a debug build
-ASSIMP_CFLAGS_DEBUG   :: 0x4
-
-//! Assimp was compiled with ASSIMP_BUILD_BOOST_WORKAROUND defined
-ASSIMP_CFLAGS_NOBOOST           :: 0x8
-
-//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
-ASSIMP_CFLAGS_SINGLETHREADED    :: 0x10
-
-//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
-ASSIMP_CFLAGS_DOUBLE_SUPPORT :: 0x20
 
 @(default_calling_convention="c", link_prefix="ai")
 foreign lib {
@@ -121,10 +101,32 @@ foreign lib {
 	*  @return The current branch name.
 	*/
 	GetBranchName :: proc() -> cstring ---
+}
 
+//! Assimp was compiled as a shared object (Windows: DLL)
+ASSIMP_CFLAGS_SHARED  :: 0x1
+
+//! Assimp was compiled against STLport
+ASSIMP_CFLAGS_STLPORT :: 0x2
+
+//! Assimp was compiled as a debug build
+ASSIMP_CFLAGS_DEBUG   :: 0x4
+
+//! Assimp was compiled with ASSIMP_BUILD_BOOST_WORKAROUND defined
+ASSIMP_CFLAGS_NOBOOST           :: 0x8
+
+//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
+ASSIMP_CFLAGS_SINGLETHREADED    :: 0x10
+
+//! Assimp was compiled with ASSIMP_BUILD_SINGLETHREADED defined
+ASSIMP_CFLAGS_DOUBLE_SUPPORT :: 0x20
+
+@(default_calling_convention="c", link_prefix="ai")
+foreign lib {
 	// ---------------------------------------------------------------------------
 	/** @brief Returns assimp's compile flags
 	*  @return Any bitwise combination of the ASSIMP_CFLAGS_xxx constants.
 	*/
 	GetCompileFlags :: proc() -> u32 ---
 }
+

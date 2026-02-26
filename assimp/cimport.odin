@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,31 +38,29 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file  cimport.h
-*  @brief Defines the C-API to the Open Asset Import Library.
-*/
-package assimp
+ *  @brief Defines the C-API to the Open Asset Import Library.
+ */
+package Assimp
 
 import "core:c"
 
-_ :: c
-
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// ASSIMP_H_INC :: 
 
-Log_Stream_Callback :: proc "c" (cstring, cstring) /* message */
+Log_Stream_Callback :: proc "c" (cstring /* user */, cstring) /* message */
 
 // --------------------------------------------------------------------------------
 /** C-API: Represents a log stream. A log stream receives all log messages and
@@ -98,7 +96,7 @@ Property_Store :: struct {
 Bool :: i32
 
 FALSE :: 0
-TRUE :: 1
+TRUE  :: 1
 
 @(default_calling_convention="c", link_prefix="ai")
 foreign lib {
@@ -396,7 +394,7 @@ foreign lib {
 	*   public properties are defined in the config.h header file (AI_CONFIG_XXX).
 	* @param value New value for the property
 	*/
-	SetImportPropertyFloat :: proc(store: ^Property_Store, szName: cstring, value: Real) ---
+	SetImportPropertyFloat :: proc(store: ^Property_Store, szName: cstring, value: f32) ---
 
 	// --------------------------------------------------------------------------------
 	/** Set a string property.
@@ -580,13 +578,13 @@ foreign lib {
 	/** Get the length of a 2D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector2Length :: proc(v: ^Vector2D) -> Real ---
+	Vector2Length :: proc(v: ^Vector2D) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Get the squared length of a 2D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector2SquareLength :: proc(v: ^Vector2D) -> Real ---
+	Vector2SquareLength :: proc(v: ^Vector2D) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Negate a 2D vector.
@@ -600,7 +598,7 @@ foreign lib {
 	*  @param b Second vector
 	*  @return The dot product of vectors
 	*/
-	Vector2DotProduct :: proc(a: ^Vector2D, b: ^Vector2D) -> Real ---
+	Vector2DotProduct :: proc(a: ^Vector2D, b: ^Vector2D) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Normalize a 2D vector.
@@ -685,13 +683,13 @@ foreign lib {
 	/** Get the length of a 3D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector3Length :: proc(v: ^Vector3D) -> Real ---
+	Vector3Length :: proc(v: ^Vector3D) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Get the squared length of a 3D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector3SquareLength :: proc(v: ^Vector3D) -> Real ---
+	Vector3SquareLength :: proc(v: ^Vector3D) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Negate a 3D vector.
@@ -705,7 +703,7 @@ foreign lib {
 	*  @param b Second vector
 	*  @return The dot product of vectors
 	*/
-	Vector3DotProduct :: proc(a: ^Vector3D, b: ^Vector3D) -> Real ---
+	Vector3DotProduct :: proc(a: ^Vector3D, b: ^Vector3D) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Get cross product of 3D vectors.
@@ -778,7 +776,7 @@ foreign lib {
 	/** Get the determinant of a 3x3 matrix.
 	*  @param mat Matrix to get the determinant from
 	*/
-	Matrix3Determinant :: proc(mat: ^Matrix3x3) -> Real ---
+	Matrix3Determinant :: proc(mat: ^Matrix3x3) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Get a 3x3 rotation matrix around the Z axis.
@@ -863,7 +861,7 @@ foreign lib {
 	*  @param mat Matrix to get the determinant from
 	*  @return The determinant of the matrix
 	*/
-	Matrix4Determinant :: proc(mat: ^Matrix4x4) -> Real ---
+	Matrix4Determinant :: proc(mat: ^Matrix4x4) -> f32 ---
 
 	// --------------------------------------------------------------------------------
 	/** Returns true of the matrix is the identity matrix.
@@ -895,7 +893,7 @@ foreign lib {
 	* @param angle Receives the output rotation angle
 	* @param position Receives the output position for the x,y,z axes.
 	*/
-	Matrix4DecomposeIntoScalingAxisAnglePosition :: proc(mat: ^Matrix4x4, scaling: ^Vector3D, axis: ^Vector3D, angle: ^Real, position: ^Vector3D) ---
+	Matrix4DecomposeIntoScalingAxisAnglePosition :: proc(mat: ^Matrix4x4, scaling: ^Vector3D, axis: ^Vector3D, angle: ^f32, position: ^Vector3D) ---
 
 	// --------------------------------------------------------------------------------
 	/** Decompose a transformation matrix into its rotational and
@@ -1040,3 +1038,4 @@ foreign lib {
 	*/
 	QuaternionInterpolate :: proc(dst: ^Quaternion, start: ^Quaternion, end: ^Quaternion, factor: f32) ---
 }
+

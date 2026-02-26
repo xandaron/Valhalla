@@ -3,7 +3,7 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2025, assimp team
+Copyright (c) 2006-2026, assimp team
 
 All rights reserved.
 
@@ -12,18 +12,18 @@ with or without modification, are permitted provided that the following
 conditions are met:
 
 * Redistributions of source code must retain the above
-copyright notice, this list of conditions and the
-following disclaimer.
+  copyright notice, this list of conditions and the
+  following disclaimer.
 
 * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the
-following disclaimer in the documentation and/or other
-materials provided with the distribution.
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
 
 * Neither the name of the assimp team, nor the names of its
-contributors may be used to endorse or promote products
-derived from this software without specific prior
-written permission of the assimp team.
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of the assimp team.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -38,57 +38,55 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---------------------------------------------------------------------------
 */
+
 /** @file importerdesc.h
-*  @brief #aiImporterFlags, aiImporterDesc implementation.
-*/
-package assimp
-
-
+ *  @brief #aiImporterFlags, aiImporterDesc implementation.
+ */
+package Assimp
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+	foreign import lib {
+		"libassimp.lib",
+		"vendor:zlib/libz.lib",
+	}
 }
 else {
-    foreign import lib {
-        "system:z",
-        "system:assimp",
-    }
+	foreign import lib {
+		"system:assimp",
+		"system:z",
+	}
 }
 
-// IMPORTER_DESC_H_INC :: 
 
-/** Mixed set of flags for #aiImporterDesc, indicating some features
-*  common to many importers*/
-Importer_Flag :: enum i32 {
+Importer_Flags :: enum i32 {
 	/** Indicates that there is a textual encoding of the
 	*  file format; and that it is supported.*/
-	SupportTextFlavour,
+	SupportTextFlavour       = 0,
 
 	/** Indicates that there is a binary encoding of the
 	*  file format; and that it is supported.*/
-	SupportBinaryFlavour,
+	SupportBinaryFlavour     = 1,
 
 	/** Indicates that there is a compressed encoding of the
 	*  file format; and that it is supported.*/
-	SupportCompressedFlavour,
+	SupportCompressedFlavour = 2,
 
 	/** Indicates that the importer reads only a very particular
 	* subset of the file format. This happens commonly for
 	* declarative or procedural formats which cannot easily
 	* be mapped to #aiScene */
-	LimitedSupport,
+	LimitedSupport           = 3,
 
 	/** Indicates that the importer is highly experimental and
 	* should be used with care. This only happens for trunk
 	* (i.e. SVN) versions, experimental code is not included
 	* in releases. */
-	Experimental,
+	Experimental             = 4,
 }
 
-Importer_Flags :: distinct bit_set[Importer_Flag; i32]
+/** Mixed set of flags for #aiImporterDesc, indicating some features
+*  common to many importers*/
+Importer_Flag :: bit_set[Importer_Flags; i32]
 
 /** Meta information about a particular importer. Importers need to fill
 *  this structure, but they can freely decide how talkative they are.
@@ -155,3 +153,4 @@ foreign lib {
 	*/
 	GetImporterDesc :: proc(extension: cstring) -> ^Importer_Desc ---
 }
+
