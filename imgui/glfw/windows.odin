@@ -6,12 +6,6 @@ import "core:sys/windows"
 
 import imgui ".."
 
-foreign import user32 "system:User32.lib"
-
-@(default_calling_convention = "system")
-foreign user32 {
-	GetMessageExtraInfo :: proc() -> windows.LPARAM ---
-}
 
 @(private = "package")
 Data :: struct {
@@ -30,8 +24,8 @@ ViewportData :: struct {
 }
 
 // WndProc hook (declared here because we will need access to ImGui_ImplGlfw_ViewportData)
-GetMouseSourceFromMessageExtraInfo :: proc() -> imgui.MouseSource {
-	extra_info := GetMessageExtraInfo()
+GetMouseSourceFromMessageExtraInfo :: proc() -> imgui.GuiMouseSource {
+	extra_info := windows.GetMessageExtraInfo()
 	if (extra_info & 0xFFFFFF80) == 0xFF515700 {
 		return .Pen
 	}
@@ -49,10 +43,10 @@ WndProc :: proc "system" (
 ) -> windows.LRESULT {
 	context = runtime.default_context()
 	bd := transmute(^Data)windows.GetPropW(hWnd, "IMGUI_BACKEND_DATA")
-	io := imgui.GetIOImGuiContextPtr(bd.Context)
+	io := imgui.Gui_GetIOImGuiContextPtr(bd.Context)
 
 	prev_wndproc := bd.PrevWndProc
-	viewport := transmute(^imgui.Viewport)windows.GetPropW(hWnd, "IMGUI_VIEWPORT")
+	viewport := transmute(^imgui.GuiViewport)windows.GetPropW(hWnd, "IMGUI_VIEWPORT")
 	if viewport != nil {
 		if vd := transmute(^ViewportData)(viewport.PlatformUserData); vd != nil {
 			prev_wndproc = vd.PrevWndProc
@@ -76,7 +70,7 @@ WndProc :: proc "system" (
 	     windows.WM_XBUTTONDOWN,
 	     windows.WM_XBUTTONDBLCLK,
 	     windows.WM_XBUTTONUP:
-		imgui.IO_AddMouseSourceEvent(io, GetMouseSourceFromMessageExtraInfo())
+		imgui.GuiIO_AddMouseSourceEvent(io, GetMouseSourceFromMessageExtraInfo())
 		break
 	// We have submitted https://github.com/glfw/glfw/pull/1568 to allow GLFW to support "transparent inputs".
 	// In the meanwhile we implement custom per-platform workarounds here (FIXME-VIEWPORT: Implement same work-around for Linux/OSX!)

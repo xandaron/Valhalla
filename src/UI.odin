@@ -1,11 +1,16 @@
 package Valhalla
 
-import "../imgui"
-import tinyfd "../tinyfiledialogs"
+import "base:runtime"
+import "core:c"
 import "core:fmt"
+import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+
+import "../imgui"
+import tinyfd "../tinyfiledialogs"
+
 
 UIData :: struct {
 	lockInput:           bool,
@@ -80,21 +85,21 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 	uiData := &globals.uiData
 	if uiData.showMetrics {
-		imgui.SetNextWindowBgAlpha(1.0)
-		imgui.ShowMetricsWindow()
+		imgui.Gui_SetNextWindowBgAlpha(1.0)
+		imgui.Gui_ShowMetricsWindow(nil)
 	}
 
 	if uiData.showDemo {
-		imgui.SetNextWindowBgAlpha(1.0)
-		imgui.ShowDemoWindow()
+		imgui.Gui_SetNextWindowBgAlpha(1.0)
+		imgui.Gui_ShowDemoWindow(nil)
 	}
 
-	imgui.SetNextWindowBgAlpha(1.0)
-	if imgui.Begin("Editor", nil, {.MenuBar}) {
+	imgui.Gui_SetNextWindowBgAlpha(1.0)
+	if imgui.Gui_Begin("Editor", nil, {.MenuBar}) {
 		scene := &globals.scenes[globals.activeScene]
-		if imgui.BeginMenuBar() {
-			if imgui.BeginMenu("File") {
-				if imgui.MenuItem("Open") {
+		if imgui.Gui_BeginMenuBar() {
+			if imgui.Gui_BeginMenu("File") {
+				if imgui.Gui_MenuItem("Open") {
 					str := string(tinyfd.openFileDialog("Open Scene", SCENE_PATH, 0, nil, nil, 0))
 					relPath, err := filepath.rel(globals.projectDir, str, context.temp_allocator)
 					if err != nil {
@@ -115,7 +120,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					loadScene(&globals.scenes[len(globals.scenes) - 1])
 				}
 
-				if imgui.MenuItem("Save") {
+				if imgui.Gui_MenuItem("Save") {
 					if scene.path != "" {
 						saveScene(scene)
 					} else {
@@ -123,11 +128,11 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					}
 				}
 
-				if imgui.MenuItem("Save As...") {
+				if imgui.Gui_MenuItem("Save As...") {
 					saveAs(scene)
 				}
 
-				if imgui.MenuItem("Close") {
+				if imgui.Gui_MenuItem("Close") {
 					saveScene(scene)
 					if len(globals.scenes) > 1 {
 						deleteScene(scene)
@@ -137,9 +142,9 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					}
 				}
 
-				imgui.SeparatorText("Assets")
-				if imgui.BeginMenu("Import") {
-					if imgui.MenuItem("Model") {
+				imgui.Gui_SeparatorText("Assets")
+				if imgui.Gui_BeginMenu("Import") {
+					if imgui.Gui_MenuItem("Model") {
 						path := tinyfd.openFileDialog("Open Model", MODELS_PATH, 0, nil, nil, 0)
 						if str := string(path);
 						   str != "" && os.exists(str) && filepath.ext(string(str)) == ".model" {
@@ -180,7 +185,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						}
 					}
 
-					if imgui.MenuItem("Texture") {
+					if imgui.Gui_MenuItem("Texture") {
 						path := tinyfd.openFileDialog(
 							"Open Texture",
 							TEXTURES_PATH,
@@ -233,70 +238,70 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							}
 						}
 					}
-					imgui.EndMenu()
+					imgui.Gui_EndMenu()
 				}
-				imgui.EndMenu()
+				imgui.Gui_EndMenu()
 			}
-			imgui.EndMenuBar()
+			imgui.Gui_EndMenuBar()
 		}
 
-		if imgui.CollapsingHeader("Settings##header") {
-			if imgui.Button("New Scene") {
+		if imgui.Gui_CollapsingHeader("Settings##header", nil) {
+			if imgui.Gui_Button("New Scene") {
 				uiData.lockInput = true
-				imgui.OpenPopup("New Scene")
+				imgui.Gui_OpenPopup("New Scene", nil)
 			}
 
-			imgui.SameLine()
-			if imgui.BeginCombo("Scene", toCstring(scene.name)) {
+			imgui.Gui_SameLine()
+			if imgui.Gui_BeginCombo("Scene", toCstring(scene.name), nil) {
 				for &scene, sceneIdx in globals.scenes {
 					if globals.activeScene == u32(sceneIdx) {
 						continue
 					}
-					if imgui.Selectable(toCstring(scene.name)) {
+					if imgui.Gui_Selectable(toCstring(scene.name)) {
 						globals.activeScene = u32(sceneIdx)
 
 						graphicsData.reloadBuffers = true
 						graphicsData.rerecordCommands = true
 					}
 				}
-				imgui.EndCombo()
+				imgui.Gui_EndCombo()
 			}
 
-			if imgui.DragFloat("Contrast", &graphicsData.contrast, 0.01) {
+			if imgui.Gui_DragFloatEx("Contrast", &graphicsData.contrast, 0.01, 0, 0, "%.3f", nil) {
 				graphicsData.reloadBuffers = true
 			}
-			if imgui.DragFloat("Brightness", &graphicsData.brightness, 0.01) {
+			if imgui.Gui_DragFloatEx("Brightness", &graphicsData.brightness, 0.01, 0, 0, "%.3f", nil) {
 				graphicsData.reloadBuffers = true
 			}
-			if imgui.DragFloat("Saturation", &graphicsData.saturation, 0.01) {
+			if imgui.Gui_DragFloatEx("Saturation", &graphicsData.saturation, 0.01, 0, 0, "%.3f", nil) {
 				graphicsData.reloadBuffers = true
 			}
-			if imgui.DragFloat("Exposure", &graphicsData.exposure, 0.01) {
+			if imgui.Gui_DragFloatEx("Exposure", &graphicsData.exposure, 0.01, 0, 0, "%.3f", nil) {
 				graphicsData.reloadBuffers = true
 			}
-			if imgui.Combo(
+			if imgui.Gui_Combo(
 				"Tonemapper",
 				transmute(^i32)(&graphicsData.tonemapper),
-				"None\000Narkowicz ACES\000",
+				"None\000Narkowicz ACES\000"
 			) {
 				graphicsData.reloadBuffers = true
 			}
-			if imgui.DragFloat("Gamma", &graphicsData.gamma, 0.01) {
+			if imgui.Gui_DragFloatEx("Gamma", &graphicsData.gamma, 0.01, 0, 0, "%.3f", nil) {
 				graphicsData.reloadBuffers = true
 			}
 		}
 
-		if imgui.CollapsingHeader("Scene##header") {
-			if imgui.DragFloat("Ambient light##scene", &scene.ambientLight, 0.01, 0, 1) {
+		if imgui.Gui_CollapsingHeader("Scene##header", nil) {
+			if imgui.Gui_DragFloatEx("Ambient light##scene", &scene.ambientLight, 0.01, 0, 1, "%.3f", nil) {
 				graphicsData.reloadBuffers = true
 			}
-			if imgui.DragFloat4("Clear colour##scene", &scene.clearColour, 0.01, 0, 1) {
+			if imgui.Gui_DragFloat4Ex("Clear colour##scene", &scene.clearColour, 0.01, 0, 1, "%.3f", nil) {
 				graphicsData.reloadBuffers = true
 			}
 		}
 
-		if imgui.CollapsingHeader("Objects##header") {
-			if imgui.Button("New Object##objects") {
+		if imgui.Gui_CollapsingHeader("Objects##header", nil) {
+			if imgui.Gui_Button("New Object##objects") {
 				addObject(scene, 0)
 
 				globals.graphicsData.reloadBuffers = true
@@ -305,15 +310,15 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 			for &object, objectIdx in scene.objects {
 				suffix := fmt.tprintf("##object%v", objectIdx)
-				if imgui.TreeNode(toCstring(object.name)) {
-					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &object.position, 0.1)
+				if imgui.Gui_TreeNode(toCstring(object.name)) {
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Position%v", suffix), &object.position, 0.1, 0, 0, "%.3f", nil)
 
 					x, y, z := quatToEuler(object.rotation)
 					x = degrees(x)
 					y = degrees(y)
 					z = degrees(z)
 					rotation := Vec3{x, y, z}
-					if imgui.DragFloat3(fmt.ctprintf("Rotation%v", suffix), &rotation, 0.1) {
+					if imgui.Gui_DragFloat3Ex(fmt.ctprintf("Rotation%v", suffix), &rotation, 0.1, 0, 0, "%.3f", nil) {
 						delta := rotation - Vec3{x, y, z}
 						object.rotation *= quatFromEuler(
 							radians(delta.x),
@@ -322,12 +327,12 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							.XYZ,
 						)
 					}
-					imgui.DragFloat3(fmt.ctprintf("Scale%v", suffix), &object.scale, 0.1)
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Scale%v", suffix), &object.scale, 0.1, 0, 0, "%.3f", nil)
 
-					if imgui.TreeNode("Flags:") {
+					if imgui.Gui_TreeNode("Flags:") {
 						for flag in ObjectFlag {
 							present := flag in object.flags
-							if imgui.Checkbox(fmt.ctprintf("%v", flag), &present) {
+							if imgui.Gui_Checkbox(fmt.ctprintf("%v", flag), &present) {
 								if present {
 									object.flags += {flag}
 								} else {
@@ -335,10 +340,10 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								}
 							}
 						}
-						imgui.TreePop()
+						imgui.Gui_TreePop()
 					}
 
-					imgui.SeparatorText("Animation")
+					imgui.Gui_SeparatorText("Animation")
 					animationData := &object.animation
 					if len(scene.models[object.modelIdx].animations) > 0 {
 						animationName: string
@@ -349,12 +354,13 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							animationName = "None"
 						}
 
-						if imgui.BeginCombo(
+						if imgui.Gui_BeginCombo(
 							fmt.ctprintf("Animation Clip%v", suffix),
 							toCstring(animationName),
+							nil,
 						) {
 							if animationData.idx >= 0 {
-								if imgui.Selectable("None") {
+								if imgui.Gui_Selectable("None") {
 									animationData.idx = -1
 									animationData.timer = 0
 								}
@@ -365,7 +371,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 									continue
 								}
 
-								if imgui.Selectable(toCstring(animation.name)) {
+								if imgui.Gui_Selectable(toCstring(animation.name)) {
 									animationData.idx = i32(animationIdx)
 									animationData.timer = 0
 									for &node in animationData.cache {
@@ -375,36 +381,38 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 									}
 								}
 							}
-							imgui.EndCombo()
+							imgui.Gui_EndCombo()
 						}
 					}
 
-					imgui.Checkbox(fmt.ctprintf("Playing%v", suffix), &animationData.playing)
+					imgui.Gui_Checkbox(fmt.ctprintf("Playing%v", suffix), &animationData.playing)
 
 					timer := f32(animationData.timer)
-					if imgui.DragFloat(fmt.ctprintf("Animation time%v", suffix), &timer, 0.01) {
+					if imgui.Gui_DragFloatEx(fmt.ctprintf("Animation time%v", suffix), &timer, 0.01, 0, 0, "%.3f", nil) {
 						animationData.timer = f64(timer)
 					}
 
-					if imgui.BeginCombo(
+					if imgui.Gui_BeginCombo(
 						fmt.ctprintf("Animation Behavior%v", suffix),
 						fmt.ctprintf("%v", animationData.end.behavior),
+						nil,
 					) {
 						for behavior in AnimationBehavior {
 							if behavior == animationData.end.behavior {
 								continue
 							}
 
-							if imgui.Selectable(fmt.ctprintf("%v", behavior)) {
+							if imgui.Gui_Selectable(fmt.ctprintf("%v", behavior)) {
 								animationData.end.behavior = behavior
 							}
 						}
-						imgui.EndCombo()
+						imgui.Gui_EndCombo()
 					}
 
-					if imgui.BeginCombo(
+					if imgui.Gui_BeginCombo(
 						fmt.ctprintf("Model%v", suffix),
 						toCstring(scene.models[object.modelIdx].name),
+						nil,
 					) {
 						for modelIdx in 0 ..< len(scene.models) {
 							if u32(modelIdx) == object.modelIdx {
@@ -412,9 +420,9 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							}
 
 							model := &scene.models[modelIdx]
-							if imgui.Selectable(toCstring(model.name)) {
+							if imgui.Gui_Selectable(toCstring(model.name)) {
 								changeModel(scene, u32(objectIdx), u32(modelIdx))
-								textureIdxs := make([][len(TextureIndex)]u32, len(model.meshes))
+								textureIdxs := make([][TextureIndex]u32, len(model.meshes))
 								for i in 0 ..< min(len(model.meshes), len(object.textureIdxs)) {
 									textureIdxs[i] = object.textureIdxs[i]
 								}
@@ -433,123 +441,126 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								graphicsData.rerecordCommands = true
 							}
 						}
-						imgui.EndCombo()
+						imgui.Gui_EndCombo()
 					}
 
 					for mesh, meshIdx in scene.models[object.modelIdx].meshes {
 						meshSuffix := fmt.ctprintf("%v##mesh%v", suffix, meshIdx)
-						if imgui.TreeNode(toCstring(mesh.name)) {
-							if imgui.BeginCombo(
+						if imgui.Gui_TreeNode(toCstring(mesh.name)) {
+							if imgui.Gui_BeginCombo(
 								fmt.ctprintf("Albedo%v", meshSuffix),
 								toCstring(
-									scene.textures[object.textureIdxs[meshIdx][TextureIndex.Albedo]].name,
+									scene.textures[object.textureIdxs[meshIdx][.Albedo]].name,
 								),
+								nil,
 							) {
 								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][TextureIndex.Albedo] ==
+									if object.textureIdxs[meshIdx][.Albedo] ==
 									   u32(textureIdx) {
 										continue
 									}
 
-									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][TextureIndex.Albedo] = u32(
+									if imgui.Gui_Selectable(toCstring(texture.name)) {
+										object.textureIdxs[meshIdx][.Albedo] = u32(
 											textureIdx,
 										)
 										graphicsData.reloadBuffers = true
 									}
 								}
-								imgui.EndCombo()
+								imgui.Gui_EndCombo()
 							}
 
-							if imgui.BeginCombo(
+							if imgui.Gui_BeginCombo(
 								fmt.ctprintf("Normal Map%v", meshSuffix),
 								toCstring(
-									scene.textures[object.textureIdxs[meshIdx][TextureIndex.NormalMap]].name,
+									scene.textures[object.textureIdxs[meshIdx][.NormalMap]].name,
 								),
+								nil,
 							) {
 								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][TextureIndex.NormalMap] ==
+									if object.textureIdxs[meshIdx][.NormalMap] ==
 									   u32(textureIdx) {
 										continue
 									}
-									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][TextureIndex.NormalMap] = u32(
+									if imgui.Gui_Selectable(toCstring(texture.name)) {
+										object.textureIdxs[meshIdx][.NormalMap] = u32(
 											textureIdx,
 										)
 										graphicsData.reloadBuffers = true
 									}
 								}
-								imgui.EndCombo()
+								imgui.Gui_EndCombo()
 							}
-							imgui.TreePop()
+							imgui.Gui_TreePop()
 						}
 					}
-					imgui.TreePop()
+					imgui.Gui_TreePop()
 				}
 			}
 		}
 
-		if imgui.CollapsingHeader("Cameras##header") {
+		if imgui.Gui_CollapsingHeader("Cameras##header", nil) {
 			for &camera, cameraIdx in scene.cameras {
 				suffix := fmt.tprintf("##camera%v", cameraIdx)
-				if imgui.TreeNode(toCstring(camera.name)) {
-					if imgui.BeginCombo(
+				if imgui.Gui_TreeNode(toCstring(camera.name)) {
+					if imgui.Gui_BeginCombo(
 						fmt.ctprintf("Mode%s", suffix),
 						toCstring(fmt.tprintf("%v", camera.mode)),
+						nil,
 					) {
 						for mode in CameraMode {
 							if mode == camera.mode {
 								continue
 							}
 
-							if imgui.Selectable(toCstring(fmt.tprintf("%v", mode))) {
+							if imgui.Gui_Selectable(toCstring(fmt.tprintf("%v", mode))) {
 								camera.mode = mode
 							}
 						}
-						imgui.EndCombo()
+						imgui.Gui_EndCombo()
 					}
 
-					imgui.DragFloat3(fmt.ctprintf("Eye%s", suffix), &camera.eye, 0.1)
-					imgui.DragFloat3(fmt.ctprintf("Center%s", suffix), &camera.center, 0.1)
-					imgui.DragFloat3(fmt.ctprintf("Up%s", suffix), &camera.up, 0.1)
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Eye%s", suffix), &camera.eye, 0.1, 0, 0, "%.3f", nil)
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Center%s", suffix), &camera.center, 0.1, 0, 0, "%.3f", nil)
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Up%s", suffix), &camera.up, 0.1, 0, 0, "%.3f", nil)
 
-					imgui.DragFloat(fmt.ctprintf("FOV%s", suffix), &camera.fov, 0.1)
-					imgui.DragFloat(fmt.ctprintf("Near Plane%s", suffix), &camera.near, 0.1)
-					imgui.DragFloat(fmt.ctprintf("Far Plane%s", suffix), &camera.far, 0.1)
+					imgui.Gui_DragFloatEx(fmt.ctprintf("FOV%s", suffix), &camera.fov, 0.1, 0, 0, "%.3f", nil)
+					imgui.Gui_DragFloatEx(fmt.ctprintf("Near Plane%s", suffix), &camera.near, 0.1, 0, 0, "%.3f", nil)
+					imgui.Gui_DragFloatEx(fmt.ctprintf("Far Plane%s", suffix), &camera.far, 0.1, 0, 0, "%.3f", nil)
 
-					imgui.TreePop()
+					imgui.Gui_TreePop()
 				}
 			}
 		}
 
-		if imgui.CollapsingHeader("Lights##header") {
+		if imgui.Gui_CollapsingHeader("Lights##header", nil) {
 			for &light, lightIdx in scene.lights {
 				suffix := fmt.tprintf("##light%v", lightIdx)
-				if imgui.TreeNode(toCstring(light.name)) {
-					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &light.position, 0.1)
-					imgui.DragFloat3(fmt.ctprintf("Colour%v", suffix), &light.colour, 0.01, 0, 1)
-					imgui.DragFloat(fmt.ctprintf("Brightness%v", suffix), &light.brightness, 0.1)
-					imgui.DragFloat(fmt.ctprintf("Dropoff%v", suffix), &light.dropoff, 0.1)
+				if imgui.Gui_TreeNode(toCstring(light.name)) {
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Position%v", suffix), &light.position, 0.1, 0, 0, "%.3f", nil)
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Colour%v", suffix), &light.colour, 0.01, 0, 1, "%.3f", nil)
+					imgui.Gui_DragFloatEx(fmt.ctprintf("Brightness%v", suffix), &light.brightness, 0.1, 0, 0, "%.3f", nil)
+					imgui.Gui_DragFloatEx(fmt.ctprintf("Dropoff%v", suffix), &light.dropoff, 0.1, 0, 0, "%.3f", nil)
 
-					imgui.TreePop()
+					imgui.Gui_TreePop()
 				}
 			}
 		}
 
-		if imgui.CollapsingHeader("Models##header") {
-			if imgui.Button("Add New Model") {
+		if imgui.Gui_CollapsingHeader("Models##header", nil) {
+			if imgui.Gui_Button("Add New Model") {
 				uiData.lockInput = true
-				imgui.OpenPopup("New Model")
+				imgui.Gui_OpenPopup("New Model", nil)
 			}
 
 			for &model, modelIdx in scene.models {
 				suffix := fmt.tprintf("##model%v", modelIdx)
-				if imgui.TreeNode(toCstring(model.name)) {
-					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &model.position, 0.1)
+				if imgui.Gui_TreeNode(toCstring(model.name)) {
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Position%v", suffix), &model.position, 0.1, 0, 0, "%.3f", nil)
 
 					x, y, z := quatToEuler(model.rotation)
 					rotation := Vec3{degrees(x), degrees(y), degrees(z)}
-					if imgui.DragFloat3(fmt.ctprintf("Rotation%v", suffix), &rotation, 0.1) {
+					if imgui.Gui_DragFloat3Ex(fmt.ctprintf("Rotation%v", suffix), &rotation, 0.1, 0, 0, "%.3f", nil) {
 						model.rotation = quatFromEuler(
 							radians(rotation.x),
 							radians(rotation.y),
@@ -558,49 +569,51 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						)
 					}
 
-					imgui.DragFloat3(fmt.ctprintf("Scale%v", suffix), &model.scale, 0.1)
-					imgui.TreePop()
+					imgui.Gui_DragFloat3Ex(fmt.ctprintf("Scale%v", suffix), &model.scale, 0.1, 0, 0, "%.3f", nil)
+					imgui.Gui_TreePop()
 				}
 			}
 		}
 
-		if imgui.CollapsingHeader("Textures##header") {
-			if imgui.Button("Add New Texture") {
+		if imgui.Gui_CollapsingHeader("Textures##header", nil) {
+			if imgui.Gui_Button("Add New Texture") {
 				uiData.lockInput = true
-				imgui.OpenPopup("New Texture")
+				imgui.Gui_OpenPopup("New Texture", nil)
 			}
 
 			for &texture, textureIdx in scene.textures {
 				suffix := fmt.tprintf("##texture%v", textureIdx)
-				if imgui.TreeNode(toCstring(texture.name)) {
-					imgui.Text("Asset Path: ")
-					imgui.SameLine()
-					imgui.Text(toCstring(texture.assetPath))
-					imgui.TreePop()
+				if imgui.Gui_TreeNode(toCstring(texture.name)) {
+					imgui.Gui_Text("Asset Path: ")
+					imgui.Gui_SameLine()
+					imgui.Gui_Text(toCstring(texture.assetPath))
+					imgui.Gui_TreePop()
 				}
 			}
 		}
 	}
 
-	if imgui.BeginPopupModal("New Scene") {
+	if imgui.Gui_BeginPopupModal("New Scene", nil, nil) {
 		createComponentInfo := &uiData.createComponentInfo
-		imgui.Text("Name:")
-		imgui.SameLine()
-		imgui.InputText(
+		imgui.Gui_Text("Name:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText(
 			"##scenename",
 			cstring(&createComponentInfo.name[0]),
 			len(createComponentInfo.name),
+			nil
 		)
 
-		imgui.Text("Save Path:")
-		imgui.SameLine()
-		imgui.InputText(
+		imgui.Gui_Text("Save Path:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText(
 			"##savepath",
 			cstring(&createComponentInfo.savePath[0]),
 			len(createComponentInfo.savePath),
+			nil,
 		)
-		imgui.SameLine()
-		if imgui.Button("Browse##save") {
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Browse##save") {
 			absPath, _ := filepath.abs(SCENE_PATH, context.temp_allocator)
 			str := tinyfd.saveFileDialog("Save As", fmt.ctprintf("%s/", absPath), 0, nil, nil)
 			if str != "" {
@@ -623,7 +636,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			}
 		}
 
-		if imgui.Button("Create") {
+		if imgui.Gui_Button("Create") {
 			scene := &globals.scenes[globals.activeScene]
 
 			if createComponentInfo.name[0] != 0 && createComponentInfo.savePath[0] != 0 {
@@ -705,7 +718,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						scale = Vec3{1, 1, 1},
 						modelIdx = 0,
 						instanceIdx = 0,
-						textureIdxs = make([][len(TextureIndex)]u32, 1),
+						textureIdxs = make([][TextureIndex]u32, 1),
 						animation = ObjectAnimation{idx = -1},
 						attachment = Attachment{targetIdx = -1},
 					},
@@ -714,30 +727,30 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 				clearComponentData(createComponentInfo)
 				uiData.lockInput = false
-				imgui.CloseCurrentPopup()
+				imgui.Gui_CloseCurrentPopup()
 			}
 		}
 
-		imgui.SameLine()
-		if imgui.Button("Cancel") {
-			imgui.CloseCurrentPopup()
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Cancel") {
+			imgui.Gui_CloseCurrentPopup()
 			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
-		imgui.End()
+		imgui.Gui_End()
 	}
 
-	if imgui.BeginPopupModal("New Model") {
+	if imgui.Gui_BeginPopupModal("New Model", nil, nil) {
 		createComponentInfo := &uiData.createComponentInfo
-		imgui.Text("Name:")
-		imgui.SameLine()
-		imgui.InputText("##texturename", cstring(&createComponentInfo.name[0]), 100)
+		imgui.Gui_Text("Name:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText("##texturename", cstring(&createComponentInfo.name[0]), 100, nil)
 
-		imgui.Text("Image Path:")
-		imgui.SameLine()
-		imgui.InputText("##texturepath", cstring(&createComponentInfo.assetPath[0]), 100)
-		imgui.SameLine()
-		if imgui.Button("Browse##texture") {
+		imgui.Gui_Text("Image Path:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText("##texturepath", cstring(&createComponentInfo.assetPath[0]), 100, nil)
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Browse##texture") {
 			absPath, _ := filepath.abs(ASSETS_PATH, context.temp_allocator)
 			str := tinyfd.openFileDialog(
 				"Load Image",
@@ -767,11 +780,11 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			}
 		}
 
-		imgui.Text("Save Path:")
-		imgui.SameLine()
-		imgui.InputText("##savepath", cstring(&createComponentInfo.savePath[0]), 100)
-		imgui.SameLine()
-		if imgui.Button("Browse##save") {
+		imgui.Gui_Text("Save Path:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText("##savepath", cstring(&createComponentInfo.savePath[0]), 100, nil)
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Browse##save") {
 			absPath, _ := filepath.abs(MODELS_PATH, context.temp_allocator)
 			str := tinyfd.saveFileDialog("Save As", fmt.ctprintf("%s/", absPath), 0, nil, nil)
 			if str != "" {
@@ -794,7 +807,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			}
 		}
 
-		if imgui.Button("Create") {
+		if imgui.Gui_Button("Create") {
 			scene := &globals.scenes[globals.activeScene]
 
 			name, path, assetPath: string
@@ -840,30 +853,30 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				saveModelComponent(model)
 				clearComponentData(createComponentInfo)
 				uiData.lockInput = false
-				imgui.CloseCurrentPopup()
+				imgui.Gui_CloseCurrentPopup()
 			}
 		}
 
-		imgui.SameLine()
-		if imgui.Button("Cancel") {
-			imgui.CloseCurrentPopup()
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Cancel") {
+			imgui.Gui_CloseCurrentPopup()
 			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
-		imgui.End()
+		imgui.Gui_End()
 	}
 
-	if imgui.BeginPopupModal("New Texture") {
+	if imgui.Gui_BeginPopupModal("New Texture", nil, nil) {
 		createComponentInfo := &uiData.createComponentInfo
-		imgui.Text("Name:")
-		imgui.SameLine()
-		imgui.InputText("##texturename", cstring(&createComponentInfo.name[0]), 100)
+		imgui.Gui_Text("Name:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText("##texturename", cstring(&createComponentInfo.name[0]), 100, nil)
 
-		imgui.Text("Image Path:")
-		imgui.SameLine()
-		imgui.InputText("##texturepath", cstring(&createComponentInfo.assetPath[0]), 100)
-		imgui.SameLine()
-		if imgui.Button("Browse##texture") {
+		imgui.Gui_Text("Image Path:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText("##texturepath", cstring(&createComponentInfo.assetPath[0]), 100, nil)
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Browse##texture") {
 			absPath, _ := filepath.abs(ASSETS_PATH, context.temp_allocator)
 			str := tinyfd.openFileDialog(
 				"Load Image",
@@ -893,11 +906,11 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			}
 		}
 
-		imgui.Text("Save Path:")
-		imgui.SameLine()
-		imgui.InputText("##savepath", cstring(&createComponentInfo.savePath[0]), 100)
-		imgui.SameLine()
-		if imgui.Button("Browse##save") {
+		imgui.Gui_Text("Save Path:")
+		imgui.Gui_SameLine()
+		imgui.Gui_InputText("##savepath", cstring(&createComponentInfo.savePath[0]), 100, nil)
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Browse##save") {
 			absPath, _ := filepath.abs(MODELS_PATH, context.temp_allocator)
 			str := tinyfd.saveFileDialog("Save As", fmt.ctprintf("%s/", absPath), 0, nil, nil)
 			if str != "" {
@@ -920,7 +933,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			}
 		}
 
-		if imgui.Button("Create") {
+		if imgui.Gui_Button("Create") {
 			scene := &globals.scenes[globals.activeScene]
 
 			name, path, assetPath: string
@@ -963,19 +976,34 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				saveTextureComponent(texture)
 				clearComponentData(createComponentInfo)
 				uiData.lockInput = false
-				imgui.CloseCurrentPopup()
+				imgui.Gui_CloseCurrentPopup()
 			}
 		}
 
-		imgui.SameLine()
-		if imgui.Button("Cancel") {
-			imgui.CloseCurrentPopup()
+		imgui.Gui_SameLine()
+		if imgui.Gui_Button("Cancel") {
+			imgui.Gui_CloseCurrentPopup()
 			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
-		imgui.End()
+		imgui.Gui_End()
 	}
 
-	imgui.End()
+	imgui.Gui_End()
+}
+
+ImguiAllocatorData :: mem.Allocator
+
+// Using a tracking allocator we wont know eactly which line allocated the leaked memory
+// but we will know that something was allocated that wasn't freed.
+imguiAlloc :: proc "c" (sz: c.size_t, user_data: rawptr) -> rawptr {
+	context = (^runtime.Context)(user_data)^
+	ptr, _ := mem.alloc(int(sz))
+	return ptr
+}
+
+imguiFree :: proc "c" (ptr: rawptr, user_data: rawptr) {
+	context = (^runtime.Context)(user_data)^
+	mem.free(ptr)
 }
 

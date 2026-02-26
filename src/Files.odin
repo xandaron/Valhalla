@@ -261,7 +261,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			scale = objectData.scale,
 			modelIdx = objectData.modelIdx,
 			instanceIdx = addInstance(scene, &scene.models[objectData.modelIdx], u32(objectIdx)),
-			textureIdxs = make([][len(TextureIndex)]u32, objectData.texturesCount),
+			textureIdxs = make([][TextureIndex]u32, objectData.texturesCount),
 			animation = ObjectAnimation {
 				idx = objectData.animation.idx,
 				timer = objectData.animation.timer,
@@ -279,7 +279,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 		os.read_ptr(
 			file,
 			raw_data(object.textureIdxs),
-			int(objectData.texturesCount) * size_of([len(TextureIndex)]u32),
+			int(objectData.texturesCount) * size_of([TextureIndex]u32),
 		)
 	}
 
@@ -427,7 +427,7 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 	ai.SetImportPropertyInteger(
 		propertyStore,
 		ai.CONFIG_PP_SBP_REMOVE,
-		i32(ai.Primitive_Type_Flags{.POINT, .LINE}),
+		transmute(i32)(ai.Primitive_Type_Flags{.POINT, .LINE}),
 	)
 
 	// Remove scene components that I don't need
