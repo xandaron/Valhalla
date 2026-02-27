@@ -127,6 +127,8 @@ main :: proc() {
 	updateSceneBuffers(&globals.graphicsData, &globals.scenes[0])
 	free_all(context.temp_allocator)
 
+	globals.uiData.showUI = true
+
 	fpsTimer = time.now()
 	lastFrameTime = time.now()
 	gameLoop: for updateWindow(&globals.graphicsData) {

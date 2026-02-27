@@ -156,13 +156,14 @@ Scene_PushConstants :: struct {
 
 @(private = "file")
 PostProcess_PushConstants :: struct {
-	contrast:   f32,
-	brightness: f32,
-	saturation: f32,
-	exposure:   f32,
-	tonemapper: ToneMapper,
-	gamma:      f32,
-	drawLights: b32,
+	contrast:    f32,
+	brightness:  f32,
+	saturation:  f32,
+	exposure:    f32,
+	tonemapper:  ToneMapper,
+	gamma:       f32,
+	drawLights:  b32,
+	maxExposure: f32,
 }
 
 ToneMapper :: enum u32 {
@@ -302,6 +303,7 @@ GraphicsData :: struct {
 	exposure:            f32,
 	tonemapper:          ToneMapper,
 	gamma:               f32,
+	maxExposure:         f32,
 
 	// GLFW + IMGUI
 	window:              WindowHandle,
@@ -511,9 +513,11 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	when HDR_ENABLED {
 		tonemapper = .None
 		gamma = 1.0
+		maxExposure = 10
 	} else {
 		tonemapper = .NarkowiczACES
 		gamma = 2.2
+		maxExposure = 1
 	}
 
 	return graphicsData, nil
@@ -1343,11 +1347,8 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(
-		device,
-		&allocInfo,
-		&commandBuffers[.Main][0],
-	); res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[.Main][0]);
+	   res != .SUCCESS {
 		log(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1359,11 +1360,8 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .SECONDARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(
-		device,
-		&allocInfo,
-		&commandBuffers[.Light][0],
-	); res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[.Light][0]);
+	   res != .SUCCESS {
 		log(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1375,11 +1373,8 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .SECONDARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(
-		device,
-		&allocInfo,
-		&commandBuffers[.Scene][0],
-	); res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[.Scene][0]);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1391,11 +1386,8 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .PRIMARY,
 		commandBufferCount = 2,
 	}
-	if res := vk.AllocateCommandBuffers(
-		device,
-		&allocInfo,
-		&commandBuffers[.Imgui][0],
-	); res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[.Imgui][0]);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1418,11 +1410,8 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(
-		device,
-		&allocInfo,
-		&commandBuffers[.Transform][0],
-	); res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[.Transform][0]);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -1434,11 +1423,8 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
-	if res := vk.AllocateCommandBuffers(
-		device,
-		&allocInfo,
-		&commandBuffers[.PostProcess][0],
-	); res != .SUCCESS {
+	if res := vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[.PostProcess][0]);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
 	}
@@ -2764,12 +2750,8 @@ createBuffersDescriptorSets :: proc(using graphicsData: ^GraphicsData) {
 		pPoolSizes    = &poolSizes[0],
 	}
 
-	if res := vk.CreateDescriptorPool(
-		device,
-		&poolInfo,
-		nil,
-		&descriptorSets[.Buffers].pool,
-	); res != .SUCCESS {
+	if res := vk.CreateDescriptorPool(device, &poolInfo, nil, &descriptorSets[.Buffers].pool);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to create descriptor pool! vkResult: %d", res)
 	}
 
@@ -2786,11 +2768,8 @@ createBuffersDescriptorSets :: proc(using graphicsData: ^GraphicsData) {
 		pSetLayouts        = &layouts[0],
 	}
 
-	if res := vk.AllocateDescriptorSets(
-		device,
-		&allocInfo,
-		&descriptorSets[.Buffers].sets[0],
-	); res != .SUCCESS {
+	if res := vk.AllocateDescriptorSets(device, &allocInfo, &descriptorSets[.Buffers].sets[0]);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate descriptor sets! vkResult %v", res)
 	}
 }
@@ -2866,12 +2845,8 @@ createTexturesDescriptorSets :: proc(using graphicsData: ^GraphicsData) {
 		pPoolSizes    = &poolSizes[0],
 	}
 
-	if res := vk.CreateDescriptorPool(
-		device,
-		&poolInfo,
-		nil,
-		&descriptorSets[.Textures].pool,
-	); res != .SUCCESS {
+	if res := vk.CreateDescriptorPool(device, &poolInfo, nil, &descriptorSets[.Textures].pool);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to create descriptor pool! vkResult: %d", res)
 	}
 
@@ -2888,11 +2863,8 @@ createTexturesDescriptorSets :: proc(using graphicsData: ^GraphicsData) {
 		pSetLayouts        = &layouts[0],
 	}
 
-	if res := vk.AllocateDescriptorSets(
-		device,
-		&allocInfo,
-		&descriptorSets[.Textures].sets[0],
-	); res != .SUCCESS {
+	if res := vk.AllocateDescriptorSets(device, &allocInfo, &descriptorSets[.Textures].sets[0]);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate descriptor sets! vkResult: %d", res)
 	}
 }
@@ -3534,12 +3506,8 @@ createLightPipeline :: proc(
 		pPushConstantRanges    = &pushConstants,
 	}
 
-	if res := vk.CreatePipelineLayout(
-		device,
-		&pipelineLayoutInfo,
-		nil,
-		&pipelines[.Light].layout,
-	); res != .SUCCESS {
+	if res := vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &pipelines[.Light].layout);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to create pipeline layout! vkResult: %d", res)
 	}
 
@@ -3881,12 +3849,8 @@ createScenePipeline :: proc(
 		pPushConstantRanges    = &pushConstant,
 	}
 
-	if res := vk.CreatePipelineLayout(
-		device,
-		&pipelineLayoutInfo,
-		nil,
-		&pipelines[.Scene].layout,
-	); res != .SUCCESS {
+	if res := vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &pipelines[.Scene].layout);
+	   res != .SUCCESS {
 		logf(.Fatal, "Failed to create pipeline layout! vkResult: %d", res)
 	}
 
@@ -4301,23 +4265,12 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 
 	imguiData := new(ImguiAllocatorData)
 	imguiData^ = context.allocator
-	imgui.Gui_SetAllocatorFunctions(
-		imguiAlloc,
-		imguiFree,
-		imguiData,
-	)
+	imgui.Gui_SetAllocatorFunctions(imguiAlloc, imguiFree, imguiData)
 
 	imguiContext = imgui.Gui_CreateContext(nil)
 	io := imgui.Gui_GetIO()
+	io.ConfigFlags += {.DockingEnable}
 	imgui.Gui_StyleColorsDark(nil)
-
-	// imguiVulkan.LoadFunctions(
-	// 	vk.API_VERSION_1_4,
-	// 	proc "c" (function_name: cstring, user_data: rawptr) -> vk.ProcVoidFunction {
-	// 		return vk.GetInstanceProcAddr(transmute(vk.Instance)user_data, function_name)
-	// 	},
-	// 	instance,
-	// )
 
 	if !imguiGLFW.InitForVulkan(window, true) {
 		log(.Fatal, "Failed to initialize imgui for vulkan.")
@@ -4383,11 +4336,7 @@ cleanupImgui :: proc(using graphicsData: ^GraphicsData) {
 	allocFn: imgui.GuiMemAllocFunc
 	freeFn: imgui.GuiMemFreeFunc
 	imguiData: ^ImguiAllocatorData
-	imgui.Gui_GetAllocatorFunctions(
-		&allocFn,
-		&freeFn,
-		(^rawptr)(&imguiData),
-	)
+	imgui.Gui_GetAllocatorFunctions(&allocFn, &freeFn, (^rawptr)(&imguiData))
 	free(imguiData)
 }
 
@@ -5248,13 +5197,14 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 	)
 
 	pushConstants: PostProcess_PushConstants = {
-		contrast   = contrast,
-		brightness = brightness,
-		saturation = saturation,
-		exposure   = pow(f32(2.0), exposure),
-		tonemapper = tonemapper,
-		gamma      = gamma,
-		drawLights = b32(drawLights),
+		contrast    = contrast,
+		brightness  = brightness,
+		saturation  = saturation,
+		exposure    = pow(f32(2.0), exposure),
+		tonemapper  = tonemapper,
+		gamma       = gamma,
+		drawLights  = b32(drawLights),
+		maxExposure = maxExposure,
 	}
 	vk.CmdPushConstants2(
 		cmdBuffer,
@@ -5555,7 +5505,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	imguiGLFW.NewFrame()
 	imgui.Gui_NewFrame()
 
-	drawImgui(graphicsData)
+	drawImgui()
 
 	imgui.Gui_EndFrame()
 

@@ -186,7 +186,7 @@ keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, ac
 		}
 	case glfw.KEY_H:
 		if action == glfw.PRESS {
-			globals.uiData.showDemo = !globals.uiData.showDemo
+			globals.uiData.showUI = !globals.uiData.showUI
 		}
 	case glfw.KEY_M:
 		if action == glfw.PRESS {

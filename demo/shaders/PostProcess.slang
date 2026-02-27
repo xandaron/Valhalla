@@ -14,6 +14,7 @@ struct PushConstants {
 	ToneMapper tonemapper;
 	float gamma;
 	bool drawLights;
+	float maxExposure;
 };
 
 [[vk::push_constant]]
@@ -80,5 +81,7 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 	}
 
 	colour = pow(colour, float3(1.0 / pushConstants.gamma));
+	colour = min(colour, float3(pushConstants.maxExposure));
+
 	processedImage[int2(x, y)] = float4(colour, 1.0);
 }
