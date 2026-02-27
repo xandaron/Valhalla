@@ -100,6 +100,7 @@ drawImgui :: proc() {
 		imgui.Gui_DockBuilderSplitNode(dockspaceID, .Left, .2, &leftDock, &main)
 		imgui.Gui_DockBuilderSplitNode(dockspaceID, .Right, .25, &rightDock, &main)
 
+		imgui.Gui_DockBuilderDockWindow("Settings", leftDock)
 		imgui.Gui_DockBuilderDockWindow("Scene Inspector", leftDock)
 		imgui.Gui_DockBuilderDockWindow("Object Inspector", rightDock)
 		imgui.Gui_DockBuilderFinish(dockspaceID)
@@ -121,15 +122,97 @@ drawImgui :: proc() {
 	}
 
 	imgui.Gui_SetNextWindowBgAlpha(1.0)
+	settingPanel()
 	sceneInspector()
 
 	if uiData.objectInspector != nil {
-		objectInspector(uiData.objectInspector)
+		objectInspector()
 	}
 
 	newScenePopup()
 	newModelPopup()
 	newTexturePopup()
+}
+
+settingPanel :: proc() {
+	uiData := &globals.uiData
+	scene := &globals.scenes[globals.activeScene]
+
+	defer imgui.Gui_End()
+	if !imgui.Gui_Begin("Settings", nil, {}) {
+		return
+	}
+
+	if imgui.Gui_Button("New Scene") {
+		uiData.lockInput = true
+		imgui.Gui_OpenPopup("New Scene", nil)
+	}
+
+	imgui.Gui_SameLine()
+	if imgui.Gui_BeginCombo("Scene", toCstring(scene.name), nil) {
+		for &scene, sceneIdx in globals.scenes {
+			if globals.activeScene == u32(sceneIdx) {
+				continue
+			}
+			if imgui.Gui_Selectable(toCstring(scene.name)) {
+				globals.activeScene = u32(sceneIdx)
+
+				globals.graphicsData.reloadBuffers = true
+				globals.graphicsData.rerecordCommands = true
+			}
+		}
+		imgui.Gui_EndCombo()
+	}
+
+	if imgui.Gui_DragFloatEx("Contrast", &globals.graphicsData.contrast, 0.01, 0, 0, "%.3f", nil) {
+		globals.graphicsData.reloadBuffers = true
+	}
+	if imgui.Gui_DragFloatEx(
+		"Brightness",
+		&globals.graphicsData.brightness,
+		0.01,
+		0,
+		0,
+		"%.3f",
+		nil,
+	) {
+		globals.graphicsData.reloadBuffers = true
+	}
+	if imgui.Gui_DragFloatEx(
+		"Saturation",
+		&globals.graphicsData.saturation,
+		0.01,
+		0,
+		0,
+		"%.3f",
+		nil,
+	) {
+		globals.graphicsData.reloadBuffers = true
+	}
+	if imgui.Gui_DragFloatEx("Exposure", &globals.graphicsData.exposure, 0.01, 0, 0, "%.3f", nil) {
+		globals.graphicsData.reloadBuffers = true
+	}
+	if imgui.Gui_DragFloatEx(
+		"Exposure Cap",
+		&globals.graphicsData.maxExposure,
+		0.01,
+		0,
+		0,
+		"%.3f",
+		nil,
+	) {
+		globals.graphicsData.reloadBuffers = true
+	}
+	if imgui.Gui_Combo(
+		"Tonemapper",
+		transmute(^i32)(&globals.graphicsData.tonemapper),
+		"None\000Narkowicz ACES\000",
+	) {
+		globals.graphicsData.reloadBuffers = true
+	}
+	if imgui.Gui_DragFloatEx("Gamma", &globals.graphicsData.gamma, 0.01, 0, 0, "%.3f", nil) {
+		globals.graphicsData.reloadBuffers = true
+	}
 }
 
 sceneInspector :: proc() {
@@ -276,95 +359,6 @@ sceneInspector :: proc() {
 			imgui.Gui_EndMenu()
 		}
 		imgui.Gui_EndMenuBar()
-	}
-
-	if imgui.Gui_CollapsingHeader("Settings##header", nil) {
-		if imgui.Gui_Button("New Scene") {
-			uiData.lockInput = true
-			imgui.Gui_OpenPopup("New Scene", nil)
-		}
-
-		imgui.Gui_SameLine()
-		if imgui.Gui_BeginCombo("Scene", toCstring(scene.name), nil) {
-			for &scene, sceneIdx in globals.scenes {
-				if globals.activeScene == u32(sceneIdx) {
-					continue
-				}
-				if imgui.Gui_Selectable(toCstring(scene.name)) {
-					globals.activeScene = u32(sceneIdx)
-
-					globals.graphicsData.reloadBuffers = true
-					globals.graphicsData.rerecordCommands = true
-				}
-			}
-			imgui.Gui_EndCombo()
-		}
-
-		if imgui.Gui_DragFloatEx(
-			"Contrast",
-			&globals.graphicsData.contrast,
-			0.01,
-			0,
-			0,
-			"%.3f",
-			nil,
-		) {
-			globals.graphicsData.reloadBuffers = true
-		}
-		if imgui.Gui_DragFloatEx(
-			"Brightness",
-			&globals.graphicsData.brightness,
-			0.01,
-			0,
-			0,
-			"%.3f",
-			nil,
-		) {
-			globals.graphicsData.reloadBuffers = true
-		}
-		if imgui.Gui_DragFloatEx(
-			"Saturation",
-			&globals.graphicsData.saturation,
-			0.01,
-			0,
-			0,
-			"%.3f",
-			nil,
-		) {
-			globals.graphicsData.reloadBuffers = true
-		}
-		if imgui.Gui_DragFloatEx(
-			"Exposure",
-			&globals.graphicsData.exposure,
-			0.01,
-			0,
-			0,
-			"%.3f",
-			nil,
-		) {
-			globals.graphicsData.reloadBuffers = true
-		}
-		if imgui.Gui_DragFloatEx(
-			"Exposure Cap",
-			&globals.graphicsData.maxExposure,
-			0.01,
-			0,
-			0,
-			"%.3f",
-			nil,
-		) {
-			globals.graphicsData.reloadBuffers = true
-		}
-		if imgui.Gui_Combo(
-			"Tonemapper",
-			transmute(^i32)(&globals.graphicsData.tonemapper),
-			"None\000Narkowicz ACES\000",
-		) {
-			globals.graphicsData.reloadBuffers = true
-		}
-		if imgui.Gui_DragFloatEx("Gamma", &globals.graphicsData.gamma, 0.01, 0, 0, "%.3f", nil) {
-			globals.graphicsData.reloadBuffers = true
-		}
 	}
 
 	if imgui.Gui_CollapsingHeader("Scene##header", nil) {
@@ -605,12 +599,18 @@ sceneInspector :: proc() {
 	}
 }
 
-objectInspector :: proc(object: ^Object) {
+objectInspector :: proc() {
 	uiData := &globals.uiData
+	open := true
 	defer imgui.Gui_End()
-	if !imgui.Gui_Begin("Object Inspector", nil, {}) {
+	if !imgui.Gui_Begin("Object Inspector", &open, {}) {
 		return
 	}
+	if !open {
+		uiData.objectInspector = nil
+		return
+	}
+	object := uiData.objectInspector
 
 	scene := &globals.scenes[globals.activeScene]
 	imgui.Gui_DragFloat3Ex("Position##objectinspector", &object.position, 0.1, 0, 0, "%.3f", nil)
