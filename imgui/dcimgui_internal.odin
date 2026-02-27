@@ -213,25 +213,27 @@ GuiTextIndex :: struct {
 	EndOffset: i32, /* = 0 */
 }
 
+GuiItemFlagPrivate :: enum i32 {
+	// Controlled by user
+	ReadOnly               = 11, // false     // [ALPHA] Allow hovering interactions but underlying value is not changed.
+	MixedValue             = 12, // false     // [BETA] Represent a mixed/indeterminate value, generally multi-selection where values differ. Currently only supported by Checkbox() (later should support all sorts of widgets)
+	NoWindowHoverableCheck = 13, // false     // Disable hoverable check in ItemHoverable()
+	AllowOverlap           = 14, // false     // Allow being overlapped by another widget. Not-hovered to Hovered transition deferred by a frame.
+	NoNavDisableMouseHover = 15, // false     // Nav keyboard/gamepad mode doesn't disable hover highlight (behave as if NavHighlightItemUnderNav==false).
+	NoMarkEdited           = 16, // false     // Skip calling MarkItemEdited()
+	NoFocus                = 17, // false     // [EXPERIMENTAL: Not very well specced] Clicking doesn't take focus. Automatically sets ImGuiButtonFlags_NoFocus + ImGuiButtonFlags_NoNavFocus in ButtonBehavior().
+
+	// Controlled by widget code
+	Inputable              = 20, // false     // [WIP] Auto-activate input mode when tab focused. Currently only used and supported by a few items before it becomes a generic feature.
+	HasSelectionUserData   = 21, // false     // Set by SetNextItemSelectionUserData()
+	IsMultiSelect          = 22, // false     // Set by SetNextItemSelectionUserData()
+	Default_               = 4,  // Please don't change, use PushItemFlag() instead.
+}
+
 // Extend ImGuiItemFlags
 // - input: PushItemFlag() manipulates g.CurrentItemFlags, g.NextItemData.ItemFlags, ItemAdd() calls may add extra flags too.
 // - output: stored in g.LastItemData.ItemFlags
-GuiItemFlagsPrivate :: enum i32 {
-	// Controlled by user
-	ReadOnly               = 2048,    // false     // [ALPHA] Allow hovering interactions but underlying value is not changed.
-	MixedValue             = 4096,    // false     // [BETA] Represent a mixed/indeterminate value, generally multi-selection where values differ. Currently only supported by Checkbox() (later should support all sorts of widgets)
-	NoWindowHoverableCheck = 8192,    // false     // Disable hoverable check in ItemHoverable()
-	AllowOverlap           = 16384,   // false     // Allow being overlapped by another widget. Not-hovered to Hovered transition deferred by a frame.
-	NoNavDisableMouseHover = 32768,   // false     // Nav keyboard/gamepad mode doesn't disable hover highlight (behave as if NavHighlightItemUnderNav==false).
-	NoMarkEdited           = 65536,   // false     // Skip calling MarkItemEdited()
-	NoFocus                = 131072,  // false     // [EXPERIMENTAL: Not very well specced] Clicking doesn't take focus. Automatically sets ImGuiButtonFlags_NoFocus + ImGuiButtonFlags_NoNavFocus in ButtonBehavior().
-
-	// Controlled by widget code
-	Inputable              = 1048576, // false     // [WIP] Auto-activate input mode when tab focused. Currently only used and supported by a few items before it becomes a generic feature.
-	HasSelectionUserData   = 2097152, // false     // Set by SetNextItemSelectionUserData()
-	IsMultiSelect          = 4194304, // false     // Set by SetNextItemSelectionUserData()
-	Default_               = 16,      // Please don't change, use PushItemFlag() instead.
-}
+GuiItemFlagsPrivate :: bit_set[GuiItemFlagPrivate; i32]
 
 GuiItemStatusFlag :: enum i32 {
 	HoveredRect      = 0,  // Mouse position is within item rectangle (does NOT mean that the window is in correct z-order and can be hovered!, this is only one part of the most-common IsItemHovered test)
@@ -251,74 +253,88 @@ GuiItemStatusFlag :: enum i32 {
 // - output: stored in g.LastItemData.StatusFlags
 GuiItemStatusFlags :: bit_set[GuiItemStatusFlag; i32]
 
+GuiHoveredFlagPrivate :: enum i32 {
+}
+
 // Extend ImGuiHoveredFlags_
-GuiHoveredFlagsPrivate :: enum i32 {
-	DelayMask_                    = 245760,
-	AllowedMaskForIsWindowHovered = 12479,
-	AllowedMaskForIsItemHovered   = 262048,
+GuiHoveredFlagsPrivate                        :: bit_set[GuiHoveredFlagPrivate; i32]
+GUIHOVEREDFLAGS_DELAYMASK_                    :: transmute(GuiHoveredFlagsPrivate)i32(245760)
+GUIHOVEREDFLAGS_ALLOWEDMASKFORISWINDOWHOVERED :: transmute(GuiHoveredFlagsPrivate)i32(12479)
+GUIHOVEREDFLAGS_ALLOWEDMASKFORISITEMHOVERED   :: transmute(GuiHoveredFlagsPrivate)i32(262048)
+
+GuiInputTextFlagPrivate :: enum i32 {
+	// [Internal]
+	Multiline            = 26, // For internal use by InputTextMultiline()
+	MergedItem           = 27, // For internal use by TempInputText(), will skip calling ItemAdd(). Require bounding-box to strictly match.
+	LocalizeDecimalPoint = 28, // For internal use by InputScalar() and TempInputScalar()
 }
 
 // Extend ImGuiInputTextFlags_
-GuiInputTextFlagsPrivate :: enum i32 {
-	// [Internal]
-	Multiline            = 67108864,  // For internal use by InputTextMultiline()
-	MergedItem           = 134217728, // For internal use by TempInputText(), will skip calling ItemAdd(). Require bounding-box to strictly match.
-	LocalizeDecimalPoint = 268435456, // For internal use by InputScalar() and TempInputScalar()
+GuiInputTextFlagsPrivate :: bit_set[GuiInputTextFlagPrivate; i32]
+
+GuiButtonFlagPrivate :: enum i32 {
+	PressedOnClick                = 4,  // return true on click (mouse down event)
+	PressedOnClickRelease         = 5,  // [Default] return true on click + release on same item <-- this is what the majority of Button are using
+	PressedOnClickReleaseAnywhere = 6,  // return true on click + release even if the release event is not done while hovering the item
+	PressedOnRelease              = 7,  // return true on release (default requires click+release)
+	PressedOnDoubleClick          = 8,  // return true on double-click (default requires click+release)
+	PressedOnDragDropHold         = 9,  // return true when held into while we are drag and dropping another item (used by e.g. tree nodes, collapsing headers)
+	FlattenChildren               = 11, // allow interactions even if a child window is overlapping
+	AllowOverlap                  = 12, // require previous frame HoveredId to either match id or be null before being usable.
+	AlignTextBaseLine             = 15, // vertically align button to match text baseline - ButtonEx() only // FIXME: Should be removed and handled by SmallButton(), not possible currently because of DC.CursorPosPrevLine
+	NoKeyModsAllowed              = 16, // disable mouse interaction if a key modifier is held
+	NoHoldingActiveId             = 17, // don't set ActiveId while holding the mouse (ImGuiButtonFlags_PressedOnClick only)
+	NoNavFocus                    = 18, // don't override navigation focus when activated (FIXME: this is essentially used every time an item uses ImGuiItemFlags_NoNav, but because legacy specs don't requires LastItemData to be set ButtonBehavior(), we can't poll g.LastItemData.ItemFlags)
+	NoHoveredOnFocus              = 19, // don't report as hovered when nav focus is on this item
+	NoSetKeyOwner                 = 20, // don't set key/input owner on the initial click (note: mouse buttons are keys! often, the key in question will be ImGuiKey_MouseLeft!)
+	NoTestKeyOwner                = 21, // don't test key/input owner when polling the key (note: mouse buttons are keys! often, the key in question will be ImGuiKey_MouseLeft!)
+	NoFocus                       = 22, // [EXPERIMENTAL: Not very well specced]. Don't focus parent window when clicking.
+	PressedOnDefault_             = 5,
 }
 
 // Extend ImGuiButtonFlags_
-GuiButtonFlagsPrivate :: enum i32 {
-	PressedOnClick                = 16,      // return true on click (mouse down event)
-	PressedOnClickRelease         = 32,      // [Default] return true on click + release on same item <-- this is what the majority of Button are using
-	PressedOnClickReleaseAnywhere = 64,      // return true on click + release even if the release event is not done while hovering the item
-	PressedOnRelease              = 128,     // return true on release (default requires click+release)
-	PressedOnDoubleClick          = 256,     // return true on double-click (default requires click+release)
-	PressedOnDragDropHold         = 512,     // return true when held into while we are drag and dropping another item (used by e.g. tree nodes, collapsing headers)
-	FlattenChildren               = 2048,    // allow interactions even if a child window is overlapping
-	AllowOverlap                  = 4096,    // require previous frame HoveredId to either match id or be null before being usable.
-	AlignTextBaseLine             = 32768,   // vertically align button to match text baseline - ButtonEx() only // FIXME: Should be removed and handled by SmallButton(), not possible currently because of DC.CursorPosPrevLine
-	NoKeyModsAllowed              = 65536,   // disable mouse interaction if a key modifier is held
-	NoHoldingActiveId             = 131072,  // don't set ActiveId while holding the mouse (ImGuiButtonFlags_PressedOnClick only)
-	NoNavFocus                    = 262144,  // don't override navigation focus when activated (FIXME: this is essentially used every time an item uses ImGuiItemFlags_NoNav, but because legacy specs don't requires LastItemData to be set ButtonBehavior(), we can't poll g.LastItemData.ItemFlags)
-	NoHoveredOnFocus              = 524288,  // don't report as hovered when nav focus is on this item
-	NoSetKeyOwner                 = 1048576, // don't set key/input owner on the initial click (note: mouse buttons are keys! often, the key in question will be ImGuiKey_MouseLeft!)
-	NoTestKeyOwner                = 2097152, // don't test key/input owner when polling the key (note: mouse buttons are keys! often, the key in question will be ImGuiKey_MouseLeft!)
-	NoFocus                       = 4194304, // [EXPERIMENTAL: Not very well specced]. Don't focus parent window when clicking.
-	PressedOnMask_                = 1008,
-	PressedOnDefault_             = 32,
+GuiButtonFlagsPrivate         :: bit_set[GuiButtonFlagPrivate; i32]
+GUIBUTTONFLAGS_PRESSEDONMASK_ :: transmute(GuiButtonFlagsPrivate)i32(1008)
+
+GuiComboFlagPrivate :: enum i32 {
+	ImGuiComboFlags_CustomPreview = 20, // enable BeginComboPreview()
 }
 
 // Extend ImGuiComboFlags_
-GuiComboFlagsPrivate :: enum i32 {
-	ImGuiComboFlags_CustomPreview = 1048576, // enable BeginComboPreview()
+GuiComboFlagsPrivate :: bit_set[GuiComboFlagPrivate; i32]
+
+GuiSliderFlagPrivate :: enum i32 {
+	Vertical = 20, // Should this slider be orientated vertically?
+	ReadOnly = 21, // Consider using g.NextItemData.ItemFlags |= ImGuiItemFlags_ReadOnly instead.
 }
 
 // Extend ImGuiSliderFlags_
-GuiSliderFlagsPrivate :: enum i32 {
-	Vertical = 1048576, // Should this slider be orientated vertically?
-	ReadOnly = 2097152, // Consider using g.NextItemData.ItemFlags |= ImGuiItemFlags_ReadOnly instead.
+GuiSliderFlagsPrivate :: bit_set[GuiSliderFlagPrivate; i32]
+
+GuiSelectableFlagPrivate :: enum i32 {
+	// NB: need to be in sync with last value of ImGuiSelectableFlags_
+	NoHoldingActiveID    = 20,
+	SelectOnClick        = 22, // Override button behavior to react on Click (default is Click+Release)
+	SelectOnRelease      = 23, // Override button behavior to react on Release (default is Click+Release)
+	SpanAvailWidth       = 24, // Span all avail width even if we declared less for layout purpose. FIXME: We may be able to remove this (added in 6251d379, 2bcafc86 for menus)
+	SetNavIdOnHover      = 25, // Set Nav/Focus ID on mouse hover (used by MenuItem)
+	NoPadWithHalfSpacing = 26, // Disable padding each side with ItemSpacing * 0.5f
+	NoSetKeyOwner        = 27, // Don't set key/input owner on the initial click (note: mouse buttons are keys! often, the key in question will be ImGuiKey_MouseLeft!)
 }
 
 // Extend ImGuiSelectableFlags_
-GuiSelectableFlagsPrivate :: enum i32 {
-	// NB: need to be in sync with last value of ImGuiSelectableFlags_
-	NoHoldingActiveID    = 1048576,
-	SelectOnClick        = 4194304,   // Override button behavior to react on Click (default is Click+Release)
-	SelectOnRelease      = 8388608,   // Override button behavior to react on Release (default is Click+Release)
-	SpanAvailWidth       = 16777216,  // Span all avail width even if we declared less for layout purpose. FIXME: We may be able to remove this (added in 6251d379, 2bcafc86 for menus)
-	SetNavIdOnHover      = 33554432,  // Set Nav/Focus ID on mouse hover (used by MenuItem)
-	NoPadWithHalfSpacing = 67108864,  // Disable padding each side with ItemSpacing * 0.5f
-	NoSetKeyOwner        = 134217728, // Don't set key/input owner on the initial click (note: mouse buttons are keys! often, the key in question will be ImGuiKey_MouseLeft!)
+GuiSelectableFlagsPrivate :: bit_set[GuiSelectableFlagPrivate; i32]
+
+GuiTreeNodeFlagPrivate :: enum i32 {
+	NoNavFocus                 = 27, // Don't claim nav focus when interacting with this item (#8551)
+	ClipLabelForTrailingButton = 28, // FIXME-WIP: Hard-coded for CollapsingHeader()
+	UpsideDownArrow            = 29, // FIXME-WIP: Turn Down arrow into an Up arrow, for reversed trees (#6517)
 }
 
 // Extend ImGuiTreeNodeFlags_
-GuiTreeNodeFlagsPrivate :: enum i32 {
-	NoNavFocus                 = 134217728, // Don't claim nav focus when interacting with this item (#8551)
-	ClipLabelForTrailingButton = 268435456, // FIXME-WIP: Hard-coded for CollapsingHeader()
-	UpsideDownArrow            = 536870912, // FIXME-WIP: Turn Down arrow into an Up arrow, for reversed trees (#6517)
-	OpenOnMask_                = 192,
-	DrawLinesMask_             = 1835008,
-}
+GuiTreeNodeFlagsPrivate         :: bit_set[GuiTreeNodeFlagPrivate; i32]
+GUITREENODEFLAGS_OPENONMASK_    :: transmute(GuiTreeNodeFlagsPrivate)i32(192)
+GUITREENODEFLAGS_DRAWLINESMASK_ :: transmute(GuiTreeNodeFlagsPrivate)i32(1835008)
 
 GuiSeparatorFlag :: enum i32 {
 	Horizontal     = 0, // Axis default to current layout type, so generally Horizontal unless e.g. in a menu bar
@@ -757,47 +773,47 @@ GuiKeyOwnerData :: struct {
 	LockUntilRelease: bool, // Reading this key requires explicit owner id (until key is released). Set by ImGuiInputFlags_LockUntilRelease. When this is true LockThisFrame is always true as well.
 }
 
-// Extend ImGuiInputFlags_
-// Flags for extended versions of IsKeyPressed(), IsMouseClicked(), Shortcut(), SetKeyOwner(), SetItemKeyOwner()
-// Don't mistake with ImGuiInputTextFlags! (which is for ImGui::InputText() function)
-GuiInputFlagsPrivate :: enum i32 {
+GuiInputFlagPrivate :: enum i32 {
 	// Flags for IsKeyPressed(), IsKeyChordPressed(), IsMouseClicked(), Shortcut()
 	// - Repeat mode: Repeat rate selection
-	RepeatRateDefault                = 2,       // Repeat rate: Regular (default)
-	RepeatRateNavMove                = 4,       // Repeat rate: Fast
-	RepeatRateNavTweak               = 8,       // Repeat rate: Faster
+	RepeatRateDefault                = 1,  // Repeat rate: Regular (default)
+	RepeatRateNavMove                = 2,  // Repeat rate: Fast
+	RepeatRateNavTweak               = 3,  // Repeat rate: Faster
 
 	// - Repeat mode: Specify when repeating key pressed can be interrupted.
 	// - In theory ImGuiInputFlags_RepeatUntilOtherKeyPress may be a desirable default, but it would break too many behavior so everything is opt-in.
-	RepeatUntilRelease               = 16,      // Stop repeating when released (default for all functions except Shortcut). This only exists to allow overriding Shortcut() default behavior.
-	RepeatUntilKeyModsChange         = 32,      // Stop repeating when released OR if keyboard mods are changed (default for Shortcut)
-	RepeatUntilKeyModsChangeFromNone = 64,      // Stop repeating when released OR if keyboard mods are leaving the None state. Allows going from Mod+Key to Key by releasing Mod.
-	RepeatUntilOtherKeyPress         = 128,     // Stop repeating when released OR if any other keyboard key is pressed during the repeat
+	RepeatUntilRelease               = 4,  // Stop repeating when released (default for all functions except Shortcut). This only exists to allow overriding Shortcut() default behavior.
+	RepeatUntilKeyModsChange         = 5,  // Stop repeating when released OR if keyboard mods are changed (default for Shortcut)
+	RepeatUntilKeyModsChangeFromNone = 6,  // Stop repeating when released OR if keyboard mods are leaving the None state. Allows going from Mod+Key to Key by releasing Mod.
+	RepeatUntilOtherKeyPress         = 7,  // Stop repeating when released OR if any other keyboard key is pressed during the repeat
 
 	// Flags for SetKeyOwner(), SetItemKeyOwner()
 	// - Locking key away from non-input aware code. Locking is useful to make input-owner-aware code steal keys from non-input-owner-aware code. If all code is input-owner-aware locking would never be necessary.
-	LockThisFrame                    = 1048576, // Further accesses to key data will require EXPLICIT owner ID (ImGuiKeyOwner_Any/0 will NOT accepted for polling). Cleared at end of frame.
-	LockUntilRelease                 = 2097152, // Further accesses to key data will require EXPLICIT owner ID (ImGuiKeyOwner_Any/0 will NOT accepted for polling). Cleared when the key is released or at end of each frame if key is released.
+	LockThisFrame                    = 20, // Further accesses to key data will require EXPLICIT owner ID (ImGuiKeyOwner_Any/0 will NOT accepted for polling). Cleared at end of frame.
+	LockUntilRelease                 = 21, // Further accesses to key data will require EXPLICIT owner ID (ImGuiKeyOwner_Any/0 will NOT accepted for polling). Cleared when the key is released or at end of each frame if key is released.
 
 	// - Condition for SetItemKeyOwner()
-	CondHovered                      = 4194304, // Only set if item is hovered (default to both)
-	CondActive                       = 8388608, // Only set if item is active (default to both)
-	CondDefault_                     = 12582912,
-
-	// [Internal] Mask of which function support which flags
-	RepeatRateMask_                  = 14,
-	RepeatUntilMask_                 = 240,
-	RepeatMask_                      = 255,
-	CondMask_                        = 12582912,
-	RouteTypeMask_                   = 15360,
-	RouteOptionsMask_                = 245760,
-	SupportedByIsKeyPressed          = 255,
-	SupportedByIsMouseClicked        = 1,
-	SupportedByShortcut              = 261375,
-	SupportedBySetNextItemShortcut   = 523519,
-	SupportedBySetKeyOwner           = 3145728,
-	SupportedBySetItemKeyOwner       = 15728640,
+	CondHovered                      = 22, // Only set if item is hovered (default to both)
+	CondActive                       = 23, // Only set if item is active (default to both)
+	SupportedByIsMouseClicked        = 0,
 }
+
+// Extend ImGuiInputFlags_
+// Flags for extended versions of IsKeyPressed(), IsMouseClicked(), Shortcut(), SetKeyOwner(), SetItemKeyOwner()
+// Don't mistake with ImGuiInputTextFlags! (which is for ImGui::InputText() function)
+GuiInputFlagsPrivate                         :: bit_set[GuiInputFlagPrivate; i32]
+GUIINPUTFLAGS_CONDDEFAULT_                   :: GuiInputFlagsPrivate {.CondHovered, .CondActive}
+GUIINPUTFLAGS_REPEATRATEMASK_                :: GuiInputFlagsPrivate {.RepeatRateDefault, .RepeatRateNavMove, .RepeatRateNavTweak}
+GUIINPUTFLAGS_REPEATUNTILMASK_               :: GuiInputFlagsPrivate {.RepeatUntilRelease, .RepeatUntilKeyModsChange, .RepeatUntilKeyModsChangeFromNone, .RepeatUntilOtherKeyPress}
+GUIINPUTFLAGS_REPEATMASK_                    :: GuiInputFlagsPrivate {.RepeatRateDefault, .RepeatRateNavMove, .RepeatRateNavTweak, .RepeatUntilRelease, .RepeatUntilKeyModsChange, .RepeatUntilKeyModsChangeFromNone, .RepeatUntilOtherKeyPress, .SupportedByIsMouseClicked}
+GUIINPUTFLAGS_CONDMASK_                      :: GuiInputFlagsPrivate {.CondHovered, .CondActive}
+GUIINPUTFLAGS_ROUTETYPEMASK_                 :: transmute(GuiInputFlagsPrivate)i32(15360)
+GUIINPUTFLAGS_ROUTEOPTIONSMASK_              :: transmute(GuiInputFlagsPrivate)i32(245760)
+GUIINPUTFLAGS_SUPPORTEDBYISKEYPRESSED        :: GuiInputFlagsPrivate {.RepeatRateDefault, .RepeatRateNavMove, .RepeatRateNavTweak, .RepeatUntilRelease, .RepeatUntilKeyModsChange, .RepeatUntilKeyModsChangeFromNone, .RepeatUntilOtherKeyPress, .SupportedByIsMouseClicked}
+GUIINPUTFLAGS_SUPPORTEDBYSHORTCUT            :: transmute(GuiInputFlagsPrivate)i32(261375)
+GUIINPUTFLAGS_SUPPORTEDBYSETNEXTITEMSHORTCUT :: transmute(GuiInputFlagsPrivate)i32(523519)
+GUIINPUTFLAGS_SUPPORTEDBYSETKEYOWNER         :: GuiInputFlagsPrivate {.LockThisFrame, .LockUntilRelease}
+GUIINPUTFLAGS_SUPPORTEDBYSETITEMKEYOWNER     :: GuiInputFlagsPrivate {.LockThisFrame, .LockUntilRelease, .CondHovered, .CondActive}
 
 // Note that Max is exclusive, so perhaps should be using a Begin/End convention.
 GuiListClipperRange :: struct {
@@ -1027,36 +1043,34 @@ GuiMultiSelectState :: struct {
 DOCKING_HOST_DRAW_CHANNEL_BG :: 0   // Dock host: background fill
 DOCKING_HOST_DRAW_CHANNEL_FG :: 1   // Dock host: decorations and contents
 
-// Extend ImGuiDockNodeFlags_
-GuiDockNodeFlagsPrivate :: enum i32 {
+GuiDockNodePrivateFlag :: enum i32 {
 	// [Internal]
-	DockSpace                 = 1024,    // Saved // A dockspace is a node that occupy space within an existing user window. Otherwise the node is floating and create its own window.
-	CentralNode               = 2048,    // Saved // The central node has 2 main properties: stay visible when empty, only use "remaining" spaces from its neighbor.
-	NoTabBar                  = 4096,    // Saved // Tab bar is completely unavailable. No triangle in the corner to enable it back.
-	HiddenTabBar              = 8192,    // Saved // Tab bar is hidden, with a triangle in the corner to show it again (NB: actual tab-bar instance may be destroyed as this is only used for single-window tab bar)
-	NoWindowMenuButton        = 16384,   // Saved // Disable window/docking menu (that one that appears instead of the collapse button)
-	NoCloseButton             = 32768,   // Saved // Disable close button
-	NoResizeX                 = 65536,   //       //
-	NoResizeY                 = 131072,  //       //
-	DockedWindowsInFocusRoute = 262144,  //       // Any docked window will be automatically be focus-route chained (window->ParentWindowForFocusRoute set to this) so Shortcut() in this window can run when any docked window is focused.
+	DockSpace                 = 10, // Saved // A dockspace is a node that occupy space within an existing user window. Otherwise the node is floating and create its own window.
+	CentralNode               = 11, // Saved // The central node has 2 main properties: stay visible when empty, only use "remaining" spaces from its neighbor.
+	NoTabBar                  = 12, // Saved // Tab bar is completely unavailable. No triangle in the corner to enable it back.
+	HiddenTabBar              = 13, // Saved // Tab bar is hidden, with a triangle in the corner to show it again (NB: actual tab-bar instance may be destroyed as this is only used for single-window tab bar)
+	NoWindowMenuButton        = 14, // Saved // Disable window/docking menu (that one that appears instead of the collapse button)
+	NoCloseButton             = 15, // Saved // Disable close button
+	NoResizeX                 = 16, //       //
+	NoResizeY                 = 17, //       //
+	DockedWindowsInFocusRoute = 18, //       // Any docked window will be automatically be focus-route chained (window->ParentWindowForFocusRoute set to this) so Shortcut() in this window can run when any docked window is focused.
 
 	// Disable docking/undocking actions in this dockspace or individual node (existing docked nodes will be preserved)
 	// Those are not exposed in public because the desirable sharing/inheriting/copy-flag-on-split behaviors are quite difficult to design and understand.
 	// The two public flags ImGuiDockNodeFlags_NoDockingOverCentralNode/ImGuiDockNodeFlags_NoDockingSplit don't have those issues.
-	NoDockingSplitOther       = 524288,  //       // Disable this node from splitting other windows/nodes.
-	NoDockingOverMe           = 1048576, //       // Disable other windows/nodes from being docked over this node.
-	NoDockingOverOther        = 2097152, //       // Disable this node from being docked over another window or non-empty node.
-	NoDockingOverEmpty        = 4194304, //       // Disable this node from being docked over an empty node (e.g. DockSpace with no other windows)
-	NoDocking                 = 7864336,
-
-	// Masks
-	SharedFlagsInheritMask_   = -1,
-	NoResizeFlagsMask_        = 196640,
-
-	// When splitting, those local flags are moved to the inheriting child, never duplicated
-	LocalFlagsTransferMask_   = 260208,
-	SavedFlagsMask_           = 261152,
+	NoDockingSplitOther       = 19, //       // Disable this node from splitting other windows/nodes.
+	NoDockingOverMe           = 20, //       // Disable other windows/nodes from being docked over this node.
+	NoDockingOverOther        = 21, //       // Disable this node from being docked over another window or non-empty node.
+	NoDockingOverEmpty        = 22, //       // Disable this node from being docked over an empty node (e.g. DockSpace with no other windows)
 }
+
+// Extend ImGuiDockNodeFlags_
+GuiDockNodeFlagsPrivate                  :: bit_set[GuiDockNodePrivateFlag; i32]
+GUIDOCKNODEFLAGS_NODOCKING               :: transmute(GuiDockNodeFlagsPrivate)i32(7864336)
+GUIDOCKNODEFLAGS_SHAREDFLAGSINHERITMASK_ :: transmute(GuiDockNodeFlagsPrivate)i32(-1)
+GUIDOCKNODEFLAGS_NORESIZEFLAGSMASK_      :: transmute(GuiDockNodeFlagsPrivate)i32(196640)
+GUIDOCKNODEFLAGS_LOCALFLAGSTRANSFERMASK_ :: transmute(GuiDockNodeFlagsPrivate)i32(260208)
+GUIDOCKNODEFLAGS_SAVEDFLAGSMASK_         :: transmute(GuiDockNodeFlagsPrivate)i32(261152)
 
 // Store the source authority (dock node vs window) of a field
 GuiDataAuthority :: enum i32 {
@@ -1950,21 +1964,25 @@ GuiWindow :: struct {
 	DockId:            GuiID,        // Backup of last valid DockNode->ID, so single window remember their dock node id even when they are not bound any more
 }
 
+GuiTabBarFlagPrivate :: enum i32 {
+	DockNode     = 20, // Part of a dock node [we don't use this in the master branch but it facilitate branch syncing to keep this around]
+	IsFocused    = 21,
+	SaveSettings = 22, // FIXME: Settings are handled by the docking system, this only request the tab bar to mark settings dirty when reordering tabs
+}
+
 // Extend ImGuiTabBarFlags_
-GuiTabBarFlagsPrivate :: enum i32 {
-	DockNode     = 1048576, // Part of a dock node [we don't use this in the master branch but it facilitate branch syncing to keep this around]
-	IsFocused    = 2097152,
-	SaveSettings = 4194304, // FIXME: Settings are handled by the docking system, this only request the tab bar to mark settings dirty when reordering tabs
+GuiTabBarFlagsPrivate :: bit_set[GuiTabBarFlagPrivate; i32]
+
+GuiTabItemFlagPrivate :: enum i32 {
+	NoCloseButton = 20, // Track whether p_open was set or not (we'll need this info on the next frame to recompute ContentWidth during layout)
+	Button        = 21, // Used by TabItemButton, change the tab item behavior to mimic a button
+	Invisible     = 22, // To reserve space e.g. with ImGuiTabItemFlags_Leading
+	Unsorted      = 23, // [Docking] Trailing tabs with the _Unsorted flag will be sorted based on the DockOrder of their Window.
 }
 
 // Extend ImGuiTabItemFlags_
-GuiTabItemFlagsPrivate :: enum i32 {
-	SectionMask_  = 192,
-	NoCloseButton = 1048576, // Track whether p_open was set or not (we'll need this info on the next frame to recompute ContentWidth during layout)
-	Button        = 2097152, // Used by TabItemButton, change the tab item behavior to mimic a button
-	Invisible     = 4194304, // To reserve space e.g. with ImGuiTabItemFlags_Leading
-	Unsorted      = 8388608, // [Docking] Trailing tabs with the _Unsorted flag will be sorted based on the DockOrder of their Window.
-}
+GuiTabItemFlagsPrivate       :: bit_set[GuiTabItemFlagPrivate; i32]
+GUITABITEMFLAGS_SECTIONMASK_ :: transmute(GuiTabItemFlagsPrivate)i32(192)
 
 // Storage for one active tab item (sizeof() 48 bytes)
 GuiTabItem :: struct {
