@@ -47,7 +47,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -68,7 +68,7 @@ MAXLEN :: 1024
 */
 Plane :: struct {
 	//! Plane equation
-	a, b, _c, d: f32,
+	a, b, _c, d: _Real,
 }
 
 // ----------------------------------------------------------------------------------
@@ -161,7 +161,7 @@ Origin :: enum i32 {
 	_AI_ORIGIN_ENFORCE_ENUM_SIZE = 2147483647,
 }
 
-Default_Log_Stream_Flags :: enum i32 {
+Default_Log_Stream_Flag :: enum i32 {
 	/** Stream the log to a file */
 	FILE     = 0,
 
@@ -182,8 +182,8 @@ Default_Log_Stream_Flags :: enum i32 {
 *  Logging to these streams can be enabled with a single call to
 *   #LogStream::createDefaultStream.
 */
-Default_Log_Stream_Flag   :: bit_set[Default_Log_Stream_Flags; i32]
-_AI_DLS_ENFORCE_ENUM_SIZE :: Default_Log_Stream_Flag {.FILE, .STDOUT, .STDERR, .DEBUGGER}
+Default_Log_Stream_Flags  :: bit_set[Default_Log_Stream_Flag; i32]
+_AI_DLS_ENFORCE_ENUM_SIZE :: transmute(Default_Log_Stream_Flags)i32(2147483647)
 
 // ----------------------------------------------------------------------------------
 /** Stores the memory requirements for different components (e.g. meshes, materials,

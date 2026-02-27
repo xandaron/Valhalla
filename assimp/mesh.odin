@@ -48,7 +48,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -107,7 +107,7 @@ Vertex_Weight :: struct {
 
 	//! The strength of the influence in the range (0...1).
 	//! The influence from all bones at one vertex amounts to 1.
-	mWeight: f32,
+	mWeight: _Real,
 }
 
 // ---------------------------------------------------------------------------

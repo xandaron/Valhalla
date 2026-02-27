@@ -49,7 +49,7 @@ import "core:c"
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -60,7 +60,7 @@ else {
 }
 
 
-Log_Stream_Callback :: proc "c" (cstring /* user */, cstring) /* message */
+Log_Stream_Callback :: proc "c" (cstring, cstring) /* message */
 
 // --------------------------------------------------------------------------------
 /** C-API: Represents a log stream. A log stream receives all log messages and
@@ -260,7 +260,7 @@ foreign lib {
 	*    Pass NULL for all other flags.
 	*  @return The log stream. callback is set to NULL if something went wrong.
 	*/
-	GetPredefinedLogStream :: proc(pStreams: Default_Log_Stream_Flag, file: cstring) -> Log_Stream ---
+	GetPredefinedLogStream :: proc(pStreams: Default_Log_Stream_Flags, file: cstring) -> Log_Stream ---
 
 	// --------------------------------------------------------------------------------
 	/** Attach a custom log stream to the libraries' logging system.
@@ -394,7 +394,7 @@ foreign lib {
 	*   public properties are defined in the config.h header file (AI_CONFIG_XXX).
 	* @param value New value for the property
 	*/
-	SetImportPropertyFloat :: proc(store: ^Property_Store, szName: cstring, value: f32) ---
+	SetImportPropertyFloat :: proc(store: ^Property_Store, szName: cstring, value: _Real) ---
 
 	// --------------------------------------------------------------------------------
 	/** Set a string property.
@@ -578,13 +578,13 @@ foreign lib {
 	/** Get the length of a 2D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector2Length :: proc(v: ^Vector2D) -> f32 ---
+	Vector2Length :: proc(v: ^Vector2D) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Get the squared length of a 2D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector2SquareLength :: proc(v: ^Vector2D) -> f32 ---
+	Vector2SquareLength :: proc(v: ^Vector2D) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Negate a 2D vector.
@@ -598,7 +598,7 @@ foreign lib {
 	*  @param b Second vector
 	*  @return The dot product of vectors
 	*/
-	Vector2DotProduct :: proc(a: ^Vector2D, b: ^Vector2D) -> f32 ---
+	Vector2DotProduct :: proc(a: ^Vector2D, b: ^Vector2D) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Normalize a 2D vector.
@@ -683,13 +683,13 @@ foreign lib {
 	/** Get the length of a 3D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector3Length :: proc(v: ^Vector3D) -> f32 ---
+	Vector3Length :: proc(v: ^Vector3D) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Get the squared length of a 3D vector.
 	*  @return v Vector to evaluate
 	*/
-	Vector3SquareLength :: proc(v: ^Vector3D) -> f32 ---
+	Vector3SquareLength :: proc(v: ^Vector3D) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Negate a 3D vector.
@@ -703,7 +703,7 @@ foreign lib {
 	*  @param b Second vector
 	*  @return The dot product of vectors
 	*/
-	Vector3DotProduct :: proc(a: ^Vector3D, b: ^Vector3D) -> f32 ---
+	Vector3DotProduct :: proc(a: ^Vector3D, b: ^Vector3D) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Get cross product of 3D vectors.
@@ -776,7 +776,7 @@ foreign lib {
 	/** Get the determinant of a 3x3 matrix.
 	*  @param mat Matrix to get the determinant from
 	*/
-	Matrix3Determinant :: proc(mat: ^Matrix3x3) -> f32 ---
+	Matrix3Determinant :: proc(mat: ^Matrix3x3) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Get a 3x3 rotation matrix around the Z axis.
@@ -861,7 +861,7 @@ foreign lib {
 	*  @param mat Matrix to get the determinant from
 	*  @return The determinant of the matrix
 	*/
-	Matrix4Determinant :: proc(mat: ^Matrix4x4) -> f32 ---
+	Matrix4Determinant :: proc(mat: ^Matrix4x4) -> _Real ---
 
 	// --------------------------------------------------------------------------------
 	/** Returns true of the matrix is the identity matrix.
@@ -893,7 +893,7 @@ foreign lib {
 	* @param angle Receives the output rotation angle
 	* @param position Receives the output position for the x,y,z axes.
 	*/
-	Matrix4DecomposeIntoScalingAxisAnglePosition :: proc(mat: ^Matrix4x4, scaling: ^Vector3D, axis: ^Vector3D, angle: ^f32, position: ^Vector3D) ---
+	Matrix4DecomposeIntoScalingAxisAnglePosition :: proc(mat: ^Matrix4x4, scaling: ^Vector3D, axis: ^Vector3D, angle: ^_Real, position: ^Vector3D) ---
 
 	// --------------------------------------------------------------------------------
 	/** Decompose a transformation matrix into its rotational and

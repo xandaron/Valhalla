@@ -47,7 +47,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -436,7 +436,7 @@ Shading_Mode :: enum i32 {
 	PBR_BRDF     = 11,
 }
 
-Texture_Flags :: enum i32 {
+Texture_Flag :: enum i32 {
 	/** The texture's color values have to be inverted (component-wise 1-n)
 	*/
 	Invert      = 0,
@@ -472,7 +472,7 @@ Texture_Flags :: enum i32 {
 *
 *  This corresponds to the #AI_MATKEY_TEXFLAGS property.
 */
-Texture_Flag :: bit_set[Texture_Flags; i32]
+Texture_Flags :: bit_set[Texture_Flag; i32]
 
 // ---------------------------------------------------------------------------
 /**
@@ -540,7 +540,7 @@ Uvtransform :: struct {
 	*  rotation center is 0.5f|0.5f. The default value
 	*  0.f.
 	*/
-	mRotation: f32,
+	mRotation: _Real,
 }
 
 //! @cond AI_DOX_INCLUDE_INTERNAL
@@ -710,7 +710,7 @@ foreign lib {
 	* @return Specifies whether the key has been found. If not, the output
 	*   arrays remains unmodified and pMax is set to 0.*/
 	// ---------------------------------------------------------------------------
-	GetMaterialFloatArray :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^f32, pMax: ^u32) -> Return ---
+	GetMaterialFloatArray :: proc(pMat: ^Material, pKey: cstring, type: u32, index: u32, pOut: ^_Real, pMax: ^u32) -> Return ---
 
 	// ---------------------------------------------------------------------------
 	/** @brief Retrieve an array of integer values with a specific key
@@ -748,6 +748,6 @@ foreign lib {
 	*  @note A texture can be easily queried using #aiGetMaterialTexture() */
 	// ---------------------------------------------------------------------------
 	GetMaterialTextureCount :: proc(pMat: ^Material, type: Texture_Type) -> u32 ---
-	GetMaterialTexture      :: proc(mat: ^Material, type: Texture_Type, index: u32, path: ^String, mapping: ^Texture_Mapping /*= NULL*/, uvindex: ^u32 /*= NULL*/, blend: ^f32 /*= NULL*/, op: ^Texture_Op /*= NULL*/, mapmode: ^Texture_Map_Mode /*= NULL*/, flags: ^u32 /*= NULL*/) -> Return ---
+	GetMaterialTexture      :: proc(mat: ^Material, type: Texture_Type, index: u32, path: ^String, mapping: ^Texture_Mapping /*= NULL*/, uvindex: ^u32 /*= NULL*/, blend: ^_Real /*= NULL*/, op: ^Texture_Op /*= NULL*/, mapmode: ^Texture_Map_Mode /*= NULL*/, flags: ^u32 /*= NULL*/) -> Return ---
 }
 

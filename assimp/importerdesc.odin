@@ -47,7 +47,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -58,7 +58,7 @@ else {
 }
 
 
-Importer_Flags :: enum i32 {
+Importer_Flag :: enum i32 {
 	/** Indicates that there is a textual encoding of the
 	*  file format; and that it is supported.*/
 	SupportTextFlavour       = 0,
@@ -86,7 +86,7 @@ Importer_Flags :: enum i32 {
 
 /** Mixed set of flags for #aiImporterDesc, indicating some features
 *  common to many importers*/
-Importer_Flag :: bit_set[Importer_Flags; i32]
+Importer_Flags :: bit_set[Importer_Flag; i32]
 
 /** Meta information about a particular importer. Importers need to fill
 *  this structure, but they can freely decide how talkative they are.

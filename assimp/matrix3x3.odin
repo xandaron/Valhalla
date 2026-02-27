@@ -47,7 +47,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -59,8 +59,8 @@ else {
 
 
 Matrix3x3 :: struct {
-	a1, a2, a3: f32,
-	b1, b2, b3: f32,
-	c1, c2, c3: f32,
+	a1, a2, a3: _Real,
+	b1, b2, b3: _Real,
+	c1, c2, c3: _Real,
 }
 

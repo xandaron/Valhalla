@@ -48,7 +48,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -58,6 +58,10 @@ else {
 	}
 }
 
+
+_Real :: f32
+_Int  :: i32
+_Uint :: u32
 
 ASSIMP_AI_REAL_TEXT_PRECISION :: 9
 

@@ -47,7 +47,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -579,6 +579,10 @@ Post_Process_Step_Flag :: enum i32 {
 	* This process gives sense back to aiProcess_JoinIdenticalVertices
 	*/
 	DropNormals              = 30,
+
+	// -------------------------------------------------------------------------
+	/**
+	*/
 	GenBoundingBoxes         = 31,
 }
 
@@ -594,5 +598,5 @@ Post_Process_Step_Flag :: enum i32 {
 *  @see aiImportFileEx
 */
 // -----------------------------------------------------------------------------------
-Post_Process_Step_Flags   :: bit_set[Post_Process_Step_Flag; i32]
+Post_Process_Step_Flags :: bit_set[Post_Process_Step_Flag; i32]
 

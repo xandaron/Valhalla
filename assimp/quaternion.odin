@@ -46,7 +46,7 @@ package Assimp
 when ODIN_OS == .Windows {
 	foreign import lib {
 		"libassimp.lib",
-		"vendor:zlib/libz.lib",
+		"z.lib",
 	}
 }
 else {
@@ -58,6 +58,6 @@ else {
 
 
 Quaternion :: struct {
-	w, x, y, z: f32,
+	w, x, y, z: _Real,
 }
 
