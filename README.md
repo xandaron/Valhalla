@@ -41,8 +41,8 @@ Clone the repository and build the demo program:
 ```sh
 git clone https://github.com/xandaron/valhalla.git
 cd valhalla/demo
-odin build . -out:demo.exe
-./demo.exe
+odin build src -out:bin/valhalla.exe
+./bin/valhalla.exe ./demo
 ```
 
 > **Note:** On Linux, you will need to install the GLFW 3.4+ library separately. Anything earlier will cause crashes.
