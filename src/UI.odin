@@ -256,7 +256,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						globals.activeScene = u32(sceneIdx)
 
 						graphicsData.reloadBuffers = true
-						graphicsData.rerecordCommands = true
+						markCommandsDirty(graphicsData, DIRTY_ALL)
 					}
 				}
 				imgui.EndCombo()
@@ -300,7 +300,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				addObject(scene, 0)
 
 				globals.graphicsData.reloadBuffers = true
-				globals.graphicsData.rerecordCommands = true
+				markCommandsDirty(&globals.graphicsData, DIRTY_GEOMETRY)
 			}
 
 			for &object, objectIdx in scene.objects {
@@ -430,7 +430,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								)
 
 								graphicsData.reloadBuffers = true
-								graphicsData.rerecordCommands = true
+								markCommandsDirty(graphicsData, DIRTY_GEOMETRY)
 							}
 						}
 						imgui.EndCombo()
