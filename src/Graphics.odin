@@ -1557,16 +1557,21 @@ endSingleTimeCommands :: proc(
 		return .FailedToEndCommandBuffer
 	}
 
-	submitInfo: vk.SubmitInfo = {
-		sType                = .SUBMIT_INFO,
-		pNext                = nil,
-		waitSemaphoreCount   = 0,
-		pWaitSemaphores      = nil,
-		pWaitDstStageMask    = nil,
-		commandBufferCount   = 1,
-		pCommandBuffers      = &commandBuffer,
-		signalSemaphoreCount = 0,
-		pSignalSemaphores    = nil,
+	submitInfo: vk.SubmitInfo2 = {
+		sType                  = .SUBMIT_INFO_2,
+		pNext                  = nil,
+		flags                  = {},
+		waitSemaphoreInfoCount = 0,
+		pWaitSemaphoreInfos    = nil,
+		commandBufferInfoCount = 1,
+		pCommandBufferInfos    = &vk.CommandBufferSubmitInfo {
+			sType = .COMMAND_BUFFER_SUBMIT_INFO,
+			pNext = nil,
+			commandBuffer = commandBuffer,
+			deviceMask = 0,
+		},
+		signalSemaphoreInfoCount = 0,
+		pSignalSemaphoreInfos    = nil,
 	}
 	fence: vk.Fence
 	fenceCreateInfo: vk.FenceCreateInfo = {
@@ -1576,8 +1581,9 @@ endSingleTimeCommands :: proc(
 	}
 	vk.CreateFence(device, &fenceCreateInfo, nil, &fence)
 
+	// A command buffer can only be submitted to the family that owns its pool.
 	queue := computeCommandPool == commandPool ? computeQueue : graphicsQueue
-	vk.QueueSubmit(queue, 1, &submitInfo, fence)
+	vk.QueueSubmit2(queue, 1, &submitInfo, fence)
 	vk.WaitForFences(device, 1, &fence, true, ~u64(0))
 	vk.DestroyFence(device, fence, nil)
 	vk.FreeCommandBuffers(device, commandPool, 1, &commandBuffer)
@@ -1718,13 +1724,25 @@ loadBufferToGPU :: proc(
 		return .FailedToCreateBuffer
 	}
 
-	copyRegion: vk.BufferCopy = {
+	copyRegion: vk.BufferCopy2 = {
+		sType     = .BUFFER_COPY_2,
+		pNext     = nil,
 		srcOffset = 0,
 		dstOffset = 0,
 		size      = vk.DeviceSize(bufferSize),
 	}
 
-	vk.CmdCopyBuffer(commandBuffer, stagingBuffer.buffer, dstBuffer.buffer, 1, &copyRegion)
+	vk.CmdCopyBuffer2(
+		commandBuffer,
+		&vk.CopyBufferInfo2 {
+			sType = .COPY_BUFFER_INFO_2,
+			pNext = nil,
+			srcBuffer = stagingBuffer.buffer,
+			dstBuffer = dstBuffer.buffer,
+			regionCount = 1,
+			pRegions = &copyRegion,
+		},
+	)
 	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool); err != nil {
 		logf(.Error, "Failed to end single time command buffer! Error: %d", err)
 		return .FailedToCreateBuffer
@@ -1902,42 +1920,25 @@ transitionImageLayout :: proc(
 	aspectMask: vk.ImageAspectFlags,
 	layerCount: u32,
 ) -> ImageError {
-	barrier: vk.ImageMemoryBarrier = {
-		sType = .IMAGE_MEMORY_BARRIER,
-		pNext = nil,
-		srcAccessMask = {},
-		dstAccessMask = {},
-		oldLayout = oldLayout,
-		newLayout = newLayout,
-		srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-		dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-		image = image,
-		subresourceRange = vk.ImageSubresourceRange {
-			aspectMask = aspectMask,
-			baseMipLevel = 0,
-			levelCount = 1,
-			baseArrayLayer = 0,
-			layerCount = layerCount,
-		},
-	}
+	srcStage, dstStage: vk.PipelineStageFlags2
+	srcAccess, dstAccess: vk.AccessFlags2
 
-	sourceStage, destinationStage: vk.PipelineStageFlags
 	#partial switch oldLayout {
 	case .UNDEFINED:
-		barrier.srcAccessMask = {}
-		sourceStage = {.TOP_OF_PIPE}
+		srcStage = {}
+		srcAccess = {}
 	case .TRANSFER_SRC_OPTIMAL:
-		barrier.srcAccessMask = {.TRANSFER_READ}
-		sourceStage = {.TRANSFER}
+		srcStage = {.COPY, .BLIT}
+		srcAccess = {.TRANSFER_READ}
 	case .TRANSFER_DST_OPTIMAL:
-		barrier.srcAccessMask = {.TRANSFER_WRITE}
-		sourceStage = {.TRANSFER}
+		srcStage = {.COPY, .BLIT}
+		srcAccess = {.TRANSFER_WRITE}
 	case .SHADER_READ_ONLY_OPTIMAL:
-		barrier.srcAccessMask = {.SHADER_READ}
-		sourceStage = {.FRAGMENT_SHADER}
+		srcStage = {.FRAGMENT_SHADER, .COMPUTE_SHADER}
+		srcAccess = {.SHADER_SAMPLED_READ}
 	case .GENERAL:
-		barrier.srcAccessMask = {.SHADER_READ}
-		sourceStage = {.COMPUTE_SHADER}
+		srcStage = {.COMPUTE_SHADER}
+		srcAccess = {.SHADER_STORAGE_READ, .SHADER_STORAGE_WRITE}
 	case:
 		log(.Error, "Unsupported image layout transition!")
 		return .TransitionFailed
@@ -1945,43 +1946,57 @@ transitionImageLayout :: proc(
 
 	#partial switch newLayout {
 	case .TRANSFER_SRC_OPTIMAL:
-		barrier.dstAccessMask = {.TRANSFER_READ}
-		destinationStage = {.TRANSFER}
+		dstStage = {.COPY, .BLIT}
+		dstAccess = {.TRANSFER_READ}
 	case .TRANSFER_DST_OPTIMAL:
-		barrier.dstAccessMask = {.TRANSFER_WRITE}
-		destinationStage = {.TRANSFER}
+		dstStage = {.COPY, .BLIT}
+		dstAccess = {.TRANSFER_WRITE}
 	case .SHADER_READ_ONLY_OPTIMAL:
-		barrier.dstAccessMask = {.SHADER_READ}
-		destinationStage = {.FRAGMENT_SHADER}
+		dstStage = {.FRAGMENT_SHADER, .COMPUTE_SHADER}
+		dstAccess = {.SHADER_SAMPLED_READ}
 	case .GENERAL:
-		if oldLayout == .TRANSFER_SRC_OPTIMAL {
-			barrier.dstAccessMask = {.SHADER_WRITE}
-		} else if oldLayout == .TRANSFER_DST_OPTIMAL {
-			barrier.dstAccessMask = {.SHADER_READ}
-		}
-		destinationStage = {.COMPUTE_SHADER}
+		dstStage = {.COMPUTE_SHADER}
+		dstAccess = {.SHADER_STORAGE_READ, .SHADER_STORAGE_WRITE}
 	case .PRESENT_SRC_KHR:
-		barrier.dstAccessMask = {.SHADER_READ}
-		destinationStage = {.COMPUTE_SHADER}
-	case .COLOR_ATTACHMENT_OPTIMAL:
-		barrier.dstAccessMask = {.SHADER_WRITE}
-		destinationStage = {.VERTEX_SHADER}
+		dstStage = {}
+		dstAccess = {}
 	case:
 		log(.Error, "Unsupported image layout transition!")
 		return .TransitionFailed
 	}
 
-	vk.CmdPipelineBarrier(
+	vk.CmdPipelineBarrier2(
 		commandBuffer,
-		sourceStage,
-		destinationStage,
-		{},
-		0,
-		nil,
-		0,
-		nil,
-		1,
-		&barrier,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 1,
+			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
+				sType = .IMAGE_MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = srcStage,
+				srcAccessMask = srcAccess,
+				dstStageMask = dstStage,
+				dstAccessMask = dstAccess,
+				oldLayout = oldLayout,
+				newLayout = newLayout,
+				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				image = image,
+				subresourceRange = vk.ImageSubresourceRange {
+					aspectMask = aspectMask,
+					baseMipLevel = 0,
+					levelCount = 1,
+					baseArrayLayer = 0,
+					layerCount = layerCount,
+				},
+			},
+		},
 	)
 
 	return .None
@@ -1995,7 +2010,9 @@ copyBufferToImage :: proc(
 	image: vk.Image,
 	width, height: u32,
 ) {
-	region: vk.BufferImageCopy = {
+	region: vk.BufferImageCopy2 = {
+		sType = .BUFFER_IMAGE_COPY_2,
+		pNext = nil,
 		bufferOffset = 0,
 		bufferRowLength = 0,
 		bufferImageHeight = 0,
@@ -2008,7 +2025,18 @@ copyBufferToImage :: proc(
 		imageOffset = vk.Offset3D{x = 0, y = 0, z = 0},
 		imageExtent = vk.Extent3D{width = width, height = height, depth = 1},
 	}
-	vk.CmdCopyBufferToImage(commandBuffer, buffer, image, .TRANSFER_DST_OPTIMAL, 1, &region)
+	vk.CmdCopyBufferToImage2(
+		commandBuffer,
+		&vk.CopyBufferToImageInfo2 {
+			sType = .COPY_BUFFER_TO_IMAGE_INFO_2,
+			pNext = nil,
+			srcBuffer = buffer,
+			dstImage = image,
+			dstImageLayout = .TRANSFER_DST_OPTIMAL,
+			regionCount = 1,
+			pRegions = &region,
+		},
+	)
 }
 
 @(private = "file")
@@ -2019,12 +2047,14 @@ copyBufferToTextureArray :: proc(
 	image: vk.Image,
 	width, height, textureCount: u32,
 ) {
-	regions := make([]vk.BufferImageCopy, textureCount)
+	regions := make([]vk.BufferImageCopy2, textureCount)
 	defer delete(regions)
 	imageSize := width * height * 4
 	for &region, index in regions {
 		index := u32(index)
 		region = {
+			sType = .BUFFER_IMAGE_COPY_2,
+			pNext = nil,
 			bufferOffset = vk.DeviceSize(imageSize * index),
 			bufferRowLength = 0,
 			bufferImageHeight = 0,
@@ -2038,13 +2068,17 @@ copyBufferToTextureArray :: proc(
 			imageExtent = vk.Extent3D{width = width, height = height, depth = 1},
 		}
 	}
-	vk.CmdCopyBufferToImage(
+	vk.CmdCopyBufferToImage2(
 		commandBuffer,
-		buffer,
-		image,
-		.TRANSFER_DST_OPTIMAL,
-		u32(len(regions)),
-		raw_data(regions),
+		&vk.CopyBufferToImageInfo2 {
+			sType = .COPY_BUFFER_TO_IMAGE_INFO_2,
+			pNext = nil,
+			srcBuffer = buffer,
+			dstImage = image,
+			dstImageLayout = .TRANSFER_DST_OPTIMAL,
+			regionCount = u32(len(regions)),
+			pRegions = raw_data(regions),
+		},
 	)
 }
 
@@ -2055,14 +2089,28 @@ copyImage :: proc(
 	srcImage, dstImage: vk.Image,
 	srcLayout, dstLayout: vk.ImageLayout,
 ) {
-	region: vk.ImageCopy = {
+	region: vk.ImageCopy2 = {
+		sType = .IMAGE_COPY_2,
+		pNext = nil,
 		srcSubresource = {aspectMask = {.COLOR}, mipLevel = 0, baseArrayLayer = 0, layerCount = 1},
 		srcOffset = {x = 0, y = 0, z = 0},
 		dstSubresource = {aspectMask = {.COLOR}, mipLevel = 0, baseArrayLayer = 0, layerCount = 1},
 		dstOffset = {x = 0, y = 0, z = 0},
 		extent = extent,
 	}
-	vk.CmdCopyImage(commandBuffer, srcImage, srcLayout, dstImage, dstLayout, 1, &region)
+	vk.CmdCopyImage2(
+		commandBuffer,
+		&vk.CopyImageInfo2 {
+			sType = .COPY_IMAGE_INFO_2,
+			pNext = nil,
+			srcImage = srcImage,
+			srcImageLayout = srcLayout,
+			dstImage = dstImage,
+			dstImageLayout = dstLayout,
+			regionCount = 1,
+			pRegions = &region,
+		},
+	)
 }
 
 @(private = "file")
@@ -2443,7 +2491,9 @@ addImages :: proc(
 		imageLayers,
 	)
 
-	copyInfo: vk.ImageCopy = {
+	copyInfo: vk.ImageCopy2 = {
+		sType = .IMAGE_COPY_2,
+		pNext = nil,
 		srcSubresource = {
 			aspectMask = {.COLOR},
 			mipLevel = 0,
@@ -2460,14 +2510,18 @@ addImages :: proc(
 		dstOffset = {0, 0, 0},
 		extent = {IMAGES_RESOLUTION.x, IMAGES_RESOLUTION.y, 1},
 	}
-	vk.CmdCopyImage(
+	vk.CmdCopyImage2(
 		commandBuffer,
-		image.vkImage,
-		.TRANSFER_SRC_OPTIMAL,
-		newImage.vkImage,
-		.TRANSFER_DST_OPTIMAL,
-		1,
-		&copyInfo,
+		&vk.CopyImageInfo2 {
+			sType = .COPY_IMAGE_INFO_2,
+			pNext = nil,
+			srcImage = image.vkImage,
+			srcImageLayout = .TRANSFER_SRC_OPTIMAL,
+			dstImage = newImage.vkImage,
+			dstImageLayout = .TRANSFER_DST_OPTIMAL,
+			regionCount = 1,
+			pRegions = &copyInfo,
+		},
 	)
 	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
 	if err != nil {
@@ -4725,15 +4779,19 @@ recordTransformCommands :: proc(using graphicsData: ^GraphicsData, index: u32, s
 		descriptorSets[.Buffers].sets[currentFrame],
 		descriptorSets[.Textures].sets[currentFrame],
 	}
-	vk.CmdBindDescriptorSets(
+	vk.CmdBindDescriptorSets2(
 		cmdBuffer,
-		.COMPUTE,
-		pipelines[.Transform].layout,
-		0,
-		len(sets),
-		&sets[0],
-		0,
-		nil,
+		&vk.BindDescriptorSetsInfo {
+			sType = .BIND_DESCRIPTOR_SETS_INFO,
+			pNext = nil,
+			stageFlags = {.COMPUTE},
+			layout = pipelines[.Transform].layout,
+			firstSet = 0,
+			descriptorSetCount = len(sets),
+			pDescriptorSets = &sets[0],
+			dynamicOffsetCount = 0,
+			pDynamicOffsets = nil,
+		},
 	)
 	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[.Transform].handle)
 
@@ -5101,15 +5159,19 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		descriptorSets[.Textures].sets[currentFrame],
 	}
 
-	vk.CmdBindDescriptorSets(
+	vk.CmdBindDescriptorSets2(
 		cmdBuffer,
-		.GRAPHICS,
-		pipelines[.Light].layout,
-		0,
-		len(sets),
-		&sets[0],
-		0,
-		nil,
+		&vk.BindDescriptorSetsInfo {
+			sType = .BIND_DESCRIPTOR_SETS_INFO,
+			pNext = nil,
+			stageFlags = {.VERTEX, .FRAGMENT},
+			layout = pipelines[.Light].layout,
+			firstSet = 0,
+			descriptorSetCount = len(sets),
+			pDescriptorSets = &sets[0],
+			dynamicOffsetCount = 0,
+			pDynamicOffsets = nil,
+		},
 	)
 
 	vk.CmdBindVertexBuffers(
@@ -5119,7 +5181,13 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		&scene.buffers.vertexBuffer.buffer,
 		raw_data([]vk.DeviceSize{0}),
 	)
-	vk.CmdBindIndexBuffer(cmdBuffer, scene.buffers.indexBuffer.buffer, 0, .UINT32)
+	vk.CmdBindIndexBuffer2(
+		cmdBuffer,
+		scene.buffers.indexBuffer.buffer,
+		0,
+		vk.DeviceSize(vk.WHOLE_SIZE),
+		.UINT32,
+	)
 
 	pushConstants: Light_PushConstants = {
 		layerIndex   = 0,
@@ -5215,15 +5283,19 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		descriptorSets[.Textures].sets[currentFrame],
 	}
 
-	vk.CmdBindDescriptorSets(
+	vk.CmdBindDescriptorSets2(
 		cmdBuffer,
-		.GRAPHICS,
-		pipelines[.Scene].layout,
-		0,
-		len(sets),
-		&sets[0],
-		0,
-		nil,
+		&vk.BindDescriptorSetsInfo {
+			sType = .BIND_DESCRIPTOR_SETS_INFO,
+			pNext = nil,
+			stageFlags = {.VERTEX, .FRAGMENT},
+			layout = pipelines[.Scene].layout,
+			firstSet = 0,
+			descriptorSetCount = len(sets),
+			pDescriptorSets = &sets[0],
+			dynamicOffsetCount = 0,
+			pDynamicOffsets = nil,
+		},
 	)
 	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Scene].handle)
 
@@ -5234,7 +5306,13 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		&scene.buffers.vertexBuffer.buffer,
 		raw_data([]vk.DeviceSize{0}),
 	)
-	vk.CmdBindIndexBuffer(cmdBuffer, scene.buffers.indexBuffer.buffer, 0, .UINT32)
+	vk.CmdBindIndexBuffer2(
+		cmdBuffer,
+		scene.buffers.indexBuffer.buffer,
+		0,
+		vk.DeviceSize(vk.WHOLE_SIZE),
+		.UINT32,
+	)
 
 	pushConstants: Scene_PushConstants = {
 		vertexOffset   = 0,
@@ -5293,7 +5371,7 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		{
 			sType = .IMAGE_MEMORY_BARRIER_2,
 			pNext = nil,
-			srcStageMask = {.TOP_OF_PIPE},
+			srcStageMask = {},
 			srcAccessMask = nil,
 			dstStageMask = {.BLIT},
 			dstAccessMask = {.TRANSFER_WRITE},
@@ -5395,15 +5473,19 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		descriptorSets[.Buffers].sets[currentFrame],
 		descriptorSets[.Textures].sets[currentFrame],
 	}
-	vk.CmdBindDescriptorSets(
+	vk.CmdBindDescriptorSets2(
 		cmdBuffer,
-		.COMPUTE,
-		pipelines[.PostProcess].layout,
-		0,
-		len(sets),
-		&sets[0],
-		0,
-		nil,
+		&vk.BindDescriptorSetsInfo {
+			sType = .BIND_DESCRIPTOR_SETS_INFO,
+			pNext = nil,
+			stageFlags = {.COMPUTE},
+			layout = pipelines[.PostProcess].layout,
+			firstSet = 0,
+			descriptorSetCount = len(sets),
+			pDescriptorSets = &sets[0],
+			dynamicOffsetCount = 0,
+			pDynamicOffsets = nil,
+		},
 	)
 
 	pushConstants: PostProcess_PushConstants = {
@@ -5470,7 +5552,7 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
 				sType = .IMAGE_MEMORY_BARRIER_2,
 				pNext = nil,
-				srcStageMask = {.TOP_OF_PIPE},
+				srcStageMask = {},
 				srcAccessMask = nil,
 				dstStageMask = {.COLOR_ATTACHMENT_OUTPUT},
 				dstAccessMask = {.COLOR_ATTACHMENT_READ},
@@ -5635,7 +5717,7 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 				pNext = nil,
 				srcStageMask = {.BLIT},
 				srcAccessMask = {.TRANSFER_WRITE},
-				dstStageMask = {.BOTTOM_OF_PIPE},
+				dstStageMask = {},
 				dstAccessMask = nil,
 				oldLayout = .TRANSFER_DST_OPTIMAL,
 				newLayout = .PRESENT_SRC_KHR,
@@ -5746,7 +5828,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 					pNext = nil,
 					semaphore = semaphores[.Transform][currentFrame],
 					value = 0,
-					stageMask = {.BOTTOM_OF_PIPE},
+					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
 				},
 			},
@@ -5769,7 +5851,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 					pNext = nil,
 					semaphore = semaphores[.Transform][currentFrame],
 					value = 0,
-					stageMask = {.TOP_OF_PIPE},
+					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
 				},
 			},
@@ -5793,7 +5875,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 					pNext = nil,
 					semaphore = semaphores[.Main][currentFrame],
 					value = 0,
-					stageMask = {.BOTTOM_OF_PIPE},
+					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
 				},
 			},
@@ -5816,7 +5898,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 					pNext = nil,
 					semaphore = semaphores[.Main][currentFrame],
 					value = 0,
-					stageMask = {.TOP_OF_PIPE},
+					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
 				},
 			},
@@ -5840,7 +5922,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 					pNext = nil,
 					semaphore = semaphores[.PostProcess][currentFrame],
 					value = 0,
-					stageMask = {.BOTTOM_OF_PIPE},
+					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
 				},
 			},
@@ -5863,7 +5945,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 					pNext = nil,
 					semaphore = semaphores[.PostProcess][currentFrame],
 					value = 0,
-					stageMask = {.TOP_OF_PIPE},
+					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
 				},
 				{
@@ -5895,7 +5977,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 					pNext = nil,
 					semaphore = swapchain.presentReady[imageIndex],
 					value = 0,
-					stageMask = {.BOTTOM_OF_PIPE},
+					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
 				},
 			},
