@@ -238,7 +238,6 @@ SemaphoreIndex :: enum {
 	Transform = 0,
 	Main,
 	PostProcess,
-	Imgui,
 	Image,
 }
 
@@ -357,6 +356,7 @@ Swapchain :: struct {
 	extent:    vk.Extent2D,
 	images:    []vk.Image,
 	views:     []vk.ImageView,
+	presentReady: []vk.Semaphore,
 }
 
 @(private = "file")
@@ -552,7 +552,7 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 	)
 	vk.FreeCommandBuffers(
 		device,
-		computeCommandPool,
+		graphicsCommandPool,
 		MAX_FRAMES_IN_FLIGHT,
 		&commandBuffers[.PostProcess][0],
 	)
@@ -887,6 +887,103 @@ DeviceError :: enum {
 }
 
 @(private = "file")
+DeviceFeatures :: struct {
+	features:           vk.PhysicalDeviceFeatures2,
+	vulkan11:           vk.PhysicalDeviceVulkan11Features,
+	vulkan12:           vk.PhysicalDeviceVulkan12Features,
+	vulkan13:           vk.PhysicalDeviceVulkan13Features,
+	vulkan14:           vk.PhysicalDeviceVulkan14Features,
+	computeDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
+	maintenance7:       vk.PhysicalDeviceMaintenance7FeaturesKHR,
+}
+
+@(private = "file")
+buildDeviceFeatures :: proc(chain: ^DeviceFeatures, request: bool) {
+	chain^ = {
+		features           = {sType = .PHYSICAL_DEVICE_FEATURES_2, pNext = &chain.vulkan11},
+		vulkan11           = {
+			sType = .PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+			pNext = &chain.vulkan12,
+		},
+		vulkan12           = {
+			sType = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+			pNext = &chain.vulkan13,
+		},
+		vulkan13           = {
+			sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+			pNext = &chain.vulkan14,
+		},
+		vulkan14           = {
+			sType = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+			pNext = &chain.computeDerivatives,
+		},
+		computeDerivatives = {
+			sType = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
+			pNext = &chain.maintenance7,
+		},
+		maintenance7       = {sType = .PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR, pNext = nil},
+	}
+
+	if !request {
+		return
+	}
+
+	chain.features.features = {imageCubeArray = true, samplerAnisotropy = true}
+	chain.vulkan11.multiview = true
+	chain.vulkan11.shaderDrawParameters = true
+	chain.vulkan12.shaderOutputViewportIndex = true
+	chain.vulkan12.shaderOutputLayer = true
+	chain.vulkan12.timelineSemaphore = true
+	chain.vulkan12.bufferDeviceAddress = true
+	chain.vulkan13.shaderDemoteToHelperInvocation = true
+	chain.vulkan13.synchronization2 = true
+	chain.vulkan13.dynamicRendering = true
+	chain.vulkan14.maintenance5 = true
+	chain.computeDerivatives.computeDerivativeGroupQuads = true
+	chain.maintenance7.maintenance7 = true
+}
+
+@(private = "file")
+@(require_results)
+supportsRequestedFeatures :: proc(physicalDevice: vk.PhysicalDevice) -> bool {
+	missing :: proc(request, support: rawptr, size: int) -> bool {
+		OFFSET :: offset_of(vk.PhysicalDeviceVulkan11Features, storageBuffer16BitAccess)
+		req := ([^]b32)(uintptr(request) + OFFSET)
+		sup := ([^]b32)(uintptr(support) + OFFSET)
+		for i in 0 ..< (size - int(OFFSET)) / size_of(b32) {
+			if req[i] && !sup[i] {
+				return true
+			}
+		}
+		return false
+	}
+
+	request, support: DeviceFeatures
+	buildDeviceFeatures(&request, true)
+	buildDeviceFeatures(&support, false)
+	vk.GetPhysicalDeviceFeatures2(physicalDevice, &support.features)
+
+	if missing(&request.features, &support.features, size_of(vk.PhysicalDeviceFeatures2)) ||
+	   missing(&request.vulkan11, &support.vulkan11, size_of(vk.PhysicalDeviceVulkan11Features)) ||
+	   missing(&request.vulkan12, &support.vulkan12, size_of(vk.PhysicalDeviceVulkan12Features)) ||
+	   missing(&request.vulkan13, &support.vulkan13, size_of(vk.PhysicalDeviceVulkan13Features)) ||
+	   missing(&request.vulkan14, &support.vulkan14, size_of(vk.PhysicalDeviceVulkan14Features)) ||
+	   missing(
+		   &request.computeDerivatives,
+		   &support.computeDerivatives,
+		   size_of(vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR),
+	   ) ||
+	   missing(
+		   &request.maintenance7,
+		   &support.maintenance7,
+		   size_of(vk.PhysicalDeviceMaintenance7FeaturesKHR),
+	   ) {
+		return false
+	}
+	return true
+}
+
+@(private = "file")
 @(require_results)
 pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	scorePhysicalDevice :: proc(
@@ -898,16 +995,12 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		deviceProperties: vk.PhysicalDeviceProperties2 = {
 			sType = .PHYSICAL_DEVICE_PROPERTIES_2,
 		}
-		deviceFeatures: vk.PhysicalDeviceFeatures2 = {
-			sType = .PHYSICAL_DEVICE_FEATURES_2,
-		}
 
 		vk.GetPhysicalDeviceProperties2(physicalDevice, &deviceProperties)
-		vk.GetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures)
 
 		indices, err := findQueueFamilies(physicalDevice, graphicsData)
 		if err ||
-		   !deviceFeatures.features.samplerAnisotropy ||
+		   !supportsRequestedFeatures(physicalDevice) ||
 		   !checkDeviceExtensionSupport(physicalDevice) ||
 		   !swapchainAdequate(physicalDevice, graphicsData) {
 			return
@@ -962,22 +1055,6 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	) -> b32 {
 		support := querySwapchainSupport(physicalDevice, graphicsData)
 		return len(support.formats) != 0 && len(support.modes) != 0
-	}
-
-	getMaxUsableSampleCount :: proc(physicalDevice: vk.PhysicalDevice) -> vk.SampleCountFlags {
-		deviceProperties: vk.PhysicalDeviceProperties2
-		vk.GetPhysicalDeviceProperties2(physicalDevice, &deviceProperties)
-
-		counts :=
-			deviceProperties.properties.limits.framebufferColorSampleCounts &
-			deviceProperties.properties.limits.framebufferDepthSampleCounts
-		if ._64 in counts do return {._64}
-		if ._32 in counts do return {._32}
-		if ._16 in counts do return {._16}
-		if ._8 in counts do return {._8}
-		if ._4 in counts do return {._4}
-		if ._2 in counts do return {._2}
-		return {._1}
 	}
 
 	deviceCount: u32
@@ -1056,59 +1133,13 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		append(&queueCreateInfos, queueCreateInfo)
 	}
 
-	maintenance7: vk.PhysicalDeviceMaintenance7FeaturesKHR = {
-		sType        = .PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR,
-		pNext        = nil,
-		maintenance7 = true,
-	}
-
-	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR = {
-		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
-		pNext                        = &maintenance7,
-		computeDerivativeGroupQuads  = true,
-		computeDerivativeGroupLinear = false,
-	}
-
-	features14: vk.PhysicalDeviceVulkan14Features = {
-		sType        = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
-		pNext        = &computeShaderDerivatives,
-		maintenance5 = true,
-	}
-
-	features13: vk.PhysicalDeviceVulkan13Features = {
-		sType                          = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-		pNext                          = &features14,
-		shaderDemoteToHelperInvocation = true,
-		synchronization2               = true,
-		dynamicRendering               = true,
-	}
-
-	features12: vk.PhysicalDeviceVulkan12Features = {
-		sType                     = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-		pNext                     = &features13,
-		shaderOutputViewportIndex = true,
-		shaderOutputLayer         = true,
-		timelineSemaphore         = true,
-		bufferDeviceAddress       = true,
-	}
-
-	features11: vk.PhysicalDeviceVulkan11Features = {
-		sType                = .PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-		pNext                = &features12,
-		multiview            = true,
-		shaderDrawParameters = true,
-	}
-
-	features: vk.PhysicalDeviceFeatures2 = {
-		sType = .PHYSICAL_DEVICE_FEATURES_2,
-		pNext = &features11,
-		features = {imageCubeArray = true, samplerAnisotropy = true},
-	}
+	features: DeviceFeatures
+	buildDeviceFeatures(&features, true)
 
 	requiredDeviceExtensions := DEVICE_EXTENSIONS
 	createInfo: vk.DeviceCreateInfo = {
 		sType                   = .DEVICE_CREATE_INFO,
-		pNext                   = &features,
+		pNext                   = &features.features,
 		flags                   = {},
 		queueCreateInfoCount    = u32(len(queueCreateInfos)),
 		pQueueCreateInfos       = raw_data(queueCreateInfos),
@@ -1249,16 +1280,26 @@ createSwapchain :: proc(using graphicsData: ^GraphicsData, oldSwapchain: vk.Swap
 		log(.Fatal, "Failed to create swapchain! vkResult: %v", res)
 	}
 
-	swapchain.images = make([]vk.Image, swapchainImageCount)
-	vk.GetSwapchainImagesKHR(
-		device,
-		swapchain.handle,
-		&swapchainImageCount,
-		raw_data(swapchain.images),
-	)
+	imageCount: u32
+	vk.GetSwapchainImagesKHR(device, swapchain.handle, &imageCount, nil)
 
-	swapchain.views = make([]vk.ImageView, swapchainImageCount)
-	for index in 0 ..< swapchainImageCount {
+	swapchain.images = make([]vk.Image, imageCount)
+	vk.GetSwapchainImagesKHR(device, swapchain.handle, &imageCount, raw_data(swapchain.images))
+
+	swapchain.presentReady = make([]vk.Semaphore, imageCount)
+	semaphoreInfo: vk.SemaphoreCreateInfo = {
+		sType = .SEMAPHORE_CREATE_INFO,
+		pNext = nil,
+		flags = {},
+	}
+	for &semaphore in swapchain.presentReady {
+		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &semaphore); res != .SUCCESS {
+			logf(.Fatal, "Failed to create present semaphore! vkResult: %v", res)
+		}
+	}
+
+	swapchain.views = make([]vk.ImageView, imageCount)
+	for index in 0 ..< imageCount {
 		err: ImageError
 		swapchain.views[index], err = createImageView(
 			graphicsData,
@@ -1280,8 +1321,13 @@ cleanupSwapchain :: proc(graphicsData: ^GraphicsData, swapchain: Swapchain) {
 		vk.DestroyImageView(graphicsData.device, view, nil)
 	}
 
+	for semaphore in swapchain.presentReady {
+		vk.DestroySemaphore(graphicsData.device, semaphore, nil)
+	}
+
 	delete(swapchain.images)
 	delete(swapchain.views)
+	delete(swapchain.presentReady)
 
 	vk.DestroySwapchainKHR(graphicsData.device, swapchain.handle, nil)
 }
@@ -1430,7 +1476,7 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 	allocInfo = {
 		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 		pNext              = nil,
-		commandPool        = computeCommandPool,
+		commandPool        = graphicsCommandPool,
 		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
@@ -1513,7 +1559,9 @@ endSingleTimeCommands :: proc(
 		flags = {},
 	}
 	vk.CreateFence(device, &fenceCreateInfo, nil, &fence)
-	vk.QueueSubmit(graphicsQueue, 1, &submitInfo, fence)
+
+	queue := computeCommandPool == commandPool ? computeQueue : graphicsQueue
+	vk.QueueSubmit(queue, 1, &submitInfo, fence)
 	vk.WaitForFences(device, 1, &fence, true, ~u64(0))
 	vk.DestroyFence(device, fence, nil)
 	vk.FreeCommandBuffers(device, commandPool, 1, &commandBuffer)
@@ -4117,7 +4165,7 @@ createPostProcessPipelineImages :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	cmdBuffer: vk.CommandBuffer
-	cmdBuffer, err = beginSingleTimeCommands(graphicsData, computeCommandPool)
+	cmdBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
 		log(.Fatal, "Failed to start commands! %v", err)
 	}
@@ -4180,7 +4228,7 @@ createPostProcessPipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		},
 	)
 
-	err = endSingleTimeCommands(graphicsData, cmdBuffer, computeCommandPool)
+	err = endSingleTimeCommands(graphicsData, cmdBuffer, graphicsCommandPool)
 	if err != nil {
 		log(.Fatal, "Failed to submit commands! %v", err)
 	}
@@ -5716,7 +5764,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = semaphores[.Imgui][currentFrame],
+					semaphore = swapchain.presentReady[imageIndex],
 					value = 0,
 					stageMask = {.BOTTOM_OF_PIPE},
 					deviceIndex = 0,
@@ -5734,7 +5782,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 		sType              = .PRESENT_INFO_KHR,
 		pNext              = nil,
 		waitSemaphoreCount = 1,
-		pWaitSemaphores    = &semaphores[.Imgui][currentFrame],
+		pWaitSemaphores    = &swapchain.presentReady[imageIndex],
 		swapchainCount     = 1,
 		pSwapchains        = &swapchain.handle,
 		pImageIndices      = &imageIndex,
