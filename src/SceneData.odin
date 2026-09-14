@@ -8,7 +8,7 @@ Object :: struct {
 	scale:       Vec3,
 	modelIdx:    u32,
 	instanceIdx: u32,
-	textureIdxs: [][len(TextureIndex)]u32,
+	textureIdxs: [][TextureIndex]u32,
 	animation:   ObjectAnimation,
 	attachment:  Attachment,
 }
@@ -93,6 +93,9 @@ deleteModel :: proc(model: ^Model) {
 	}
 	delete(model.animations)
 
+	for &bindpoint in model.bindpoints {
+		deleteBindpoint(&bindpoint)
+	}
 	delete(model.bindpoints)
 
 	delete(model.instances)

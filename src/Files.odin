@@ -1,30 +1,32 @@
 package Valhalla
 
-import ai "../assimp"
 import "core:os"
 import "core:strings"
 
+import ai "../assimp"
+import refdisk "../ref-disk"
+
 SceneData :: struct {
-	nameLength:   u32,
+	name:         string,
 	ambientLight: f32,
 	clearColour:  Vec4,
-	modelCount:   u32,
-	textureCount: u32,
-	objectCount:  u32,
-	lightCount:   u32,
-	cameraCount:  u32,
+	models:       [dynamic]string,
+	textures:     [dynamic]string,
+	objects:      [dynamic]ObjectComponent,
+	lights:       [dynamic]PointLight,
+	cameras:      [dynamic]Camera,
 }
 
 ObjectComponent :: struct {
-	nameLength:    u32,
-	flags:         ObjectFlags,
-	position:      Vec3,
-	rotation:      Quat,
-	scale:         Vec3,
-	modelIdx:      u32,
-	texturesCount: u32,
-	animation:     AnimationComponent,
-	attachment:    Attachment,
+	name:        string,
+	flags:       ObjectFlags,
+	position:    Vec3,
+	rotation:    Quat,
+	scale:       Vec3,
+	modelIdx:    u32,
+	textureIdxs: [][TextureIndex]u32,
+	animation:   AnimationComponent,
+	attachment:  Attachment,
 }
 
 AnimationComponent :: struct {
@@ -34,23 +36,13 @@ AnimationComponent :: struct {
 	end:     ObjectAnimationEnd,
 }
 
-LightComponent :: struct {
-	nameLength: u32,
+ModelComponent :: struct {
+	name:       string,
+	assetPath:  string,
 	position:   Vec3,
-	colour:     Vec3,
-	brightness: f32,
-	dropoff:    f32,
-}
-
-CameraComponent :: struct {
-	nameLength: u32,
-	mode:       CameraMode,
-	eye:        Vec3,
-	center:     Vec3,
-	up:         Vec3,
-	fov:        f32,
-	near:       f32,
-	far:        f32,
+	rotation:   Quat,
+	scale:      Vec3,
+	bindpoints: [dynamic]Bindpoint,
 }
 
 SaveError :: enum {
@@ -87,90 +79,45 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 	}
 	defer os.close(file)
 
-	saveData := SceneData {
-		nameLength   = u32(len(scene.name)),
+	sceneData := SceneData {
+		name         = scene.name,
 		ambientLight = scene.ambientLight,
 		clearColour  = scene.clearColour,
-		modelCount   = u32(len(scene.models)),
-		textureCount = u32(len(scene.textures)),
-		objectCount  = u32(len(scene.objects)),
-		lightCount   = u32(len(scene.lights)),
-		cameraCount  = u32(len(scene.cameras)),
-	}
-	_, err = os.write_ptr(file, &saveData, size_of(SceneData))
-	if err != nil {
-		return .IO
-	}
-	_, err = os.write_string(file, scene.name)
-	if err != nil {
-		return .IO
+		models       = make([dynamic]string, len(scene.models), context.temp_allocator),
+		textures     = make([dynamic]string, len(scene.textures), context.temp_allocator),
+		objects      = make([dynamic]ObjectComponent, len(scene.objects), context.temp_allocator),
+		lights       = scene.lights,
+		cameras      = scene.cameras,
 	}
 
-	for &model in scene.models {
-		length := u32(len(model.path))
-		os.write_ptr(file, &length, size_of(u32))
-		os.write_string(file, model.path)
+	for &model, i in scene.models {
+		sceneData.models[i] = model.path
 	}
 
-	for &texture in scene.textures {
-		length := u32(len(texture.path))
-		os.write_ptr(file, &length, size_of(u32))
-		os.write_string(file, texture.path)
+	for &texture, i in scene.textures {
+		sceneData.textures[i] = texture.path
 	}
 
-	for &object in scene.objects {
-		objectData := ObjectComponent {
-			nameLength = u32(len(object.name)),
-			flags = object.flags,
-			position = object.position,
-			rotation = object.rotation,
-			scale = object.scale,
-			modelIdx = object.modelIdx,
-			texturesCount = u32(len(object.textureIdxs)),
-			animation = AnimationComponent {
-				idx = object.animation.idx,
-				timer = object.animation.timer,
+	for &object, i in scene.objects {
+		sceneData.objects[i] = ObjectComponent {
+			name        = object.name,
+			flags       = object.flags,
+			position    = object.position,
+			rotation    = object.rotation,
+			scale       = object.scale,
+			modelIdx    = object.modelIdx,
+			textureIdxs = object.textureIdxs,
+			animation   = AnimationComponent {
+				idx     = object.animation.idx,
+				timer   = object.animation.timer,
 				playing = object.animation.playing,
-				end = object.animation.end,
+				end     = object.animation.end,
 			},
-			attachment = object.attachment,
+			attachment  = object.attachment,
 		}
-		os.write_ptr(file, &objectData, size_of(ObjectComponent))
-		os.write_string(file, object.name)
-		os.write_ptr(
-			file,
-			raw_data(object.textureIdxs),
-			len(object.textureIdxs) * size_of([len(TextureIndex)]u32),
-		)
 	}
 
-	for &light in scene.lights {
-		lightData := LightComponent {
-			nameLength = u32(len(light.name)),
-			position   = light.position,
-			colour     = light.colour,
-			brightness = light.brightness,
-			dropoff    = light.dropoff,
-		}
-		os.write_ptr(file, &lightData, size_of(LightComponent))
-		os.write_string(file, light.name)
-	}
-
-	for &camera in scene.cameras {
-		cameraData := CameraComponent {
-			nameLength = u32(len(camera.name)),
-			mode       = camera.mode,
-			eye        = camera.eye,
-			center     = camera.center,
-			up         = camera.up,
-			fov        = camera.fov,
-			near       = camera.near,
-			far        = camera.far,
-		}
-		os.write_ptr(file, &cameraData, size_of(CameraComponent))
-		os.write_string(file, camera.name)
-	}
-
+	refdisk.save(file, sceneData)
 	return .None
 }
 
@@ -192,51 +139,40 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 	}
 	defer os.close(file)
 
-	sceneData: SceneData
-	os.read_ptr(file, &sceneData, size_of(SceneData))
+	sceneData := refdisk.load(file, SceneData)
 
-	scene.name = string(make([]byte, sceneData.nameLength))
+	scene.name         = sceneData.name
 	scene.ambientLight = sceneData.ambientLight
-	scene.clearColour = sceneData.clearColour
-	scene.models = make([dynamic]Model, sceneData.modelCount)
-	scene.textures = make([dynamic]Texture, sceneData.textureCount)
-	scene.objects = make([dynamic]Object, sceneData.objectCount)
-	scene.lights = make([dynamic]PointLight, sceneData.lightCount)
-	scene.cameras = make([dynamic]Camera, sceneData.cameraCount)
-	scene.boneCount = 1
+	scene.clearColour  = sceneData.clearColour
+	scene.models       = make([dynamic]Model, len(sceneData.models))
+	scene.textures     = make([dynamic]Texture, len(sceneData.textures))
+	scene.objects      = make([dynamic]Object, len(sceneData.objects))
+	scene.lights       = sceneData.lights
+	scene.cameras      = sceneData.cameras
+	scene.boneCount    = 1
 
-	os.read(file, transmute([]byte)scene.name)
-
-	for &model in scene.models {
-		pathLength: u32
-		os.read_ptr(file, &pathLength, size_of(u32))
-		modelPath := make([]byte, pathLength)
-		os.read(file, modelPath)
-
-		model.path = string(modelPath)
-		lerr := loadModelComponent(&model)
+	for modelPath, i in sceneData.models {
+		model := &scene.models[i]
+		model.path = modelPath
+		lerr := loadModelComponent(model)
 		if lerr != .None {
 			logf(.Error, "Failed to load model \"%s\": %v", model.path, lerr)
 			return lerr
 		}
 
-		lerr = loadModel(scene, &model)
+		lerr = loadModel(scene, model)
 		if lerr != .None {
 			logf(.Error, "Failed to load model data \"%s\": %v", model.path, lerr)
 			return .Asset
 		}
 	}
 
-	texPaths := make([]string, sceneData.textureCount)
+	texPaths := make([]string, len(sceneData.textures))
 	defer delete(texPaths)
-	for &texture, idx in scene.textures {
-		pathLength: u32
-		os.read_ptr(file, &pathLength, size_of(u32))
-		texturePath := make([]byte, pathLength)
-		os.read(file, texturePath)
-
-		texture.path = string(texturePath)
-		lerr := loadTextureComponent(&texture)
+	for texturePath, idx in sceneData.textures {
+		texture := &scene.textures[idx]
+		texture.path = texturePath
+		lerr := loadTextureComponent(texture)
 		if lerr != .None {
 			logf(.Error, "Failed to load texture \"%s\": %v", texturePath, lerr)
 			return lerr
@@ -250,77 +186,32 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 		return .Asset
 	}
 
-	for &object, objectIdx in scene.objects {
-		objectData: ObjectComponent
-		os.read_ptr(file, &objectData, size_of(ObjectComponent))
-		object = {
-			name = string(make([]byte, objectData.nameLength)),
-			flags = objectData.flags,
-			position = objectData.position,
-			rotation = objectData.rotation,
-			scale = objectData.scale,
-			modelIdx = objectData.modelIdx,
-			instanceIdx = addInstance(scene, &scene.models[objectData.modelIdx], u32(objectIdx)),
-			textureIdxs = make([][len(TextureIndex)]u32, objectData.texturesCount),
-			animation = ObjectAnimation {
-				idx = objectData.animation.idx,
-				timer = objectData.animation.timer,
-				playing = objectData.animation.playing,
-				state = make([]Mat4, len(scene.models[objectData.modelIdx].skeleton)),
-				cache = make(
+	for &objData, objectIdx in sceneData.objects {
+		scene.objects[objectIdx] = {
+			name        = objData.name,
+			flags       = objData.flags,
+			position    = objData.position,
+			rotation    = objData.rotation,
+			scale       = objData.scale,
+			modelIdx    = objData.modelIdx,
+			instanceIdx = addInstance(scene, &scene.models[objData.modelIdx], u32(objectIdx)),
+			textureIdxs = objData.textureIdxs,
+			animation   = ObjectAnimation {
+				idx     = objData.animation.idx,
+				timer   = objData.animation.timer,
+				playing = objData.animation.playing,
+				state   = make([]Mat4, len(scene.models[objData.modelIdx].skeleton)),
+				cache   = make(
 					[]ObjectAnimationCache,
-					len(scene.models[objectData.modelIdx].skeleton),
+					len(scene.models[objData.modelIdx].skeleton),
 				),
-				end = objectData.animation.end,
+				end     = objData.animation.end,
 			},
-			attachment = objectData.attachment,
+			attachment  = objData.attachment,
 		}
-		os.read(file, transmute([]byte)object.name)
-		os.read_ptr(
-			file,
-			raw_data(object.textureIdxs),
-			int(objectData.texturesCount) * size_of([len(TextureIndex)]u32),
-		)
-	}
-
-	for &light in scene.lights {
-		lightData: LightComponent
-		os.read_ptr(file, &lightData, size_of(LightComponent))
-		light = {
-			name       = string(make([]byte, lightData.nameLength)),
-			position   = lightData.position,
-			colour     = lightData.colour,
-			brightness = lightData.brightness,
-			dropoff    = lightData.dropoff,
-		}
-		os.read(file, transmute([]byte)light.name)
-	}
-
-	for &camera in scene.cameras {
-		cameraData: CameraComponent
-		os.read_ptr(file, &cameraData, size_of(CameraComponent))
-		camera = {
-			name   = string(make([]byte, cameraData.nameLength)),
-			eye    = cameraData.eye,
-			center = cameraData.center,
-			up     = cameraData.up,
-			fov    = cameraData.fov,
-			near   = cameraData.near,
-			far    = cameraData.far,
-		}
-		os.read(file, transmute([]byte)camera.name)
 	}
 
 	return .None
-}
-
-ModelComponent :: struct {
-	nameLength:     u32,
-	pathLength:     u32,
-	position:       Vec3,
-	rotation:       Quat,
-	scale:          Vec3,
-	bindpointCount: u32,
 }
 
 saveModelComponent :: proc(model: ^Model) -> SaveError {
@@ -336,17 +227,14 @@ saveModelComponent :: proc(model: ^Model) -> SaveError {
 	defer os.close(file)
 
 	modelData := ModelComponent {
-		nameLength     = u32(len(model.name)),
-		pathLength     = u32(len(model.assetPath)),
-		position       = model.position,
-		rotation       = model.rotation,
-		scale          = model.scale,
-		bindpointCount = u32(len(model.bindpoints)),
+		name       = model.name,
+		assetPath  = model.assetPath,
+		position   = model.position,
+		rotation   = model.rotation,
+		scale      = model.scale,
+		bindpoints = model.bindpoints,
 	}
-	os.write_ptr(file, &modelData, size_of(ModelComponent))
-	os.write_string(file, model.name)
-	os.write_string(file, model.assetPath)
-	os.write_ptr(file, raw_data(model.bindpoints), len(model.bindpoints) * size_of(Bindpoint))
+	refdisk.save(file, modelData)
 
 	return .None
 }
@@ -360,23 +248,16 @@ loadModelComponent :: proc(model: ^Model) -> LoadError {
 	if err != nil {
 		return .IO
 	}
+	defer os.close(file)
 
-	modelData: ModelComponent
-	os.read_ptr(file, &modelData, size_of(ModelComponent))
+	modelData := refdisk.load(file, ModelComponent)
 
-	model.assetPath = string(make([]byte, modelData.pathLength))
-	model.name = string(make([]byte, modelData.nameLength))
-	model.position = modelData.position
-	model.rotation = modelData.rotation
-	model.scale = modelData.scale
-	model.bindpoints = make([dynamic]Bindpoint, modelData.bindpointCount)
-	os.read(file, transmute([]byte)model.name)
-	os.read(file, transmute([]byte)model.assetPath)
-	os.read_ptr(
-		file,
-		raw_data(model.bindpoints),
-		int(modelData.bindpointCount * size_of(Bindpoint)),
-	)
+	model.assetPath  = modelData.assetPath
+	model.name       = modelData.name
+	model.position   = modelData.position
+	model.rotation   = modelData.rotation
+	model.scale      = modelData.scale
+	model.bindpoints = modelData.bindpoints
 
 	return .None
 }
@@ -761,13 +642,8 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 }
 
 TextureComponent :: struct {
-	nameLength: u32,
-	pathLength: u32,
-	// In the future I should generate mips from the image at path
-	// and save the mips in a file so I can load it later
-	// width, height: u32,
-	// miplevels: u32,
-	// data: []byte,
+	name:      string,
+	assetPath: string,
 }
 
 saveTextureComponent :: proc(texture: ^Texture) -> SaveError {
@@ -783,12 +659,10 @@ saveTextureComponent :: proc(texture: ^Texture) -> SaveError {
 	defer os.close(file)
 
 	textureData := TextureComponent {
-		nameLength = u32(len(texture.name)),
-		pathLength = u32(len(texture.assetPath)),
+		name      = texture.name,
+		assetPath = texture.assetPath,
 	}
-	os.write_ptr(file, &textureData, size_of(TextureComponent))
-	os.write_string(file, texture.name)
-	os.write_string(file, texture.assetPath)
+	refdisk.save(file, textureData)
 
 	return .None
 }
@@ -804,14 +678,10 @@ loadTextureComponent :: proc(texture: ^Texture) -> LoadError {
 	}
 	defer os.close(file)
 
-	textureData: TextureComponent
-	os.read_ptr(file, &textureData, size_of(TextureComponent))
+	textureData := refdisk.load(file, TextureComponent)
 
-	texture.assetPath = string(make([]byte, textureData.pathLength))
-	texture.name = string(make([]byte, textureData.nameLength))
-
-	os.read(file, transmute([]byte)texture.name)
-	os.read(file, transmute([]byte)texture.assetPath)
+	texture.assetPath = textureData.assetPath
+	texture.name      = textureData.name
 
 	return .None
 }
