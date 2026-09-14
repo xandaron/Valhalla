@@ -51,10 +51,9 @@ package assimp
 
 
 when ODIN_OS == .Windows {
-    foreign import lib {
-        "vendor:zlib/libz.lib",
-        "libassimp.lib",
-    }
+    foreign import lib "libassimp.lib"
+    @(require, extra_linker_flags="/ignore:4099")
+    foreign import "../zlib/libz.lib"
 }
 else {
     foreign import lib {
