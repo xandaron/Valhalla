@@ -13,11 +13,6 @@ import "../imgui"
 import imguiGLFW "../imgui/imgui_impl_glfw"
 import imguiVulkan "../imgui/imgui_impl_vulkan"
 
-// ###################################################################
-// #                          Constants                              #
-// ###################################################################
-
-
 VERSION: u32 : (0 << 22) | (1 << 12) | (0)
 
 HDR_ENABLED: bool : false
@@ -108,12 +103,6 @@ DEPTH_BIAS_CONSTANT: f32 : 1.25
 @(private = "file")
 DEPTH_BIAS_SLOPE: f32 : 1.75
 
-
-// ###################################################################
-// #                        Callbacks                               #
-// ###################################################################
-
-
 ErrorLevel :: enum {
 	Warning,
 	Error,
@@ -126,12 +115,6 @@ GLFWMouseButtonCallback :: glfw.MouseButtonProc
 GLFWCursorPosCallback :: glfw.CursorPosProc
 GLFWScrollCallback :: glfw.ScrollProc
 GLFWErrorCallback :: glfw.ErrorProc
-
-
-// ###################################################################
-// #                           Shader Data                           #
-// ###################################################################
-
 
 @(private = "file")
 Transform_PushConstants :: struct {
@@ -210,12 +193,6 @@ InstanceInfo :: struct #align (16) {
 	modelTransform: Mat4,
 	boneOffset:     u32,
 }
-
-
-// ###################################################################
-// #                         Data Structures                         #
-// ###################################################################
-
 
 Error :: union #shared_nil {
 	InitError,
@@ -313,6 +290,7 @@ GraphicsData :: struct {
 	physicalDevice:      vk.PhysicalDevice,
 	device:              vk.Device,
 	memoryProperties:    vk.PhysicalDeviceMemoryProperties,
+	memoryAllocator:     MemoryAllocator,
 
 	// Queues
 	queueFamilies:       QueueFamilyIndices,
@@ -390,18 +368,18 @@ DescriptorSetIndex :: enum {
 
 @(private = "file")
 Buffer :: struct {
-	buffer: vk.Buffer,
-	memory: vk.DeviceMemory,
-	mapped: rawptr,
+	buffer:     vk.Buffer,
+	allocation: Allocation,
+	mapped:     rawptr,
 }
 
 @(private = "file")
 Image :: struct {
-	vkImage: vk.Image,
-	memory:  vk.DeviceMemory,
-	view:    vk.ImageView,
-	format:  vk.Format,
-	sampler: u32,
+	vkImage:    vk.Image,
+	allocation: Allocation,
+	view:       vk.ImageView,
+	format:     vk.Format,
+	sampler:    u32,
 }
 
 InitGraphicsInfo :: struct {
@@ -448,6 +426,9 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	initWindow(&graphicsData, initInfo.windowTitle) or_return
 	pickPhysicalDevice(&graphicsData) or_return
 	createLogicalDevice(&graphicsData) or_return
+
+	memoryAllocatorInit(&graphicsData.memoryAllocator, graphicsData.device, memoryProperties)
+
 	createSwapchain(&graphicsData)
 	createCommandBuffers(&graphicsData) or_return
 
@@ -458,20 +439,11 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 			bufferSize,
 			{.UNIFORM_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
-			&uniformBuffers[index].buffer,
-			&uniformBuffers[index].memory,
+			&uniformBuffers[index],
 		); err != nil {
 			log(.Fatal, "Failed to create uniform buffer!")
 			return graphicsData, err
 		}
-		vk.MapMemory(
-			device,
-			uniformBuffers[index].memory,
-			0,
-			vk.DeviceSize(bufferSize),
-			{},
-			&uniformBuffers[index].mapped,
-		)
 	}
 
 	depthFormat = findSupportedDepthFormat(
@@ -606,6 +578,9 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	cleanupSamplers(graphicsData)
+
+	memoryAllocatorReportLeaks(&graphicsData.memoryAllocator)
+	memoryAllocatorDestroy(&graphicsData.memoryAllocator)
 
 	vk.DestroyDevice(device, nil)
 	vk.DestroySurfaceKHR(instance, surface, nil)
@@ -1591,8 +1566,7 @@ createBuffer :: proc(
 	size: int,
 	usage: vk.BufferUsageFlags,
 	properties: vk.MemoryPropertyFlags,
-	buffer: ^vk.Buffer,
-	bufferMemory: ^vk.DeviceMemory,
+	buffer: ^Buffer,
 ) -> BufferError {
 	bufferInfo: vk.BufferCreateInfo = {
 		sType                 = .BUFFER_CREATE_INFO,
@@ -1604,9 +1578,8 @@ createBuffer :: proc(
 		queueFamilyIndexCount = 0,
 		pQueueFamilyIndices   = nil,
 	}
-	vkDevice := graphicsData.device
-	if res := vk.CreateBuffer(vkDevice, &bufferInfo, nil, buffer); res != .SUCCESS {
-		logf(.Error, "Failed to create buffer! vkResult: %d", res)
+	if res := vk.CreateBuffer(device, &bufferInfo, nil, &buffer.buffer); res != .SUCCESS {
+		logf(.Error, "Failed to create buffer! vkResult: %v", res)
 		return .FailedToCreateBuffer
 	}
 
@@ -1623,7 +1596,7 @@ createBuffer :: proc(
 		&vk.BufferMemoryRequirementsInfo2 {
 			sType = .BUFFER_MEMORY_REQUIREMENTS_INFO_2,
 			pNext = nil,
-			buffer = buffer^,
+			buffer = buffer.buffer,
 		},
 		&memoryRequirements,
 	)
@@ -1632,31 +1605,32 @@ createBuffer :: proc(
 		sType  = .MEMORY_DEDICATED_ALLOCATE_INFO,
 		pNext  = nil,
 		image  = 0,
-		buffer = buffer^,
+		buffer = buffer.buffer,
 	}
-
-	allocInfo: vk.MemoryAllocateInfo = {
-		sType           = .MEMORY_ALLOCATE_INFO,
-		pNext           = nil,
-		allocationSize  = memoryRequirements.memoryRequirements.size,
-		memoryTypeIndex = findMemoryType(
-			graphicsData,
-			memoryRequirements.memoryRequirements.memoryTypeBits,
-			properties,
-		),
-	}
+	dedicated: ^vk.MemoryDedicatedAllocateInfo
 	if dedicatedRequirements.prefersDedicatedAllocation ||
 	   dedicatedRequirements.requiresDedicatedAllocation {
-		allocInfo.pNext = &dedicatedInfo
+		dedicated = &dedicatedInfo
 	}
 
-	if res := vk.AllocateMemory(device, &allocInfo, nil, bufferMemory); res != .SUCCESS {
-		logf(.Error, "Failed to allocate buffer memory! vkResult: %d", res)
+	allocation, err := memoryAllocate(
+		&graphicsData.memoryAllocator,
+		memoryRequirements.memoryRequirements,
+		properties,
+		.Linear,
+		dedicated,
+	)
+	if err != .None {
+		vk.DestroyBuffer(device, buffer.buffer, nil)
+		buffer.buffer = 0
 		return .FailedToAllocateBufferMemory
 	}
+	buffer.allocation = allocation
+	buffer.mapped = allocation.mapped
 
-	if res := vk.BindBufferMemory(device, buffer^, bufferMemory^, 0); res != .SUCCESS {
-		logf(.Error, "Failed to bind buffer memory! vkResult: %d", res)
+	if res := vk.BindBufferMemory(device, buffer.buffer, allocation.memory, allocation.offset);
+	   res != .SUCCESS {
+		logf(.Error, "Failed to bind buffer memory! vkResult: %v", res)
 		return .FailedToBindBufferMemory
 	}
 
@@ -1678,26 +1652,21 @@ loadBufferToGPU :: proc(
 		bufferSize,
 		{.TRANSFER_SRC},
 		{.HOST_VISIBLE, .HOST_COHERENT},
-		&stagingBuffer.buffer,
-		&stagingBuffer.memory,
+		&stagingBuffer,
 	); err != nil {
 		logf(.Error, "Failed to create staging buffer! Error: %d", err)
 		return .FailedToCreateBuffer
 	}
 	defer deleteBuffer(graphicsData, &stagingBuffer)
 
-	data: rawptr
-	vk.MapMemory(device, stagingBuffer.memory, 0, vk.DeviceSize(bufferSize), {}, &data)
-	mem.copy(data, srcData, bufferSize)
-	vk.UnmapMemory(device, stagingBuffer.memory)
+	mem.copy(stagingBuffer.mapped, srcData, bufferSize)
 
 	if err := createBuffer(
 		graphicsData,
 		bufferSize,
 		{.TRANSFER_DST, .STORAGE_BUFFER, bufferType},
 		{.DEVICE_LOCAL},
-		&dstBuffer.buffer,
-		&dstBuffer.memory,
+		dstBuffer,
 	); err != nil {
 		logf(.Error, "Failed to create destination buffer! Error: %d", err)
 		return .FailedToCreateBuffer
@@ -1739,23 +1708,8 @@ loadBufferToGPU :: proc(
 @(private = "file")
 deleteBuffer :: proc(using graphicsData: ^GraphicsData, buffer: ^Buffer) {
 	vk.DestroyBuffer(device, buffer.buffer, nil)
-	vk.FreeMemory(device, buffer.memory, nil)
-}
-
-@(private = "file")
-findMemoryType :: proc(
-	using graphicsData: ^GraphicsData,
-	typeFilter: u32,
-	properties: vk.MemoryPropertyFlags,
-) -> u32 {
-	for i in 0 ..< memoryProperties.memoryTypeCount {
-		if typeFilter & (1 << i) != 0 &&
-		   (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties {
-			return i
-		}
-	}
-	log(.Error, "Failed to find suitable memory type!")
-	return 0
+	memoryFree(&graphicsData.memoryAllocator, &buffer.allocation)
+	buffer^ = {}
 }
 
 ImageError :: enum {
@@ -1831,29 +1785,29 @@ createImage :: proc(
 		image  = image.vkImage,
 		buffer = 0,
 	}
-
-	allocInfo: vk.MemoryAllocateInfo = {
-		sType           = .MEMORY_ALLOCATE_INFO,
-		pNext           = nil,
-		allocationSize  = memoryRequirements.memoryRequirements.size,
-		memoryTypeIndex = findMemoryType(
-			graphicsData,
-			memoryRequirements.memoryRequirements.memoryTypeBits,
-			properties,
-		),
-	}
+	dedicated: ^vk.MemoryDedicatedAllocateInfo
 	if dedicatedRequirements.prefersDedicatedAllocation ||
 	   dedicatedRequirements.requiresDedicatedAllocation {
-		allocInfo.pNext = &dedicatedInfo
+		dedicated = &dedicatedInfo
 	}
 
-	if res := vk.AllocateMemory(device, &allocInfo, nil, &image.memory); res != .SUCCESS {
-		logf(.Error, "Failed to allocate image memory! vkResult: %d", res)
+	allocation, err := memoryAllocate(
+		&graphicsData.memoryAllocator,
+		memoryRequirements.memoryRequirements,
+		properties,
+		.Linear if tiling == .LINEAR else .Optimal,
+		dedicated,
+	)
+	if err != .None {
+		vk.DestroyImage(device, image.vkImage, nil)
+		image.vkImage = 0
 		return .FailedToAllocateImageMemory
 	}
+	image.allocation = allocation
 
-	if res := vk.BindImageMemory(device, image.vkImage, image.memory, 0); res != .SUCCESS {
-		logf(.Error, "Failed to bind image memory! vkResult: %d", res)
+	if res := vk.BindImageMemory(device, image.vkImage, allocation.memory, allocation.offset);
+	   res != .SUCCESS {
+		logf(.Error, "Failed to bind image memory! vkResult: %v", res)
 		return .FailedToBindImageMemory
 	}
 
@@ -2280,8 +2234,7 @@ loadImages :: proc(
 			textureSize,
 			{.TRANSFER_SRC},
 			{.HOST_VISIBLE, .HOST_COHERENT},
-			&stagingBuffer.buffer,
-			&stagingBuffer.memory,
+			&stagingBuffer,
 		)
 		if err != nil {
 			logf(.Error, "Failed to create staging buffer! Error: %v", err)
@@ -2291,10 +2244,7 @@ loadImages :: proc(
 			deleteBuffer(graphicsData, &stagingBuffer)
 		}
 
-		data: rawptr
-		vk.MapMemory(device, stagingBuffer.memory, 0, vk.DeviceSize(textureSize), {}, &data)
-		mem.copy(data, pixels, textureSize)
-		vk.UnmapMemory(device, stagingBuffer.memory)
+		mem.copy(stagingBuffer.mapped, pixels, textureSize)
 
 		stagingImage: Image
 		stagingImage.format = .R8G8B8A8_SRGB
@@ -2320,7 +2270,7 @@ loadImages :: proc(
 
 		defer {
 			vk.DestroyImage(device, stagingImage.vkImage, nil)
-			vk.FreeMemory(device, stagingImage.memory, nil)
+			memoryFree(&graphicsData.memoryAllocator, &stagingImage.allocation)
 		}
 
 		commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
@@ -2540,8 +2490,7 @@ addImages :: proc(
 			textureSize,
 			{.TRANSFER_SRC},
 			{.HOST_VISIBLE, .HOST_COHERENT},
-			&stagingBuffer.buffer,
-			&stagingBuffer.memory,
+			&stagingBuffer,
 		)
 		if err != nil {
 			logf(.Error, "Failed to create staging buffer! Error: %v", err)
@@ -2551,10 +2500,7 @@ addImages :: proc(
 			deleteBuffer(graphicsData, &stagingBuffer)
 		}
 
-		data: rawptr
-		vk.MapMemory(device, stagingBuffer.memory, 0, vk.DeviceSize(textureSize), {}, &data)
-		mem.copy(data, pixels, textureSize)
-		vk.UnmapMemory(device, stagingBuffer.memory)
+		mem.copy(stagingBuffer.mapped, pixels, textureSize)
 
 		stagingImage: Image
 		stagingImage.format = .R8G8B8A8_SRGB
@@ -2581,7 +2527,7 @@ addImages :: proc(
 
 		defer {
 			vk.DestroyImage(device, stagingImage.vkImage, nil)
-			vk.FreeMemory(device, stagingImage.memory, nil)
+			memoryFree(&graphicsData.memoryAllocator, &stagingImage.allocation)
 		}
 
 		commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
@@ -2677,7 +2623,9 @@ addImages :: proc(
 deleteImage :: proc(using graphicsData: ^GraphicsData, image: ^Image) {
 	vk.DestroyImageView(device, image.view, nil)
 	vk.DestroyImage(device, image.vkImage, nil)
-	vk.FreeMemory(device, image.memory, nil)
+	memoryFree(&graphicsData.memoryAllocator, &image.allocation)
+	image.view = 0
+	image.vkImage = 0
 }
 
 updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
@@ -2728,20 +2676,11 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			instanceBufferSize,
 			{.STORAGE_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
-			&buffers.instanceBuffers[i].buffer,
-			&buffers.instanceBuffers[i].memory,
+			&buffers.instanceBuffers[i],
 		)
 		if err != nil {
 			logf(.Fatal, "Failed to create instance buffer! Error: %v", err)
 		}
-		vk.MapMemory(
-			graphicsData.device,
-			buffers.instanceBuffers[i].memory,
-			0,
-			vk.DeviceSize(instanceBufferSize),
-			{},
-			&buffers.instanceBuffers[i].mapped,
-		)
 
 		deleteBuffer(graphicsData, &buffers.boneBuffers[i])
 		err = createBuffer(
@@ -2749,20 +2688,11 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			boneBufferSize,
 			{.STORAGE_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
-			&buffers.boneBuffers[i].buffer,
-			&buffers.boneBuffers[i].memory,
+			&buffers.boneBuffers[i],
 		)
 		if err != nil {
 			logf(.Fatal, "Failed to create bone buffer! Error: %v", err)
 		}
-		vk.MapMemory(
-			graphicsData.device,
-			buffers.boneBuffers[i].memory,
-			0,
-			vk.DeviceSize(boneBufferSize),
-			{},
-			&buffers.boneBuffers[i].mapped,
-		)
 
 		deleteBuffer(graphicsData, &buffers.lightBuffers[i])
 		err = createBuffer(
@@ -2770,20 +2700,11 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			lightBufferSize,
 			{.STORAGE_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
-			&buffers.lightBuffers[i].buffer,
-			&buffers.lightBuffers[i].memory,
+			&buffers.lightBuffers[i],
 		)
 		if err != nil {
 			logf(.Fatal, "Failed to create light buffer! Error: %v", err)
 		}
-		vk.MapMemory(
-			graphicsData.device,
-			buffers.lightBuffers[i].memory,
-			0,
-			vk.DeviceSize(lightBufferSize),
-			{},
-			&buffers.lightBuffers[i].mapped,
-		)
 
 		deleteBuffer(graphicsData, &buffers.transformBuffers[i])
 		err = createBuffer(
@@ -2791,8 +2712,7 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			int(transformBufferSize),
 			{.STORAGE_BUFFER},
 			{.DEVICE_LOCAL},
-			&buffers.transformBuffers[i].buffer,
-			&buffers.transformBuffers[i].memory,
+			&buffers.transformBuffers[i],
 		)
 		if err != nil {
 			logf(.Fatal, "Failed to create transform buffer! Error: %v", err)
@@ -2805,20 +2725,11 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 		textureIndexSize,
 		{.STORAGE_BUFFER},
 		{.HOST_VISIBLE, .HOST_COHERENT},
-		&buffers.textureIndexBuffer.buffer,
-		&buffers.textureIndexBuffer.memory,
+		&buffers.textureIndexBuffer,
 	)
 	if err != nil {
 		logf(.Fatal, "Failed to create transform buffer! Error: %v", err)
 	}
-	vk.MapMemory(
-		graphicsData.device,
-		buffers.textureIndexBuffer.memory,
-		0,
-		vk.DeviceSize(textureIndexSize),
-		nil,
-		&buffers.textureIndexBuffer.mapped,
-	)
 	updateTextureIndexBuffer(graphicsData, scene)
 
 	deleteImage(graphicsData, &pipelines[.Light].images[0])
