@@ -140,6 +140,9 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 	defer os.close(file)
 
 	sceneData := refdisk.load(file, SceneData)
+	defer delete(sceneData.models)
+	defer delete(sceneData.textures)
+	defer delete(sceneData.objects)
 
 	scene.name         = sceneData.name
 	scene.ambientLight = sceneData.ambientLight
