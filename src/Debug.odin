@@ -2,6 +2,7 @@ package Valhalla
 
 import "base:runtime"
 import logging "core:log"
+import "core:strings"
 import vk "vendor:vulkan"
 
 VK_DEBUG_MESSENGER_CREATE_INFO := vk.DebugUtilsMessengerCreateInfoEXT {
@@ -27,13 +28,11 @@ logf :: proc(level: logging.Level, fmt_str: string, args: ..any, location := #ca
 	}
 }
 
-// GLFW
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
 	context = globals.runtimeContext
 	logf(.Error, "GLFW Error: Code %d, Description: %s", code, string(desc))
 }
 
-// Vulkan
 vkDebugCallback :: proc "system" (
 	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
 	messageType: vk.DebugUtilsMessageTypeFlagsEXT,
@@ -92,7 +91,6 @@ vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -
 	return "Unknown"
 }
 
-// Imgui Vulkan
 imguiCheckVkResult :: proc "c" (err: vk.Result) {
 	context = globals.runtimeContext
 	if int(err) == 0 {
@@ -105,3 +103,44 @@ imguiCheckVkResult :: proc "c" (err: vk.Result) {
 	logf(.Error, "[Imgui-Vulkan] Error: VkResult = %v", err)
 }
 
+vkNameObject :: proc(
+	device: vk.Device,
+	objectType: vk.ObjectType,
+	handle: u64,
+	name: string,
+	allocator := context.temp_allocator,
+) {
+	if vk.SetDebugUtilsObjectNameEXT == nil || handle == 0 {
+		return
+	}
+
+	nameInfo: vk.DebugUtilsObjectNameInfoEXT = {
+		sType        = .DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+		pNext        = nil,
+		objectType   = objectType,
+		objectHandle = handle,
+		pObjectName  = strings.clone_to_cstring(name, allocator),
+	}
+	vk.SetDebugUtilsObjectNameEXT(device, &nameInfo)
+}
+
+vkBeginLabel :: proc(commandBuffer: vk.CommandBuffer, name: cstring, colour: [4]f32 = {}) {
+	if vk.CmdBeginDebugUtilsLabelEXT == nil {
+		return
+	}
+
+	labelInfo: vk.DebugUtilsLabelEXT = {
+		sType      = .DEBUG_UTILS_LABEL_EXT,
+		pNext      = nil,
+		pLabelName = name,
+		color      = colour,
+	}
+	vk.CmdBeginDebugUtilsLabelEXT(commandBuffer, &labelInfo)
+}
+
+vkEndLabel :: proc(commandBuffer: vk.CommandBuffer) {
+	if vk.CmdEndDebugUtilsLabelEXT == nil {
+		return
+	}
+	vk.CmdEndDebugUtilsLabelEXT(commandBuffer)
+}

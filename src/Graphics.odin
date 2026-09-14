@@ -1,9 +1,7 @@
 #+feature using-stmt
 package Valhalla
 
-import "../imgui"
-import imguiGLFW "../imgui/imgui_impl_glfw"
-import imguiVulkan "../imgui/imgui_impl_vulkan"
+import "core:fmt"
 import "core:mem"
 import "core:os"
 import "core:strings"
@@ -11,6 +9,9 @@ import "vendor:glfw"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
 
+import "../imgui"
+import imguiGLFW "../imgui/imgui_impl_glfw"
+import imguiVulkan "../imgui/imgui_impl_vulkan"
 
 // ###################################################################
 // #                          Constants                              #
@@ -237,15 +238,13 @@ vkDebugMessengerCreateInfo :: vk.DebugUtilsMessengerCreateInfoEXT
 @(private = "file")
 SemaphoreIndex :: enum {
 	Transform = 0,
-	Main,
-	PostProcess,
+
 	Image,
 }
 
 @(private = "file")
 CmdBufferIndex :: enum {
 	Transform = 0,
-	Main,
 	Light,
 	Scene,
 	PostProcess,
@@ -347,7 +346,14 @@ GraphicsData :: struct {
 	currentFrame:        u32,
 	drawLights:          bool,
 	reloadBuffers:       bool,
-	rerecordCommands:    bool,
+	dirtyCommands:       bit_set[CmdBufferIndex],
+}
+
+DIRTY_ALL: bit_set[CmdBufferIndex] : {.Transform, .Light, .Scene, .PostProcess}
+DIRTY_GEOMETRY: bit_set[CmdBufferIndex] : {.Transform, .Light, .Scene}
+
+markCommandsDirty :: proc(graphicsData: ^GraphicsData, passes: bit_set[CmdBufferIndex]) {
+	graphicsData.dirtyCommands += passes
 }
 
 @(private = "file")
@@ -507,6 +513,8 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 
 	initImgui(&graphicsData)
 
+	nameCoreObjects(&graphicsData)
+
 	currentFrame = 0
 	contrast = 1.0
 	brightness = 0.0
@@ -536,12 +544,6 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 		computeCommandPool,
 		MAX_FRAMES_IN_FLIGHT,
 		&commandBuffers[.Transform][0],
-	)
-	vk.FreeCommandBuffers(
-		device,
-		graphicsCommandPool,
-		MAX_FRAMES_IN_FLIGHT,
-		&commandBuffers[.Main][0],
 	)
 	vk.FreeCommandBuffers(
 		device,
@@ -1372,8 +1374,7 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) {
 
 	cleanupImgui(graphicsData)
 	initImgui(graphicsData)
-	
-	graphicsData.rerecordCommands = true
+	markCommandsDirty(graphicsData, {.PostProcess})
 }
 
 CommandBufferError :: enum {
@@ -1408,22 +1409,6 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 	if res := vk.AllocateCommandBuffers(
 		device,
 		&allocInfo,
-		&commandBuffers[.Main][0],
-	); res != .SUCCESS {
-		log(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
-		return .FailedToAllocateCommandBuffer
-	}
-
-	allocInfo = {
-		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-		pNext              = nil,
-		commandPool        = graphicsCommandPool,
-		level              = .SECONDARY,
-		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
-	}
-	if res := vk.AllocateCommandBuffers(
-		device,
-		&allocInfo,
 		&commandBuffers[.Light][0],
 	); res != .SUCCESS {
 		log(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
@@ -1434,7 +1419,7 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 		pNext              = nil,
 		commandPool        = graphicsCommandPool,
-		level              = .SECONDARY,
+		level              = .PRIMARY,
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
 	if res := vk.AllocateCommandBuffers(
@@ -1451,7 +1436,7 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		pNext              = nil,
 		commandPool        = graphicsCommandPool,
 		level              = .PRIMARY,
-		commandBufferCount = 2,
+		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
 	if res := vk.AllocateCommandBuffers(
 		device,
@@ -2841,6 +2826,7 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	createLightPipelineImages(graphicsData, scene)
 
 	updateDescriptorSets(graphicsData, scene)
+	markCommandsDirty(graphicsData, DIRTY_ALL)
 	updateCommandBuffers(graphicsData, scene)
 }
 
@@ -3471,6 +3457,102 @@ Pipeline :: struct {
 	layout:     vk.PipelineLayout,
 	images:     []Image,
 	descriptor: vk.DescriptorImageInfo,
+}
+
+@(private = "file")
+nameCoreObjects :: proc(using graphicsData: ^GraphicsData) {
+	vkNameObject(device, .DEVICE, u64(uintptr(device)), "Device")
+	vkNameObject(device, .QUEUE, u64(uintptr(graphicsQueue)), "Queue: Graphics")
+	vkNameObject(device, .QUEUE, u64(uintptr(presentQueue)), "Queue: Present")
+	vkNameObject(device, .QUEUE, u64(uintptr(computeQueue)), "Queue: Compute")
+	vkNameObject(device, .SWAPCHAIN_KHR, u64(swapchain.handle), "Swapchain")
+
+	vkNameObject(
+		device,
+		.COMMAND_POOL,
+		u64(graphicsCommandPool),
+		"Command Pool: Graphics",
+	)
+	vkNameObject(device, .COMMAND_POOL, u64(computeCommandPool), "Command Pool: Compute")
+	vkNameObject(device, .PIPELINE_CACHE, u64(pipelineCache), "Pipeline Cache")
+
+	for pass in CmdBufferIndex {
+		for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+			vkNameObject(
+				device,
+				.COMMAND_BUFFER,
+				u64(uintptr(commandBuffers[pass][frame])),
+				fmt.tprintf("Cmd: %v [frame %v]", pass, frame),
+			)
+		}
+	}
+
+	for kind in SemaphoreIndex {
+		for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+			vkNameObject(
+				device,
+				.SEMAPHORE,
+				u64(semaphores[kind][frame]),
+				fmt.tprintf("Semaphore: %v [frame %v]", kind, frame),
+			)
+		}
+	}
+
+	for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		vkNameObject(
+			device,
+			.FENCE,
+			u64(inFlightFrames[frame]),
+			fmt.tprintf("Fence: In Flight [frame %v]", frame),
+		)
+	}
+
+	for index in PipelineIndex {
+		vkNameObject(
+			device,
+			.PIPELINE,
+			u64(pipelines[index].handle),
+			fmt.tprintf("Pipeline: %v", index),
+		)
+		vkNameObject(
+			device,
+			.PIPELINE_LAYOUT,
+			u64(pipelines[index].layout),
+			fmt.tprintf("Pipeline Layout: %v", index),
+		)
+
+		for &image, imageIndex in pipelines[index].images {
+			vkNameObject(
+				device,
+				.IMAGE,
+				u64(image.vkImage),
+				fmt.tprintf("Image: %v [%v]", index, imageIndex),
+			)
+			vkNameObject(
+				device,
+				.IMAGE_VIEW,
+				u64(image.view),
+				fmt.tprintf("Image View: %v [%v]", index, imageIndex),
+			)
+		}
+	}
+
+	for index in DescriptorSetIndex {
+		vkNameObject(
+			device,
+			.DESCRIPTOR_SET_LAYOUT,
+			u64(descriptorSets[index].layout),
+			fmt.tprintf("Descriptor Layout: %v", index),
+		)
+		for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+			vkNameObject(
+				device,
+				.DESCRIPTOR_SET,
+				u64(descriptorSets[index].sets[frame]),
+				fmt.tprintf("Descriptor Set: %v [frame %v]", index, frame),
+			)
+		}
+	}
 }
 
 @(private = "file")
@@ -4513,15 +4595,17 @@ updatePipelineShaders :: proc(
 	switch pipelineIndex {
 	case .Transform:
 		createTransformPipeline(graphicsData, shaders[0])
+		markCommandsDirty(graphicsData, {.Transform})
 	case .Light:
 		createLightPipeline(graphicsData, shaders)
+		markCommandsDirty(graphicsData, {.Light})
 	case .Scene:
 		createScenePipeline(graphicsData, shaders)
+		markCommandsDirty(graphicsData, {.Scene})
 	case .PostProcess:
 		createPostProcessPipeline(graphicsData, shaders[0])
+		markCommandsDirty(graphicsData, {.PostProcess})
 	}
-
-	graphicsData.rerecordCommands = true
 }
 
 @(private = "file")
@@ -4742,23 +4826,32 @@ updateTextureIndexBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
 
 @(private = "file")
 updateCommandBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
+	if dirtyCommands == nil {
+		return
+	}
+	defer dirtyCommands = nil
+
 	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
 		logf(.Error, "Failed to wait for device idle! vkResult: %v", res)
 		panic("Idk why this would ever fail.")
 	}
 
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.ResetCommandBuffer(commandBuffers[.Transform][bufferIndex], nil)
-		vk.ResetCommandBuffer(commandBuffers[.Light][bufferIndex], nil)
-		vk.ResetCommandBuffer(commandBuffers[.Scene][bufferIndex], nil)
-		vk.ResetCommandBuffer(commandBuffers[.Main][bufferIndex], nil)
-		vk.ResetCommandBuffer(commandBuffers[.Transform][bufferIndex], nil)
+		for pass in dirtyCommands {
+			vk.ResetCommandBuffer(commandBuffers[pass][bufferIndex], nil)
 
-		recordTransformCommands(graphicsData, bufferIndex, scene)
-		recordLightCommands(graphicsData, bufferIndex, scene)
-		recordSceneCommands(graphicsData, bufferIndex, scene)
-		recordMainCommands(graphicsData, bufferIndex, scene)
-		recordPostProcessCommands(graphicsData, bufferIndex)
+			switch pass {
+			case .Transform:
+				recordTransformCommands(graphicsData, bufferIndex, scene)
+			case .Light:
+				recordLightCommands(graphicsData, bufferIndex, scene)
+			case .Scene:
+				recordSceneCommands(graphicsData, bufferIndex, scene)
+			case .PostProcess:
+				recordPostProcessCommands(graphicsData, bufferIndex)
+			case .Imgui:
+			}
+		}
 	}
 }
 
@@ -4774,6 +4867,8 @@ recordTransformCommands :: proc(using graphicsData: ^GraphicsData, index: u32, s
 	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
 	}
+
+	vkBeginLabel(cmdBuffer, "Transform", {0.4, 0.8, 0.4, 1})
 
 	sets: [len(DescriptorSetIndex)]vk.DescriptorSet = {
 		descriptorSets[.Buffers].sets[currentFrame],
@@ -4840,13 +4935,18 @@ recordTransformCommands :: proc(using graphicsData: ^GraphicsData, index: u32, s
 		pushConstants.instance += u32(len(model.instances))
 	}
 
+	vkEndLabel(cmdBuffer)
+
 	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Fatal, "Failed to record command buffer! vkResult: %v", res)
 	}
 }
 
 @(private = "file")
-recordMainCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene: ^Scene) {
+recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene: ^Scene) {
+	lightCount := u32(len(scene.lights))
+	lightImageCount := lightCount * 6
+
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
@@ -4854,10 +4954,12 @@ recordMainCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene:
 		pInheritanceInfo = nil,
 	}
 
-	cmdBuffer := commandBuffers[.Main][index]
+	cmdBuffer := commandBuffers[.Light][index]
 	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
 	}
+
+	vkBeginLabel(cmdBuffer, "Shadow Maps", {0.9, 0.8, 0.3, 1})
 
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
@@ -4873,8 +4975,8 @@ recordMainCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene:
 			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
 				sType = .IMAGE_MEMORY_BARRIER_2,
 				pNext = nil,
-				srcStageMask = nil,
-				srcAccessMask = nil,
+				srcStageMask = {.FRAGMENT_SHADER},
+				srcAccessMask = {.SHADER_SAMPLED_READ},
 				dstStageMask = {.COLOR_ATTACHMENT_OUTPUT},
 				dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
 				oldLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -4887,7 +4989,7 @@ recordMainCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene:
 					baseMipLevel = 0,
 					levelCount = 1,
 					baseArrayLayer = 0,
-					layerCount = u32(len(scene.lights)) * 6,
+					layerCount = lightImageCount,
 				},
 			},
 		},
@@ -4898,12 +5000,12 @@ recordMainCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene:
 		&vk.RenderingInfo {
 			sType = .RENDERING_INFO,
 			pNext = nil,
-			flags = {.CONTENTS_SECONDARY_COMMAND_BUFFERS, .CONTENTS_INLINE_KHR},
+			flags = nil,
 			renderArea = vk.Rect2D {
 				offset = {0, 0},
 				extent = {SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y},
 			},
-			layerCount = u32(len(scene.lights)) * 6,
+			layerCount = lightImageCount,
 			viewMask = 0,
 			colorAttachmentCount = 1,
 			pColorAttachments = &vk.RenderingAttachmentInfo {
@@ -4933,224 +5035,6 @@ recordMainCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene:
 			pStencilAttachment = nil,
 		},
 	)
-	vk.CmdExecuteCommands(cmdBuffer, 1, &commandBuffers[.Light][index])
-	vk.CmdEndRendering(cmdBuffer)
-
-	imageBarriers3 := [?]vk.ImageMemoryBarrier2 {
-		{
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			pNext = nil,
-			srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
-			srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-			dstStageMask = {.FRAGMENT_SHADER},
-			dstAccessMask = {.SHADER_READ},
-			oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-			newLayout = .SHADER_READ_ONLY_OPTIMAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Light].images[0].vkImage,
-			subresourceRange = vk.ImageSubresourceRange {
-				aspectMask = {.COLOR},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = u32(len(scene.lights)) * 6,
-			},
-		},
-		{
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			pNext = nil,
-			srcStageMask = nil,
-			srcAccessMask = nil,
-			dstStageMask = {.COLOR_ATTACHMENT_OUTPUT},
-			dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-			oldLayout = .TRANSFER_SRC_OPTIMAL,
-			newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[0].vkImage,
-			subresourceRange = vk.ImageSubresourceRange {
-				aspectMask = {.COLOR},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-		},
-		{
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			pNext = nil,
-			srcStageMask = nil,
-			srcAccessMask = nil,
-			dstStageMask = {.EARLY_FRAGMENT_TESTS},
-			dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-			oldLayout = .SHADER_READ_ONLY_OPTIMAL,
-			newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[1].vkImage,
-			subresourceRange = vk.ImageSubresourceRange {
-				aspectMask = {.DEPTH},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-		},
-	}
-
-	vk.CmdPipelineBarrier2(
-		cmdBuffer,
-		&vk.DependencyInfo {
-			sType = .DEPENDENCY_INFO,
-			pNext = nil,
-			dependencyFlags = nil,
-			memoryBarrierCount = 0,
-			pMemoryBarriers = nil,
-			bufferMemoryBarrierCount = 0,
-			pBufferMemoryBarriers = nil,
-			imageMemoryBarrierCount = len(imageBarriers3),
-			pImageMemoryBarriers = &imageBarriers3[0],
-		},
-	)
-
-	vk.CmdBeginRendering(
-		cmdBuffer,
-		&vk.RenderingInfo {
-			sType = .RENDERING_INFO,
-			pNext = nil,
-			flags = {.CONTENTS_SECONDARY_COMMAND_BUFFERS, .CONTENTS_INLINE_KHR},
-			renderArea = vk.Rect2D{offset = {0, 0}, extent = {RENDER_SIZE.x, RENDER_SIZE.y}},
-			layerCount = 1,
-			viewMask = 0,
-			colorAttachmentCount = 1,
-			pColorAttachments = &vk.RenderingAttachmentInfo {
-				sType = .RENDERING_ATTACHMENT_INFO,
-				pNext = nil,
-				imageView = pipelines[.Scene].images[0].view,
-				imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-				resolveMode = nil,
-				resolveImageView = 0,
-				resolveImageLayout = .UNDEFINED,
-				loadOp = .CLEAR,
-				storeOp = .STORE,
-				clearValue = {color = {float32 = scene.clearColour}},
-			},
-			pDepthAttachment = &vk.RenderingAttachmentInfo {
-				sType = .RENDERING_ATTACHMENT_INFO,
-				pNext = nil,
-				imageView = pipelines[.Scene].images[1].view,
-				imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-				resolveMode = nil,
-				resolveImageView = 0,
-				resolveImageLayout = .UNDEFINED,
-				loadOp = .CLEAR,
-				storeOp = .STORE,
-				clearValue = {depthStencil = {depth = 1, stencil = 0}},
-			},
-			pStencilAttachment = nil,
-		},
-	)
-	vk.CmdExecuteCommands(cmdBuffer, 1, &commandBuffers[.Scene][index])
-	vk.CmdEndRendering(cmdBuffer)
-
-	imageBarriers2 := [?]vk.ImageMemoryBarrier2 {
-		{
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			pNext = nil,
-			srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
-			srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-			dstStageMask = {.BLIT},
-			dstAccessMask = {.TRANSFER_READ},
-			oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-			newLayout = .TRANSFER_SRC_OPTIMAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[0].vkImage,
-			subresourceRange = vk.ImageSubresourceRange {
-				aspectMask = {.COLOR},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-		},
-		{
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			pNext = nil,
-			srcStageMask = {.LATE_FRAGMENT_TESTS},
-			srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-			dstStageMask = {.FRAGMENT_SHADER},
-			dstAccessMask = {.SHADER_READ},
-			oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-			newLayout = .SHADER_READ_ONLY_OPTIMAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[1].vkImage,
-			subresourceRange = vk.ImageSubresourceRange {
-				aspectMask = {.DEPTH},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-		},
-	}
-	vk.CmdPipelineBarrier2(
-		cmdBuffer,
-		&vk.DependencyInfo {
-			sType = .DEPENDENCY_INFO,
-			pNext = nil,
-			dependencyFlags = nil,
-			memoryBarrierCount = 0,
-			pMemoryBarriers = nil,
-			bufferMemoryBarrierCount = 0,
-			pBufferMemoryBarriers = nil,
-			imageMemoryBarrierCount = len(imageBarriers2),
-			pImageMemoryBarriers = &imageBarriers2[0],
-		},
-	)
-
-	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
-		logf(.Fatal, "Failed to record command buffer! vkResult: %v", res)
-	}
-}
-
-@(private = "file")
-recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene: ^Scene) {
-	lightCount := u32(len(scene.lights))
-	lightImageCount := lightCount * 6
-
-	beginInfo: vk.CommandBufferBeginInfo = {
-		sType            = .COMMAND_BUFFER_BEGIN_INFO,
-		pNext            = nil,
-		flags            = {.RENDER_PASS_CONTINUE},
-		pInheritanceInfo = &vk.CommandBufferInheritanceInfo {
-			sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-			pNext = &vk.CommandBufferInheritanceRenderingInfo {
-				sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-				pNext = nil,
-				flags = nil,
-				viewMask = 0,
-				colorAttachmentCount = 1,
-				pColorAttachmentFormats = &pipelines[.Light].images[0].format,
-				depthAttachmentFormat = pipelines[.Light].images[1].format,
-				stencilAttachmentFormat = .UNDEFINED,
-				rasterizationSamples = {._1},
-			},
-			renderPass = 0,
-			subpass = 0,
-			framebuffer = 0,
-			occlusionQueryEnable = false,
-			queryFlags = nil,
-			pipelineStatistics = nil,
-		},
-	}
-
-	cmdBuffer := commandBuffers[.Light][index]
-	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
-		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
-	}
 
 	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Light].handle)
 
@@ -5240,6 +5124,44 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		}
 	}
 
+	vk.CmdEndRendering(cmdBuffer)
+
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 1,
+			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
+				sType = .IMAGE_MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+				srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+				dstStageMask = {.FRAGMENT_SHADER},
+				dstAccessMask = {.SHADER_SAMPLED_READ},
+				oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+				newLayout = .SHADER_READ_ONLY_OPTIMAL,
+				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				image = pipelines[.Light].images[0].vkImage,
+				subresourceRange = vk.ImageSubresourceRange {
+					aspectMask = {.COLOR},
+					baseMipLevel = 0,
+					levelCount = 1,
+					baseArrayLayer = 0,
+					layerCount = lightImageCount,
+				},
+			},
+		},
+	)
+
+	vkEndLabel(cmdBuffer)
+
 	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Fatal, "Failed to record command buffer! vkResult: %v", res)
 	}
@@ -5250,33 +5172,113 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
-		flags            = {.RENDER_PASS_CONTINUE},
-		pInheritanceInfo = &vk.CommandBufferInheritanceInfo {
-			sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-			pNext = &vk.CommandBufferInheritanceRenderingInfo {
-				sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-				pNext = nil,
-				flags = nil,
-				viewMask = 0,
-				colorAttachmentCount = 1,
-				pColorAttachmentFormats = &pipelines[.Scene].images[0].format,
-				depthAttachmentFormat = pipelines[.Scene].images[1].format,
-				stencilAttachmentFormat = .UNDEFINED,
-				rasterizationSamples = {._1},
-			},
-			renderPass = 0,
-			subpass = 0,
-			framebuffer = 0,
-			occlusionQueryEnable = false,
-			queryFlags = {},
-			pipelineStatistics = {},
-		},
+		flags            = nil,
+		pInheritanceInfo = nil,
 	}
 
 	cmdBuffer := commandBuffers[.Scene][index]
 	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
 	}
+
+	vkBeginLabel(cmdBuffer, "Scene", {0.4, 0.6, 0.9, 1})
+
+	entryBarriers := [?]vk.ImageMemoryBarrier2 {
+		{
+			sType = .IMAGE_MEMORY_BARRIER_2,
+			pNext = nil,
+			srcStageMask = {.BLIT},
+			srcAccessMask = {.TRANSFER_READ},
+			dstStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+			dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+			oldLayout = .TRANSFER_SRC_OPTIMAL,
+			newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			image = pipelines[.Scene].images[0].vkImage,
+			subresourceRange = vk.ImageSubresourceRange {
+				aspectMask = {.COLOR},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		},
+		{
+			sType = .IMAGE_MEMORY_BARRIER_2,
+			pNext = nil,
+			// Sampled as the depth source by the post-process pass last frame.
+			srcStageMask = {.FRAGMENT_SHADER, .COMPUTE_SHADER},
+			srcAccessMask = {.SHADER_SAMPLED_READ},
+			dstStageMask = {.EARLY_FRAGMENT_TESTS},
+			dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+			oldLayout = .SHADER_READ_ONLY_OPTIMAL,
+			newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			image = pipelines[.Scene].images[1].vkImage,
+			subresourceRange = vk.ImageSubresourceRange {
+				aspectMask = {.DEPTH},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		},
+	}
+
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = len(entryBarriers),
+			pImageMemoryBarriers = &entryBarriers[0],
+		},
+	)
+
+	vk.CmdBeginRendering(
+		cmdBuffer,
+		&vk.RenderingInfo {
+			sType = .RENDERING_INFO,
+			pNext = nil,
+			flags = nil,
+			renderArea = vk.Rect2D{offset = {0, 0}, extent = {RENDER_SIZE.x, RENDER_SIZE.y}},
+			layerCount = 1,
+			viewMask = 0,
+			colorAttachmentCount = 1,
+			pColorAttachments = &vk.RenderingAttachmentInfo {
+				sType = .RENDERING_ATTACHMENT_INFO,
+				pNext = nil,
+				imageView = pipelines[.Scene].images[0].view,
+				imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+				resolveMode = nil,
+				resolveImageView = 0,
+				resolveImageLayout = .UNDEFINED,
+				loadOp = .CLEAR,
+				storeOp = .STORE,
+				clearValue = {color = {float32 = scene.clearColour}},
+			},
+			pDepthAttachment = &vk.RenderingAttachmentInfo {
+				sType = .RENDERING_ATTACHMENT_INFO,
+				pNext = nil,
+				imageView = pipelines[.Scene].images[1].view,
+				imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+				resolveMode = nil,
+				resolveImageView = 0,
+				resolveImageLayout = .UNDEFINED,
+				loadOp = .CLEAR,
+				storeOp = .STORE,
+				clearValue = {depthStencil = {depth = 1, stencil = 0}},
+			},
+			pStencilAttachment = nil,
+		},
+	)
 
 	sets: [len(DescriptorSetIndex)]vk.DescriptorSet = {
 		descriptorSets[.Buffers].sets[currentFrame],
@@ -5348,6 +5350,68 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		}
 	}
 
+	vk.CmdEndRendering(cmdBuffer)
+
+	exitBarriers := [?]vk.ImageMemoryBarrier2 {
+		{
+			sType = .IMAGE_MEMORY_BARRIER_2,
+			pNext = nil,
+			srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+			srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+			dstStageMask = {.BLIT},
+			dstAccessMask = {.TRANSFER_READ},
+			oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+			newLayout = .TRANSFER_SRC_OPTIMAL,
+			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			image = pipelines[.Scene].images[0].vkImage,
+			subresourceRange = vk.ImageSubresourceRange {
+				aspectMask = {.COLOR},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		},
+		{
+			sType = .IMAGE_MEMORY_BARRIER_2,
+			pNext = nil,
+			srcStageMask = {.LATE_FRAGMENT_TESTS},
+			srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+			dstStageMask = {.FRAGMENT_SHADER, .COMPUTE_SHADER},
+			dstAccessMask = {.SHADER_SAMPLED_READ},
+			oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			newLayout = .SHADER_READ_ONLY_OPTIMAL,
+			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+			image = pipelines[.Scene].images[1].vkImage,
+			subresourceRange = vk.ImageSubresourceRange {
+				aspectMask = {.DEPTH},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		},
+	}
+
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = len(exitBarriers),
+			pImageMemoryBarriers = &exitBarriers[0],
+		},
+	)
+
+	vkEndLabel(cmdBuffer)
+
 	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Fatal, "Failed to record command buffer! vkResult: %v", res)
 	}
@@ -5367,12 +5431,14 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		logf(.Fatal, "Failed to start recording compute commands! vkResult: %v", res)
 	}
 
+	vkBeginLabel(cmdBuffer, "Post Process", {0.8, 0.4, 0.8, 1})
+
 	imageBarriers := [?]vk.ImageMemoryBarrier2 {
 		{
 			sType = .IMAGE_MEMORY_BARRIER_2,
 			pNext = nil,
-			srcStageMask = {},
-			srcAccessMask = nil,
+			srcStageMask = {.COMPUTE_SHADER},
+			srcAccessMask = {.SHADER_STORAGE_READ, .SHADER_SAMPLED_READ},
 			dstStageMask = {.BLIT},
 			dstAccessMask = {.TRANSFER_WRITE},
 			oldLayout = .GENERAL,
@@ -5391,8 +5457,8 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		{
 			sType = .IMAGE_MEMORY_BARRIER_2,
 			pNext = nil,
-			srcStageMask = nil,
-			srcAccessMask = nil,
+			srcStageMask = {.BLIT},
+			srcAccessMask = {.TRANSFER_READ},
 			dstStageMask = {.COMPUTE_SHADER},
 			dstAccessMask = {.SHADER_STORAGE_WRITE},
 			oldLayout = .TRANSFER_SRC_OPTIMAL,
@@ -5519,6 +5585,8 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		1,
 	)
 
+	vkEndLabel(cmdBuffer)
+
 	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Fatal, "Failed to record compute command buffer! vkResult: %v", res)
 	}
@@ -5538,6 +5606,8 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
 	}
 
+	vkBeginLabel(cmdBuffer, "Imgui", {0.7, 0.7, 0.7, 1})
+
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
 		&vk.DependencyInfo {
@@ -5552,8 +5622,8 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
 				sType = .IMAGE_MEMORY_BARRIER_2,
 				pNext = nil,
-				srcStageMask = {},
-				srcAccessMask = nil,
+				srcStageMask = {.COMPUTE_SHADER},
+				srcAccessMask = {.SHADER_STORAGE_WRITE},
 				dstStageMask = {.COLOR_ATTACHMENT_OUTPUT},
 				dstAccessMask = {.COLOR_ATTACHMENT_READ},
 				oldLayout = .GENERAL,
@@ -5577,7 +5647,7 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 		&vk.RenderingInfo {
 			sType = .RENDERING_INFO,
 			pNext = nil,
-			flags = {.CONTENTS_SECONDARY_COMMAND_BUFFERS, .CONTENTS_INLINE_KHR},
+			flags = nil,
 			renderArea = vk.Rect2D {
 				offset = {0, 0},
 				extent = {swapchain.extent.width, swapchain.extent.height},
@@ -5735,6 +5805,8 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 		},
 	)
 
+	vkEndLabel(cmdBuffer)
+
 	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
 		logf(.Fatal, "Failed to record ui command buffer! vkResult: %v", res)
 	}
@@ -5749,10 +5821,8 @@ updateSceneData :: proc(
 	if graphicsData.reloadBuffers {
 		updateSceneBuffers(graphicsData, scene)
 		graphicsData.reloadBuffers = false
-		graphicsData.rerecordCommands = false
-	} else if graphicsData.rerecordCommands {
+	} else {
 		updateCommandBuffers(graphicsData, scene)
-		graphicsData.rerecordCommands = false
 	}
 
 	updateUniformBuffer(graphicsData, scene, view, projection)
@@ -5839,136 +5909,60 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 		return .FailedToSubmitPreCommandBuffer
 	}
 
-	submitInfo = {
-		sType                    = .SUBMIT_INFO_2,
-		pNext                    = nil,
-		flags                    = {},
-		waitSemaphoreInfoCount   = 1,
-		pWaitSemaphoreInfos      = raw_data(
-			[]vk.SemaphoreSubmitInfo {
-				{
-					sType = .SEMAPHORE_SUBMIT_INFO,
-					pNext = nil,
-					semaphore = semaphores[.Transform][currentFrame],
-					value = 0,
-					stageMask = {.ALL_COMMANDS},
-					deviceIndex = 0,
-				},
-			},
-		),
-		commandBufferInfoCount   = 1,
-		pCommandBufferInfos      = raw_data(
-			[]vk.CommandBufferSubmitInfo {
-				{
-					sType = .COMMAND_BUFFER_SUBMIT_INFO,
-					pNext = nil,
-					commandBuffer = commandBuffers[.Main][currentFrame],
-					deviceMask = 0,
-				},
-			},
-		),
-		signalSemaphoreInfoCount = 1,
-		pSignalSemaphoreInfos    = raw_data(
-			[]vk.SemaphoreSubmitInfo {
-				{
-					sType = .SEMAPHORE_SUBMIT_INFO,
-					pNext = nil,
-					semaphore = semaphores[.Main][currentFrame],
-					value = 0,
-					stageMask = {.ALL_COMMANDS},
-					deviceIndex = 0,
-				},
-			},
-		),
+	graphicsCommandBuffers := [?]vk.CommandBufferSubmitInfo {
+		{
+			sType = .COMMAND_BUFFER_SUBMIT_INFO,
+			pNext = nil,
+			commandBuffer = commandBuffers[.Light][currentFrame],
+			deviceMask = 0,
+		},
+		{
+			sType = .COMMAND_BUFFER_SUBMIT_INFO,
+			pNext = nil,
+			commandBuffer = commandBuffers[.Scene][currentFrame],
+			deviceMask = 0,
+		},
+		{
+			sType = .COMMAND_BUFFER_SUBMIT_INFO,
+			pNext = nil,
+			commandBuffer = commandBuffers[.PostProcess][currentFrame],
+			deviceMask = 0,
+		},
+		{
+			sType = .COMMAND_BUFFER_SUBMIT_INFO,
+			pNext = nil,
+			commandBuffer = commandBuffers[.Imgui][currentFrame],
+			deviceMask = 0,
+		},
 	}
-	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, 0); res != .SUCCESS {
-		logf(.Fatal, "Failed to submit command buffer! vkResult: %v", res)
-		return .FailedToSubmitPreCommandBuffer
+
+	graphicsWaits := [?]vk.SemaphoreSubmitInfo {
+		{
+			sType = .SEMAPHORE_SUBMIT_INFO,
+			pNext = nil,
+			semaphore = semaphores[.Transform][currentFrame],
+			value = 0,
+			stageMask = {.ALL_COMMANDS},
+			deviceIndex = 0,
+		},
+		{
+			sType = .SEMAPHORE_SUBMIT_INFO,
+			pNext = nil,
+			semaphore = semaphores[.Image][currentFrame],
+			value = 0,
+			stageMask = {.BLIT},
+			deviceIndex = 0,
+		},
 	}
 
 	submitInfo = {
 		sType                    = .SUBMIT_INFO_2,
 		pNext                    = nil,
 		flags                    = {},
-		waitSemaphoreInfoCount   = 1,
-		pWaitSemaphoreInfos      = raw_data(
-			[]vk.SemaphoreSubmitInfo {
-				{
-					sType = .SEMAPHORE_SUBMIT_INFO,
-					pNext = nil,
-					semaphore = semaphores[.Main][currentFrame],
-					value = 0,
-					stageMask = {.ALL_COMMANDS},
-					deviceIndex = 0,
-				},
-			},
-		),
-		commandBufferInfoCount   = 1,
-		pCommandBufferInfos      = raw_data(
-			[]vk.CommandBufferSubmitInfo {
-				{
-					sType = .COMMAND_BUFFER_SUBMIT_INFO,
-					pNext = nil,
-					commandBuffer = commandBuffers[.PostProcess][currentFrame],
-					deviceMask = 0,
-				},
-			},
-		),
-		signalSemaphoreInfoCount = 1,
-		pSignalSemaphoreInfos    = raw_data(
-			[]vk.SemaphoreSubmitInfo {
-				{
-					sType = .SEMAPHORE_SUBMIT_INFO,
-					pNext = nil,
-					semaphore = semaphores[.PostProcess][currentFrame],
-					value = 0,
-					stageMask = {.ALL_COMMANDS},
-					deviceIndex = 0,
-				},
-			},
-		),
-	}
-	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, 0); res != .SUCCESS {
-		logf(.Fatal, "Failed to submit command buffer! vkResult: %v", res)
-		return .FailedToSubmitPreCommandBuffer
-	}
-
-	submitInfo = {
-		sType                    = .SUBMIT_INFO_2,
-		pNext                    = nil,
-		flags                    = {},
-		waitSemaphoreInfoCount   = 2,
-		pWaitSemaphoreInfos      = raw_data(
-			[]vk.SemaphoreSubmitInfo {
-				{
-					sType = .SEMAPHORE_SUBMIT_INFO,
-					pNext = nil,
-					semaphore = semaphores[.PostProcess][currentFrame],
-					value = 0,
-					stageMask = {.ALL_COMMANDS},
-					deviceIndex = 0,
-				},
-				{
-					sType = .SEMAPHORE_SUBMIT_INFO,
-					pNext = nil,
-					semaphore = semaphores[.Image][currentFrame],
-					value = 0,
-					stageMask = {.BLIT},
-					deviceIndex = 0,
-				},
-			},
-		),
-		commandBufferInfoCount   = 1,
-		pCommandBufferInfos      = raw_data(
-			[]vk.CommandBufferSubmitInfo {
-				{
-					sType = .COMMAND_BUFFER_SUBMIT_INFO,
-					pNext = nil,
-					commandBuffer = commandBuffers[.Imgui][currentFrame],
-					deviceMask = 0,
-				},
-			},
-		),
+		waitSemaphoreInfoCount   = len(graphicsWaits),
+		pWaitSemaphoreInfos      = &graphicsWaits[0],
+		commandBufferInfoCount   = len(graphicsCommandBuffers),
+		pCommandBufferInfos      = &graphicsCommandBuffers[0],
 		signalSemaphoreInfoCount = 1,
 		pSignalSemaphoreInfos    = raw_data(
 			[]vk.SemaphoreSubmitInfo {
@@ -5985,8 +5979,8 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	}
 	if res := vk.QueueSubmit2(graphicsQueue, 1, &submitInfo, inFlightFrames[currentFrame]);
 	   res != .SUCCESS {
-		logf(.Fatal, "Failed to submit command buffer! vkResult: %v", res)
-		return .FailedToSubmitPreCommandBuffer
+		logf(.Fatal, "Failed to submit graphics command buffers! vkResult: %v", res)
+		return .FailedToSubmitMainCommandBuffer
 	}
 
 	presentInfo: vk.PresentInfoKHR = {
@@ -6019,4 +6013,3 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 waitDeviceIdle :: proc(using graphicsData: ^GraphicsData) -> vk.Result {
 	return vk.DeviceWaitIdle(device)
 }
-
