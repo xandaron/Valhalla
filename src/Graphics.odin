@@ -18,7 +18,7 @@ import vk "vendor:vulkan"
 
 VERSION: u32 : (0 << 22) | (1 << 12) | (0)
 
-HDR_ENABLED: bool : true
+HDR_ENABLED: bool : false
 
 @(private = "file")
 REQUESTED_LAYERS: []cstring : {"VK_LAYER_KHRONOS_validation"}
@@ -712,7 +712,7 @@ createInstance :: proc(using graphicsData: ^GraphicsData, version: u32) -> Insta
 		logf(.Warning, "Couldn't find layer: %s", name)
 	}
 
-	features := [?]vk.ValidationFeatureEnableEXT{.GPU_ASSISTED, .SYNCHRONIZATION_VALIDATION}
+	features := [?]vk.ValidationFeatureEnableEXT{.SYNCHRONIZATION_VALIDATION}
 	validationFeatures: vk.ValidationFeaturesEXT = {
 		sType                          = .VALIDATION_FEATURES_EXT,
 		pNext                          = nil,
@@ -1062,22 +1062,17 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		maintenance7 = true,
 	}
 
-	maintenance5: vk.PhysicalDeviceMaintenance5Features = {
-		sType        = .PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES,
-		pNext        = &maintenance7,
-		maintenance5 = true,
-	}
-
 	computeShaderDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR = {
 		sType                        = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
-		pNext                        = &maintenance5,
+		pNext                        = &maintenance7,
 		computeDerivativeGroupQuads  = true,
 		computeDerivativeGroupLinear = false,
 	}
 
 	features14: vk.PhysicalDeviceVulkan14Features = {
-		sType = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
-		pNext = &computeShaderDerivatives,
+		sType        = .PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+		pNext        = &computeShaderDerivatives,
+		maintenance5 = true,
 	}
 
 	features13: vk.PhysicalDeviceVulkan13Features = {
@@ -1117,8 +1112,8 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		flags                   = {},
 		queueCreateInfoCount    = u32(len(queueCreateInfos)),
 		pQueueCreateInfos       = raw_data(queueCreateInfos),
-		enabledLayerCount       = u32(len(REQUESTED_LAYERS)),
-		ppEnabledLayerNames     = raw_data(REQUESTED_LAYERS),
+		enabledLayerCount       = 0,
+		ppEnabledLayerNames     = nil,
 		enabledExtensionCount   = u32(len(requiredDeviceExtensions)),
 		ppEnabledExtensionNames = raw_data(requiredDeviceExtensions),
 		pEnabledFeatures        = nil,
