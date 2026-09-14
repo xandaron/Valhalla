@@ -414,7 +414,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							model := &scene.models[modelIdx]
 							if imgui.Selectable(toCstring(model.name)) {
 								changeModel(scene, u32(objectIdx), u32(modelIdx))
-								textureIdxs := make([][len(TextureIndex)]u32, len(model.meshes))
+								textureIdxs := make([][TextureIndex]u32, len(model.meshes))
 								for i in 0 ..< min(len(model.meshes), len(object.textureIdxs)) {
 									textureIdxs[i] = object.textureIdxs[i]
 								}
@@ -442,17 +442,17 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							if imgui.BeginCombo(
 								fmt.ctprintf("Albedo%v", meshSuffix),
 								toCstring(
-									scene.textures[object.textureIdxs[meshIdx][TextureIndex.Albedo]].name,
+									scene.textures[object.textureIdxs[meshIdx][.Albedo]].name,
 								),
 							) {
 								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][TextureIndex.Albedo] ==
+									if object.textureIdxs[meshIdx][.Albedo] ==
 									   u32(textureIdx) {
 										continue
 									}
 
 									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][TextureIndex.Albedo] = u32(
+										object.textureIdxs[meshIdx][.Albedo] = u32(
 											textureIdx,
 										)
 										graphicsData.reloadBuffers = true
@@ -464,16 +464,16 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							if imgui.BeginCombo(
 								fmt.ctprintf("Normal Map%v", meshSuffix),
 								toCstring(
-									scene.textures[object.textureIdxs[meshIdx][TextureIndex.NormalMap]].name,
+									scene.textures[object.textureIdxs[meshIdx][.NormalMap]].name,
 								),
 							) {
 								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][TextureIndex.NormalMap] ==
+									if object.textureIdxs[meshIdx][.NormalMap] ==
 									   u32(textureIdx) {
 										continue
 									}
 									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][TextureIndex.NormalMap] = u32(
+										object.textureIdxs[meshIdx][.NormalMap] = u32(
 											textureIdx,
 										)
 										graphicsData.reloadBuffers = true
@@ -705,7 +705,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						scale = Vec3{1, 1, 1},
 						modelIdx = 0,
 						instanceIdx = 0,
-						textureIdxs = make([][len(TextureIndex)]u32, 1),
+						textureIdxs = make([][TextureIndex]u32, 1),
 						animation = ObjectAnimation{idx = -1},
 						attachment = Attachment{targetIdx = -1},
 					},

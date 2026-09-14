@@ -75,7 +75,7 @@ addObject :: proc(scene: ^Scene, modelIdx: u32) {
 			scale = Vec3{1, 1, 1},
 			modelIdx = modelIdx,
 			instanceIdx = addInstance(scene, &scene.models[modelIdx], u32(len(scene.objects))),
-			textureIdxs = make([][len(TextureIndex)]u32, len(scene.models[modelIdx].meshes)),
+			textureIdxs = make([][TextureIndex]u32, len(scene.models[modelIdx].meshes)),
 			animation = ObjectAnimation {
 				idx = -1,
 				state = make([]Mat4, len(scene.models[modelIdx].skeleton)),

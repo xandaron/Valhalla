@@ -45,8 +45,6 @@ odin build src -out:bin/valhalla.exe
 ./bin/valhalla.exe ./demo
 ```
 
-> **Note:** On Linux, you will need to install the GLFW 3.4+ library separately. Anything earlier will cause crashes.
-
 ## Roadmap
 
 Planned features and improvements:
