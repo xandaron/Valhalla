@@ -25,6 +25,7 @@ DEVICE_EXTENSIONS: []cstring : {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	vk.KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
 	vk.KHR_MAINTENANCE_7_EXTENSION_NAME,
+	vk.EXT_MEMORY_BUDGET_EXTENSION_NAME,
 }
 
 when HDR_ENABLED {
@@ -207,6 +208,7 @@ Error :: union #shared_nil {
 	DescriptorSetError,
 	ImageError,
 	BufferError,
+	StagingError,
 	DrawError,
 }
 
@@ -291,6 +293,7 @@ GraphicsData :: struct {
 	device:              vk.Device,
 	memoryProperties:    vk.PhysicalDeviceMemoryProperties,
 	memoryAllocator:     MemoryAllocator,
+	staging:             StagingRing,
 
 	// Queues
 	queueFamilies:       QueueFamilyIndices,
@@ -366,7 +369,6 @@ DescriptorSetIndex :: enum {
 	Textures,
 }
 
-@(private = "file")
 Buffer :: struct {
 	buffer:     vk.Buffer,
 	allocation: Allocation,
@@ -427,10 +429,16 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	pickPhysicalDevice(&graphicsData) or_return
 	createLogicalDevice(&graphicsData) or_return
 
-	memoryAllocatorInit(&graphicsData.memoryAllocator, graphicsData.device, memoryProperties)
+	memoryAllocatorInit(
+		&graphicsData.memoryAllocator,
+		graphicsData.device,
+		graphicsData.physicalDevice,
+		memoryProperties,
+	)
 
 	createSwapchain(&graphicsData)
 	createCommandBuffers(&graphicsData) or_return
+	stagingInit(&graphicsData) or_return
 
 	bufferSize := size_of(UniformBuffer)
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -510,6 +518,8 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	cleanupImgui(graphicsData)
+
+	stagingDestroy(graphicsData)
 
 	vk.FreeCommandBuffers(
 		device,
@@ -1559,7 +1569,6 @@ BufferError :: enum {
 	FailedToLoadBufferToGPU,
 }
 
-@(private = "file")
 @(require_results)
 createBuffer :: proc(
 	using graphicsData: ^GraphicsData,
@@ -1578,11 +1587,6 @@ createBuffer :: proc(
 		queueFamilyIndexCount = 0,
 		pQueueFamilyIndices   = nil,
 	}
-	if res := vk.CreateBuffer(device, &bufferInfo, nil, &buffer.buffer); res != .SUCCESS {
-		logf(.Error, "Failed to create buffer! vkResult: %v", res)
-		return .FailedToCreateBuffer
-	}
-
 	dedicatedRequirements: vk.MemoryDedicatedRequirements = {
 		sType = .MEMORY_DEDICATED_REQUIREMENTS,
 		pNext = nil,
@@ -1591,15 +1595,29 @@ createBuffer :: proc(
 		sType = .MEMORY_REQUIREMENTS_2,
 		pNext = &dedicatedRequirements,
 	}
-	vk.GetBufferMemoryRequirements2(
+	vk.GetDeviceBufferMemoryRequirements(
 		device,
-		&vk.BufferMemoryRequirementsInfo2 {
-			sType = .BUFFER_MEMORY_REQUIREMENTS_INFO_2,
+		&vk.DeviceBufferMemoryRequirements {
+			sType = .DEVICE_BUFFER_MEMORY_REQUIREMENTS,
 			pNext = nil,
-			buffer = buffer.buffer,
+			pCreateInfo = &bufferInfo,
 		},
 		&memoryRequirements,
 	)
+
+	if _, found := memoryFindType(
+		&graphicsData.memoryAllocator,
+		memoryRequirements.memoryRequirements.memoryTypeBits,
+		properties,
+	); !found {
+		logf(.Error, "No memory type supports a %v byte buffer with %v.", size, properties)
+		return .FailedToAllocateBufferMemory
+	}
+
+	if res := vk.CreateBuffer(device, &bufferInfo, nil, &buffer.buffer); res != .SUCCESS {
+		logf(.Error, "Failed to create buffer! vkResult: %v", res)
+		return .FailedToCreateBuffer
+	}
 
 	dedicatedInfo: vk.MemoryDedicatedAllocateInfo = {
 		sType  = .MEMORY_DEDICATED_ALLOCATE_INFO,
@@ -1646,21 +1664,6 @@ loadBufferToGPU :: proc(
 	dstBuffer: ^Buffer,
 	bufferType: vk.BufferUsageFlag,
 ) -> Error {
-	stagingBuffer: Buffer
-	if err := createBuffer(
-		graphicsData,
-		bufferSize,
-		{.TRANSFER_SRC},
-		{.HOST_VISIBLE, .HOST_COHERENT},
-		&stagingBuffer,
-	); err != nil {
-		logf(.Error, "Failed to create staging buffer! Error: %d", err)
-		return .FailedToCreateBuffer
-	}
-	defer deleteBuffer(graphicsData, &stagingBuffer)
-
-	mem.copy(stagingBuffer.mapped, srcData, bufferSize)
-
 	if err := createBuffer(
 		graphicsData,
 		bufferSize,
@@ -1668,44 +1671,29 @@ loadBufferToGPU :: proc(
 		{.DEVICE_LOCAL},
 		dstBuffer,
 	); err != nil {
-		logf(.Error, "Failed to create destination buffer! Error: %d", err)
-		return .FailedToCreateBuffer
+		logf(.Error, "Failed to create destination buffer! Error: %v", err)
+		return BufferError.FailedToCreateBuffer
 	}
 
-	commandBuffer, err := beginSingleTimeCommands(graphicsData, graphicsCommandPool)
-	if err != nil {
-		logf(.Error, "Failed to begin single time command buffer! Error: %d", err)
-		return .FailedToCreateBuffer
+	commandBuffer, cmdErr := stagingCommands(graphicsData)
+	if cmdErr != .None {
+		return cmdErr
 	}
 
-	copyRegion: vk.BufferCopy2 = {
-		sType     = .BUFFER_COPY_2,
-		pNext     = nil,
-		srcOffset = 0,
-		dstOffset = 0,
-		size      = vk.DeviceSize(bufferSize),
-	}
-
-	vk.CmdCopyBuffer2(
+	if err := stagingUploadBuffer(
+		graphicsData,
 		commandBuffer,
-		&vk.CopyBufferInfo2 {
-			sType = .COPY_BUFFER_INFO_2,
-			pNext = nil,
-			srcBuffer = stagingBuffer.buffer,
-			dstBuffer = dstBuffer.buffer,
-			regionCount = 1,
-			pRegions = &copyRegion,
-		},
-	)
-	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool); err != nil {
-		logf(.Error, "Failed to end single time command buffer! Error: %d", err)
-		return .FailedToCreateBuffer
+		dstBuffer.buffer,
+		0,
+		srcData,
+		vk.DeviceSize(bufferSize),
+	); err != .None {
+		return err
 	}
 
 	return nil
 }
 
-@(private = "file")
 deleteBuffer :: proc(using graphicsData: ^GraphicsData, buffer: ^Buffer) {
 	vk.DestroyBuffer(device, buffer.buffer, nil)
 	memoryFree(&graphicsData.memoryAllocator, &buffer.allocation)
@@ -1946,13 +1934,14 @@ copyBufferToImage :: proc(
 	using graphicsData: ^GraphicsData,
 	commandBuffer: vk.CommandBuffer,
 	buffer: vk.Buffer,
+	bufferOffset: vk.DeviceSize,
 	image: vk.Image,
 	width, height: u32,
 ) {
 	region: vk.BufferImageCopy2 = {
 		sType = .BUFFER_IMAGE_COPY_2,
 		pNext = nil,
-		bufferOffset = 0,
+		bufferOffset = bufferOffset,
 		bufferRowLength = 0,
 		bufferImageHeight = 0,
 		imageSubresource = vk.ImageSubresourceLayers {
@@ -2190,10 +2179,18 @@ loadImages :: proc(
 		return err
 	}
 
+	stagingImages := make([dynamic]Image, context.temp_allocator)
+	defer {
+		stagingWait(graphicsData)
+		for &staging in stagingImages {
+			vk.DestroyImage(device, staging.vkImage, nil)
+			memoryFree(&graphicsData.memoryAllocator, &staging.allocation)
+		}
+	}
+
 	commandBuffer: vk.CommandBuffer
-	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
+	commandBuffer, err = stagingCommands(graphicsData)
 	if err != nil {
-		logf(.Error, "Failed to begin single time commands! Error: %v", err)
 		return err
 	}
 
@@ -2206,11 +2203,6 @@ loadImages :: proc(
 		{.COLOR},
 		u32(len(imagePaths)),
 	)
-
-	if err := endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool); err != nil {
-		logf(.Error, "Failed to end single time commands! Error: %v", err)
-		return err
-	}
 
 	for path, index in imagePaths {
 		width, height: i32
@@ -2228,23 +2220,12 @@ loadImages :: proc(
 		}
 		textureSize := int(width * height * 4)
 
-		stagingBuffer: Buffer
-		err = createBuffer(
-			graphicsData,
-			textureSize,
-			{.TRANSFER_SRC},
-			{.HOST_VISIBLE, .HOST_COHERENT},
-			&stagingBuffer,
-		)
-		if err != nil {
-			logf(.Error, "Failed to create staging buffer! Error: %v", err)
-			return err
+		stagingOffset, stagingPtr, fits := stagingReserve(graphicsData, vk.DeviceSize(textureSize))
+		if !fits {
+			logf(.Error, "Texture larger than the staging ring: %v bytes.", textureSize)
+			return ImageError.FailedToLoadImage
 		}
-		defer {
-			deleteBuffer(graphicsData, &stagingBuffer)
-		}
-
-		mem.copy(stagingBuffer.mapped, pixels, textureSize)
+		mem.copy(stagingPtr, pixels, textureSize)
 
 		stagingImage: Image
 		stagingImage.format = .R8G8B8A8_SRGB
@@ -2268,14 +2249,10 @@ loadImages :: proc(
 			return err
 		}
 
-		defer {
-			vk.DestroyImage(device, stagingImage.vkImage, nil)
-			memoryFree(&graphicsData.memoryAllocator, &stagingImage.allocation)
-		}
+		append(&stagingImages, stagingImage)
 
-		commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
+		commandBuffer, err = stagingCommands(graphicsData)
 		if err != nil {
-			logf(.Error, "Failed to begin single time commands! Error: %v", err)
 			return err
 		}
 		transitionImageLayout(
@@ -2291,7 +2268,8 @@ loadImages :: proc(
 		copyBufferToImage(
 			graphicsData,
 			commandBuffer,
-			stagingBuffer.buffer,
+			graphicsData.staging.buffer,
+			stagingOffset,
 			stagingImage.vkImage,
 			u32(width),
 			u32(height),
@@ -2316,18 +2294,12 @@ loadImages :: proc(
 			0,
 			u32(index),
 		)
-		err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
-		if err != nil {
-			logf(.Error, "Failed to end single time commands! Error: %v", err)
-			return err
-		}
 	}
 
-	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
-	if err != nil {
-		logf(.Error, "Failed to begin single time commands! Error: %v", err)
-		return err
-	}
+	commandBuffer, err = stagingCommands(graphicsData)
+		if err != nil {
+			return err
+		}
 
 	transitionImageLayout(
 		graphicsData,
@@ -2339,11 +2311,6 @@ loadImages :: proc(
 		u32(len(imagePaths)),
 	)
 
-	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
-	if err != nil {
-		logf(.Error, "Failed to end single time commands! Error: %v", err)
-		return err
-	}
 
 	image.view, err = createImageView(
 		graphicsData,
@@ -2399,12 +2366,20 @@ addImages :: proc(
 		return err
 	}
 
-	commandBuffer: vk.CommandBuffer
-	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
-	if err != nil {
-		logf(.Error, "Failed to begin single time commands! Error: %v", err)
-		return err
+	stagingImages := make([dynamic]Image, context.temp_allocator)
+	defer {
+		stagingWait(graphicsData)
+		for &staging in stagingImages {
+			vk.DestroyImage(device, staging.vkImage, nil)
+			memoryFree(&graphicsData.memoryAllocator, &staging.allocation)
+		}
 	}
+
+	commandBuffer: vk.CommandBuffer
+	commandBuffer, err = stagingCommands(graphicsData)
+		if err != nil {
+			return err
+		}
 
 	transitionImageLayout(
 		graphicsData,
@@ -2458,11 +2433,6 @@ addImages :: proc(
 			pRegions = &copyInfo,
 		},
 	)
-	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
-	if err != nil {
-		logf(.Error, "Failed to end single time commands! Error: %v", err)
-		return err
-	}
 
 	// Crashing if error after this point
 	deleteImage(graphicsData, image)
@@ -2484,23 +2454,12 @@ addImages :: proc(
 		}
 		textureSize := int(width * height * 4)
 
-		stagingBuffer: Buffer
-		err = createBuffer(
-			graphicsData,
-			textureSize,
-			{.TRANSFER_SRC},
-			{.HOST_VISIBLE, .HOST_COHERENT},
-			&stagingBuffer,
-		)
-		if err != nil {
-			logf(.Error, "Failed to create staging buffer! Error: %v", err)
-			return err
+		stagingOffset, stagingPtr, fits := stagingReserve(graphicsData, vk.DeviceSize(textureSize))
+		if !fits {
+			logf(.Error, "Texture larger than the staging ring: %v bytes.", textureSize)
+			return ImageError.FailedToLoadImage
 		}
-		defer {
-			deleteBuffer(graphicsData, &stagingBuffer)
-		}
-
-		mem.copy(stagingBuffer.mapped, pixels, textureSize)
+		mem.copy(stagingPtr, pixels, textureSize)
 
 		stagingImage: Image
 		stagingImage.format = .R8G8B8A8_SRGB
@@ -2525,14 +2484,10 @@ addImages :: proc(
 			return err
 		}
 
-		defer {
-			vk.DestroyImage(device, stagingImage.vkImage, nil)
-			memoryFree(&graphicsData.memoryAllocator, &stagingImage.allocation)
-		}
+		append(&stagingImages, stagingImage)
 
-		commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
+		commandBuffer, err = stagingCommands(graphicsData)
 		if err != nil {
-			logf(.Error, "Failed to begin single time commands! Error: %v", err)
 			return err
 		}
 
@@ -2549,7 +2504,8 @@ addImages :: proc(
 		copyBufferToImage(
 			graphicsData,
 			commandBuffer,
-			stagingBuffer.buffer,
+			graphicsData.staging.buffer,
+			stagingOffset,
 			stagingImage.vkImage,
 			u32(width),
 			u32(height),
@@ -2575,18 +2531,12 @@ addImages :: proc(
 			imageLayers,
 		)
 
-		err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
-		if err != nil {
-			logf(.Error, "Failed to end single time commands! Error: %v", err)
-			return err
-		}
 	}
 
-	commandBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
-	if err != nil {
-		logf(.Error, "Failed to begin single time commands! Error: %v", err)
-		return err
-	}
+	commandBuffer, err = stagingCommands(graphicsData)
+		if err != nil {
+			return err
+		}
 
 	transitionImageLayout(
 		graphicsData,
@@ -2597,11 +2547,6 @@ addImages :: proc(
 		{.COLOR},
 		imageLayers,
 	)
-	err = endSingleTimeCommands(graphicsData, commandBuffer, graphicsCommandPool)
-	if err != nil {
-		logf(.Error, "Failed to end single time commands! Error: %v", err)
-		return err
-	}
 
 	image.view, err = createImageView(
 		graphicsData,
@@ -2657,6 +2602,8 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	if err != nil {
 		logf(.Fatal, "Failed to load index buffer! Error: %v", err)
 	}
+
+	stagingWait(graphicsData)
 
 	instanceBufferSize := size_of(InstanceInfo) * len(scene.objects)
 	boneBufferSize := size_of(Mat4) * scene.boneCount
