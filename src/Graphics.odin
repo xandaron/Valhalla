@@ -5,6 +5,7 @@ import "../imgui"
 import imguiGLFW "../imgui/imgui_impl_glfw"
 import imguiVulkan "../imgui/imgui_impl_vulkan"
 import "core:mem"
+import "core:os"
 import "core:strings"
 import "vendor:glfw"
 import img "vendor:stb/image"
@@ -312,6 +313,7 @@ GraphicsData :: struct {
 	surface:             vk.SurfaceKHR,
 	physicalDevice:      vk.PhysicalDevice,
 	device:              vk.Device,
+	memoryProperties:    vk.PhysicalDeviceMemoryProperties,
 
 	// Queues
 	queueFamilies:       QueueFamilyIndices,
@@ -325,6 +327,7 @@ GraphicsData :: struct {
 	// Pipelines
 	descriptorSets:      [DescriptorSetIndex]DescriptorSet,
 	pipelines:           [PipelineIndex]Pipeline,
+	pipelineCache:       vk.PipelineCache,
 
 	// Frame Resources
 	depthFormat:         vk.Format,
@@ -481,6 +484,8 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	createBuffersDescriptorSets(&graphicsData)
 	createTexturesDescriptorSets(&graphicsData)
 
+	createPipelineCache(&graphicsData)
+
 	createTransformPipeline(&graphicsData, initInfo.transformShader)
 
 	pipelines[.Light].images = make([]Image, 2)
@@ -578,6 +583,10 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	cleanupSwapchain(graphicsData, swapchain)
+
+	savePipelineCache(graphicsData)
+	vk.DestroyPipelineCache(device, pipelineCache, nil)
+
 	for &pipeline in pipelines {
 		cleanupPipeline(graphicsData, &pipeline)
 
@@ -1085,6 +1094,13 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		log(.Fatal, "No suitable physical device found!")
 		return .FailedToFindSuitableDevice
 	}
+
+	properties: vk.PhysicalDeviceMemoryProperties2 = {
+		sType = .PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+		pNext = nil,
+	}
+	vk.GetPhysicalDeviceMemoryProperties2(physicalDevice, &properties)
+	memoryProperties = properties.memoryProperties
 
 	return .None
 }
@@ -1603,14 +1619,46 @@ createBuffer :: proc(
 		return .FailedToCreateBuffer
 	}
 
-	memRequirements: vk.MemoryRequirements
-	vk.GetBufferMemoryRequirements(device, buffer^, &memRequirements)
+	dedicatedRequirements: vk.MemoryDedicatedRequirements = {
+		sType = .MEMORY_DEDICATED_REQUIREMENTS,
+		pNext = nil,
+	}
+	memoryRequirements: vk.MemoryRequirements2 = {
+		sType = .MEMORY_REQUIREMENTS_2,
+		pNext = &dedicatedRequirements,
+	}
+	vk.GetBufferMemoryRequirements2(
+		device,
+		&vk.BufferMemoryRequirementsInfo2 {
+			sType = .BUFFER_MEMORY_REQUIREMENTS_INFO_2,
+			pNext = nil,
+			buffer = buffer^,
+		},
+		&memoryRequirements,
+	)
+
+	dedicatedInfo: vk.MemoryDedicatedAllocateInfo = {
+		sType  = .MEMORY_DEDICATED_ALLOCATE_INFO,
+		pNext  = nil,
+		image  = 0,
+		buffer = buffer^,
+	}
+
 	allocInfo: vk.MemoryAllocateInfo = {
 		sType           = .MEMORY_ALLOCATE_INFO,
 		pNext           = nil,
-		allocationSize  = memRequirements.size,
-		memoryTypeIndex = findMemoryType(graphicsData, memRequirements.memoryTypeBits, properties),
+		allocationSize  = memoryRequirements.memoryRequirements.size,
+		memoryTypeIndex = findMemoryType(
+			graphicsData,
+			memoryRequirements.memoryRequirements.memoryTypeBits,
+			properties,
+		),
 	}
+	if dedicatedRequirements.prefersDedicatedAllocation ||
+	   dedicatedRequirements.requiresDedicatedAllocation {
+		allocInfo.pNext = &dedicatedInfo
+	}
+
 	if res := vk.AllocateMemory(device, &allocInfo, nil, bufferMemory); res != .SUCCESS {
 		logf(.Error, "Failed to allocate buffer memory! vkResult: %d", res)
 		return .FailedToAllocateBufferMemory
@@ -1697,11 +1745,9 @@ findMemoryType :: proc(
 	typeFilter: u32,
 	properties: vk.MemoryPropertyFlags,
 ) -> u32 {
-	memProperties: vk.PhysicalDeviceMemoryProperties
-	vk.GetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties)
-	for i in 0 ..< memProperties.memoryTypeCount {
+	for i in 0 ..< memoryProperties.memoryTypeCount {
 		if typeFilter & (1 << i) != 0 &&
-		   (memProperties.memoryTypes[i].propertyFlags & properties) == properties {
+		   (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties {
 			return i
 		}
 	}
@@ -1758,14 +1804,46 @@ createImage :: proc(
 		return .FailedToCreateImage
 	}
 
-	memRequirements: vk.MemoryRequirements
-	vk.GetImageMemoryRequirements(device, image.vkImage, &memRequirements)
+	dedicatedRequirements: vk.MemoryDedicatedRequirements = {
+		sType = .MEMORY_DEDICATED_REQUIREMENTS,
+		pNext = nil,
+	}
+	memoryRequirements: vk.MemoryRequirements2 = {
+		sType = .MEMORY_REQUIREMENTS_2,
+		pNext = &dedicatedRequirements,
+	}
+	vk.GetImageMemoryRequirements2(
+		device,
+		&vk.ImageMemoryRequirementsInfo2 {
+			sType = .IMAGE_MEMORY_REQUIREMENTS_INFO_2,
+			pNext = nil,
+			image = image.vkImage,
+		},
+		&memoryRequirements,
+	)
+
+	dedicatedInfo: vk.MemoryDedicatedAllocateInfo = {
+		sType  = .MEMORY_DEDICATED_ALLOCATE_INFO,
+		pNext  = nil,
+		image  = image.vkImage,
+		buffer = 0,
+	}
+
 	allocInfo: vk.MemoryAllocateInfo = {
 		sType           = .MEMORY_ALLOCATE_INFO,
 		pNext           = nil,
-		allocationSize  = memRequirements.size,
-		memoryTypeIndex = findMemoryType(graphicsData, memRequirements.memoryTypeBits, properties),
+		allocationSize  = memoryRequirements.memoryRequirements.size,
+		memoryTypeIndex = findMemoryType(
+			graphicsData,
+			memoryRequirements.memoryRequirements.memoryTypeBits,
+			properties,
+		),
 	}
+	if dedicatedRequirements.prefersDedicatedAllocation ||
+	   dedicatedRequirements.requiresDedicatedAllocation {
+		allocInfo.pNext = &dedicatedInfo
+	}
+
 	if res := vk.AllocateMemory(device, &allocInfo, nil, &image.memory); res != .SUCCESS {
 		logf(.Error, "Failed to allocate image memory! vkResult: %d", res)
 		return .FailedToAllocateImageMemory
@@ -3342,10 +3420,65 @@ Pipeline :: struct {
 }
 
 @(private = "file")
+PIPELINE_CACHE_PATH: string : "pipeline_cache.bin"
+
+@(private = "file")
+createPipelineCache :: proc(using graphicsData: ^GraphicsData) {
+	initialData, readErr := os.read_entire_file(PIPELINE_CACHE_PATH, context.temp_allocator)
+	if readErr != nil {
+		logf(.Info, "No pipeline cache at %v, starting cold.", PIPELINE_CACHE_PATH)
+		initialData = nil
+	}
+
+	cacheInfo: vk.PipelineCacheCreateInfo = {
+		sType           = .PIPELINE_CACHE_CREATE_INFO,
+		pNext           = nil,
+		flags           = {},
+		initialDataSize = len(initialData),
+		pInitialData    = raw_data(initialData),
+	}
+
+	if res := vk.CreatePipelineCache(device, &cacheInfo, nil, &pipelineCache); res != .SUCCESS {
+		logf(.Warning, "Failed to create pipeline cache! vkResult: %v", res)
+		pipelineCache = 0
+	}
+}
+
+@(private = "file")
+savePipelineCache :: proc(using graphicsData: ^GraphicsData) {
+	if pipelineCache == 0 {
+		return
+	}
+
+	size: int
+	if res := vk.GetPipelineCacheData(device, pipelineCache, &size, nil); res != .SUCCESS {
+		logf(.Warning, "Failed to size pipeline cache! vkResult: %v", res)
+		return
+	}
+
+	data := make([]byte, size, context.temp_allocator)
+	if res := vk.GetPipelineCacheData(device, pipelineCache, &size, raw_data(data));
+	   res != .SUCCESS {
+		logf(.Warning, "Failed to read pipeline cache! vkResult: %v", res)
+		return
+	}
+
+	if writeErr := os.write_entire_file(PIPELINE_CACHE_PATH, data); writeErr != nil {
+		logf(
+			.Warning,
+			"Failed to write pipeline cache to %v! Error: %v",
+			PIPELINE_CACHE_PATH,
+			writeErr,
+		)
+		return
+	}
+	logf(.Info, "Wrote %v bytes of pipeline cache to %v.", size, PIPELINE_CACHE_PATH)
+}
+
+@(private = "file")
 createTransformPipeline :: proc(
 	using graphicsData: ^GraphicsData,
 	shader: []byte,
-	pipelineCache: vk.PipelineCache = 0,
 ) {
 	layouts: [len(DescriptorSetIndex)]vk.DescriptorSetLayout = {
 		descriptorSets[.Buffers].layout,
@@ -3557,7 +3690,6 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 createLightPipeline :: proc(
 	using graphicsData: ^GraphicsData,
 	shaders: [][]byte,
-	pipelineCache: vk.PipelineCache = 0,
 ) {
 	layouts: [len(DescriptorSetIndex)]vk.DescriptorSetLayout = {
 		descriptorSets[.Buffers].layout,
@@ -3904,7 +4036,6 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 createScenePipeline :: proc(
 	using graphicsData: ^GraphicsData,
 	shaders: [][]byte,
-	pipelineCache: vk.PipelineCache = 0,
 ) {
 	layouts: [len(DescriptorSetIndex)]vk.DescriptorSetLayout = {
 		descriptorSets[.Buffers].layout,
@@ -4238,7 +4369,6 @@ createPostProcessPipelineImages :: proc(using graphicsData: ^GraphicsData) {
 createPostProcessPipeline :: proc(
 	using graphicsData: ^GraphicsData,
 	shader: []byte,
-	pipelineCache: vk.PipelineCache = 0,
 ) {
 	err: Error
 	layouts: [len(DescriptorSetIndex)]vk.DescriptorSetLayout = {
@@ -4322,20 +4452,19 @@ updatePipelineShaders :: proc(
 	using graphicsData: ^GraphicsData,
 	pipelineIndex: PipelineIndex,
 	shaders: [][]byte,
-	pipelineCache: vk.PipelineCache = 0,
 ) {
 	vk.DeviceWaitIdle(device)
 
 	cleanupPipeline(graphicsData, &pipelines[pipelineIndex])
 	switch pipelineIndex {
 	case .Transform:
-		createTransformPipeline(graphicsData, shaders[0], pipelineCache)
+		createTransformPipeline(graphicsData, shaders[0])
 	case .Light:
-		createLightPipeline(graphicsData, shaders, pipelineCache)
+		createLightPipeline(graphicsData, shaders)
 	case .Scene:
-		createScenePipeline(graphicsData, shaders, pipelineCache)
+		createScenePipeline(graphicsData, shaders)
 	case .PostProcess:
-		createPostProcessPipeline(graphicsData, shaders[0], pipelineCache)
+		createPostProcessPipeline(graphicsData, shaders[0])
 	}
 
 	graphicsData.rerecordCommands = true

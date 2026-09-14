@@ -8,3 +8,4 @@ docs/
 dump/
 run.bat
 *.dbg
+pipeline_cache.bin
