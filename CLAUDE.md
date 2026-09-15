@@ -114,7 +114,7 @@ and sampler properties live in `Textures.slang` via `extension HeapIndices`.
 Consequences worth knowing before touching pipelines, buffers or shaders:
 
 - `Shaders.odin` must set the `spvDescriptorHeapEXT` capability on the target
-  (`FindCapability` + a `Compiler_Option_Entry` of `.Capability`). Without it Slang silently falls
+  (`slang.find_capability` + a `Compiler_Option_Entry` of `.Capability`). Without it Slang silently falls
   back to descriptor-indexing and the pipelines fail validation. The `+capability` suffix on a
   profile string does **not** work through the API.
 - `VK_KHR_shader_untyped_pointers` and `shaderUntypedPointers` are required, because the untyped
@@ -143,8 +143,9 @@ resource. `beginSingleTimeCommands`/`endSingleTimeCommands` still exist but are 
 one-off layout transitions; they block, so do not use them for uploads.
 
 **Other files.** `Main.odin` owns the `globals` struct and the frame loop. `Files.odin` handles
-scene/model/texture serialisation (assimp). `Shaders.odin` compiles `.slang` sources at runtime through Slang's COM-lite
-interfaces (`slang/`, bound directly — there is no C shim);
+scene/model/texture serialisation (assimp). `Shaders.odin` compiles `.slang` sources at runtime through the `slang/`
+bindings, which wrap Slang's COM-lite interfaces as plain Odin procs (`slang.load_module`,
+`slang.release`, ...) — there is no C shim and no vtable calls at the call site;
 `IO.odin` hot-reloads them through `updatePipelineShaders`, which dirties only the affected pass.
 `UI.odin` is the imgui editor. `Debug.odin` has the log wrappers and the Vulkan debug-utils
 helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived objects in

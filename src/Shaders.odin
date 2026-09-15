@@ -25,16 +25,16 @@ compileShader :: proc(
 	err: CompileError,
 ) {
 	// TODO: Add ability to compile for multiple entry points at once.
-	blobToString :: proc(blob: ^slang.IBlob, allocator := context.temp_allocator) -> string {
+	blobToString :: proc(blob: ^slang.Blob, allocator := context.temp_allocator) -> string {
 		if blob == nil {
 			return ""
 		}
-		size := blob->GetBufferSize()
+		size := slang.get_buffer_size(blob)
 		if size == 0 {
 			return ""
 		}
 		return strings.clone_from_bytes(
-			([^]u8)(blob->GetBufferPointer())[:size],
+			([^]u8)(slang.get_buffer_pointer(blob))[:size],
 			allocator = allocator,
 		)
 	}
@@ -48,7 +48,7 @@ compileShader :: proc(
 	}
 	defer slang.release(globalSession)
 
-	heapCapability := globalSession->FindCapability("spvDescriptorHeapEXT")
+	heapCapability := slang.find_capability(globalSession, "spvDescriptorHeapEXT")
 	if heapCapability == 0 {
 		log(.Error, "Slang does not know the spvDescriptorHeapEXT capability!")
 		err = .Capability
@@ -61,7 +61,7 @@ compileShader :: proc(
 
 	target := slang.target_desc_default()
 	target.format = .SPIRV
-	target.profile = globalSession->FindProfile("spirv_1_6")
+	target.profile = slang.find_profile(globalSession, "spirv_1_6")
 	target.compilerOptionEntries = raw_data(targetOptions)
 	target.compilerOptionEntryCount = u32(len(targetOptions))
 
@@ -103,7 +103,7 @@ compileShader :: proc(
 	}
 	defer slang.release(ep)
 
-	components := []^slang.IComponentType{module, ep}
+	components := []^slang.Component_Type{module, ep}
 	program, programDiagnostics, programOk := slang.create_composite_component_type(
 		session,
 		components,
@@ -134,7 +134,7 @@ compileShader :: proc(
 	}
 	defer slang.release(codeBlob)
 
-	size := codeBlob->GetBufferSize()
+	size := slang.get_buffer_size(codeBlob)
 	if size == 0 {
 		log(.Error, "Shader code length is zero")
 		err = .Code
@@ -142,7 +142,7 @@ compileShader :: proc(
 	}
 
 	shaderCode = make([]u8, size)
-	mem.copy(raw_data(shaderCode), codeBlob->GetBufferPointer(), int(size))
+	mem.copy(raw_data(shaderCode), slang.get_buffer_pointer(codeBlob), int(size))
 	return
 }
 
