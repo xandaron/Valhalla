@@ -81,7 +81,8 @@ add new ones there rather than leaving TODO comments scattered in the source.
 
 ```sh
 odin build src --debug --linker:radlink -out:bin/valhalla.exe     # build
-./bin/valhalla.exe ./demo                # run (argument is the project directory)
+./bin/valhalla.exe ./demo/demo.project   # run (argument is the project file)
+./bin/valhalla.exe ./demo/demo.project ./scenes/bench.scene   # optional scene override
 ```
 
 There is no test suite, linter or build script. `odin build` is the only check; treat a clean
@@ -243,7 +244,21 @@ helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived o
 
 ## Conventions
 
-- The project directory is a runtime argument (`./demo`), and the app runs with it as its working
-  directory. Paths in `Main.odin` (`SCENE_PATH`, `SHADERS_PATH`, ...) are relative to it.
+- A **project file** is the runtime argument (`./demo/demo.project`), not a directory. The app
+  chdirs to the directory holding it, so every path inside the file stays relative to the file.
+  `loadProject` reads it into `globals.project` before anything else runs.
+- `SCENE_PATH()`, `RESOURCE_PATH()`, `SHADERS_PATH()` and `ASSETS_PATH()` are **procedures now,
+  not constants** — they read `globals.project`. They can't be concatenated at compile time, so
+  use `projectPath(dir, file)` to join, and `projectPathC` where a C API needs a cstring.
+- The engine can only **load** a project. Creating one is `tools/projectgen`; do not add project
+  authoring to the engine. Both tools import the engine's `ProjectData` so the format has one
+  definition.
+- A project file supplies its own data in full. Do **not** add fallbacks for unset fields — the
+  engine infers nothing, and `loadProject` rejects a project that leaves a required field blank.
+  Sensible defaults belong in `projectgen`, which bakes them into the file it writes, so what the
+  engine reads is always explicit.
+- `ProjectData.version` is the first field on purpose. refdisk is positional with no header, so
+  offset 0 is the only place a version can be read before the rest of the layout is trusted.
+  Bump `PROJECT_FORMAT_VERSION` when the struct changes.
 - `docs/` and `pipeline_cache.bin` are gitignored.
 - Commit only when asked.

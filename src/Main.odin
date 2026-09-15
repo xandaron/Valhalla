@@ -11,11 +11,6 @@ import "core:time"
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 APP_NAME :: "Valhalla Demo"
 
-SCENE_PATH :: "./scenes/"
-RESOURCE_PATH :: "./components/"
-SHADERS_PATH :: "./shaders/"
-ASSETS_PATH :: "./assets/"
-
 LOG_TO_FILE :: false
 
 frameCount: u32 = 0
@@ -36,6 +31,8 @@ cameraMove: Vec3 = {0, 0, 0}
 globals: struct {
 	runtimeContext: runtime.Context,
 	projectDir:     string,
+	projectFile:    string,
+	project:        ProjectData,
 
 	// Graphics Engine Data
 	graphicsData:   GraphicsData,
@@ -56,15 +53,42 @@ main :: proc() {
 	defer log.destroy_console_logger(context.logger)
 
 	if len(os.args) < 2 {
-		logf(.Error, "Usage: %v <path_to_project_file>", os.args[0])
+		logf(.Error, "Usage: %v <path_to_project_file> [scene]", os.args[0])
 		os.exit(1)
 	} else if !os.exists(os.args[1]) {
-		logf(.Error, "%v: Dir not found!", os.args[1])
+		logf(.Error, "%v: project file not found!", os.args[1])
 		os.exit(1)
 	}
 
-	globals.projectDir, _ = filepath.abs(os.args[1], context.allocator)
-	os.set_working_directory(os.args[1])
+	globals.projectFile, _ = filepath.abs(os.args[1], context.allocator)
+	globals.projectDir = filepath.dir(globals.projectFile)
+
+	// Every path inside the project file is relative to the file itself, so the working directory
+	// has to move before the first of them is resolved.
+	os.set_working_directory(globals.projectDir)
+
+	projectErr: LoadError
+	globals.project, projectErr = loadProject(globals.projectFile)
+	if projectErr != .None {
+		logf(.Error, "Failed to load project \"%v\": %v", globals.projectFile, projectErr)
+		os.exit(1)
+	}
+	if globals.project.root != "" && globals.project.root != "." {
+		root := strings.concatenate(
+			{globals.projectDir, "/", globals.project.root},
+			context.temp_allocator,
+		)
+		if !os.is_dir(root) {
+			logf(.Error, "Project root \"%v\" does not exist.", root)
+			os.exit(1)
+		}
+		os.set_working_directory(root)
+		delete(globals.projectDir)
+		globals.projectDir, _ = filepath.abs(".", context.allocator)
+	}
+
+	logf(.Info, "Project \"%v\" loaded from %v", globals.project.name, globals.projectFile)
+	defer deleteProject(&globals.project)
 
 	when ODIN_DEBUG {
 		tracker: mem.Tracking_Allocator
@@ -90,14 +114,14 @@ main :: proc() {
 	globals.runtimeContext = context
 
 	err: Error
-	transformComp, _ := compileShader("./shaders/Transform.slang", "comp", .COMPUTE)
-	lightVert, _ := compileShader("./shaders/Light.slang", "vert", .VERTEX)
-	lightFrag, _ := compileShader("./shaders/Light.slang", "frag", .FRAGMENT)
-	sceneVert, _ := compileShader("./shaders/Scene.slang", "vert", .VERTEX)
-	sceneFrag, _ := compileShader("./shaders/Scene.slang", "frag", .FRAGMENT)
-	gizmoVert, _ := compileShader("./shaders/Gizmo.slang", "vert", .VERTEX)
-	gizmoFrag, _ := compileShader("./shaders/Gizmo.slang", "frag", .FRAGMENT)
-	postProcessComp, _ := compileShader("./shaders/PostProcess.slang", "comp", .COMPUTE)
+	transformComp, _ := compileShader(projectPath(SHADERS_PATH(), "Transform.slang"), "comp", .COMPUTE)
+	lightVert, _ := compileShader(projectPath(SHADERS_PATH(), "Light.slang"), "vert", .VERTEX)
+	lightFrag, _ := compileShader(projectPath(SHADERS_PATH(), "Light.slang"), "frag", .FRAGMENT)
+	sceneVert, _ := compileShader(projectPath(SHADERS_PATH(), "Scene.slang"), "vert", .VERTEX)
+	sceneFrag, _ := compileShader(projectPath(SHADERS_PATH(), "Scene.slang"), "frag", .FRAGMENT)
+	gizmoVert, _ := compileShader(projectPath(SHADERS_PATH(), "Gizmo.slang"), "vert", .VERTEX)
+	gizmoFrag, _ := compileShader(projectPath(SHADERS_PATH(), "Gizmo.slang"), "frag", .FRAGMENT)
+	postProcessComp, _ := compileShader(projectPath(SHADERS_PATH(), "PostProcess.slang"), "comp", .COMPUTE)
 	defer delete(transformComp)
 	defer delete(lightVert)
 	defer delete(lightFrag)
@@ -120,7 +144,12 @@ main :: proc() {
 	)
 	defer cleanupGraphics(&globals.graphicsData)
 
-	append(&globals.scenes, Scene{path = strings.clone(len(os.args) > 2 ? os.args[2] : "./scenes/environment.scene")})
+	startupScene := len(os.args) > 2 ? os.args[2] : globals.project.startupScene
+	if startupScene == "" {
+		logf(.Error, "Project declares no startup scene and none was given on the command line.")
+		os.exit(1)
+	}
+	append(&globals.scenes, Scene{path = strings.clone(startupScene)})
 	assert(loadScene(&globals.scenes[0]) == nil)
 	defer {
 		for &scene in globals.scenes {

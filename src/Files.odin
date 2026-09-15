@@ -6,6 +6,87 @@ import "core:strings"
 import ai "../assimp"
 import refdisk "../ref-disk"
 
+SaveError :: enum {
+	None,
+	InvalidScene,
+	InvalidSceneData,
+	IO,
+}
+
+LoadError :: enum {
+	None,
+	InvalidArgument,
+	IO,
+	Asset,
+}
+
+PROJECT_FORMAT_VERSION :: u32(1)
+
+ProjectData :: struct {
+	version:        u32,
+	name:           string,
+	root:           string,
+	scenesPath:     string,
+	assetsPath:     string,
+	componentsPath: string,
+	shadersPath:    string,
+	startupScene:   string,
+	defaultModel:   string,
+	defaultAlbedo:  string,
+	defaultNormal:  string,
+}
+
+saveProject :: proc(path: string, project: ProjectData) -> SaveError {
+	file, err := os.open(path, {.Write, .Create, .Trunc})
+	if err != nil {
+		return .IO
+	}
+	defer os.close(file)
+
+	stored := project
+	stored.version = PROJECT_FORMAT_VERSION
+	refdisk.save(file, stored)
+	return .None
+}
+
+loadProject :: proc(path: string) -> (project: ProjectData, err: LoadError) {
+	file, ferr := os.open(path, {.Read})
+	if ferr != nil {
+		logf(.Error, "Failed to open project \"%s\": %v", path, ferr)
+		return {}, .IO
+	}
+	defer os.close(file)
+
+	project = refdisk.load(file, ProjectData)
+	if project.version != PROJECT_FORMAT_VERSION {
+		logf(
+			.Error,
+			"Project \"%s\" is format version %v, this build reads version %v.",
+			path,
+			project.version,
+			PROJECT_FORMAT_VERSION,
+		)
+		deleteProject(&project)
+		return {}, .InvalidArgument
+	}
+	return project, .None
+}
+
+deleteProject :: proc(project: ^ProjectData) {
+	delete(project.name)
+	delete(project.root)
+	delete(project.scenesPath)
+	delete(project.assetsPath)
+	delete(project.componentsPath)
+	delete(project.shadersPath)
+	delete(project.startupScene)
+	delete(project.defaultModel)
+	delete(project.defaultAlbedo)
+	delete(project.defaultNormal)
+}
+
+SCENE_FORMAT_VERSION :: u32(1)
+
 SceneData :: struct {
 	name:         string,
 	ambientLight: f32,
@@ -15,41 +96,6 @@ SceneData :: struct {
 	objects:      [dynamic]ObjectComponent,
 	lights:       [dynamic]PointLight,
 	cameras:      [dynamic]Camera,
-}
-
-ObjectComponent :: struct {
-	name:        string,
-	flags:       ObjectFlags,
-	position:    Vec3,
-	rotation:    Quat,
-	scale:       Vec3,
-	modelIdx:    u32,
-	textureIdxs: [][TextureIndex]u32,
-	animation:   AnimationComponent,
-	attachment:  Attachment,
-}
-
-AnimationComponent :: struct {
-	idx:     i32,
-	timer:   f64,
-	playing: bool,
-	end:     ObjectAnimationEnd,
-}
-
-ModelComponent :: struct {
-	name:       string,
-	assetPath:  string,
-	position:   Vec3,
-	rotation:   Quat,
-	scale:      Vec3,
-	bindpoints: [dynamic]Bindpoint,
-}
-
-SaveError :: enum {
-	None,
-	InvalidScene,
-	InvalidSceneData,
-	IO,
 }
 
 saveScene :: proc(scene: ^Scene) -> SaveError {
@@ -119,13 +165,6 @@ saveScene :: proc(scene: ^Scene) -> SaveError {
 
 	refdisk.save(file, sceneData)
 	return .None
-}
-
-LoadError :: enum {
-	None,
-	InvalidArgument,
-	IO,
-	Asset,
 }
 
 loadScene :: proc(scene: ^Scene) -> LoadError {
@@ -215,6 +254,36 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 	}
 
 	return .None
+}
+
+OBJECT_FORMAT_VERSION :: u32(1)
+
+ObjectComponent :: struct {
+	name:        string,
+	flags:       ObjectFlags,
+	position:    Vec3,
+	rotation:    Quat,
+	scale:       Vec3,
+	modelIdx:    u32,
+	textureIdxs: [][TextureIndex]u32,
+	animation:   AnimationComponent,
+	attachment:  Attachment,
+}
+
+AnimationComponent :: struct {
+	idx:     i32,
+	timer:   f64,
+	playing: bool,
+	end:     ObjectAnimationEnd,
+}
+
+ModelComponent :: struct {
+	name:       string,
+	assetPath:  string,
+	position:   Vec3,
+	rotation:   Quat,
+	scale:      Vec3,
+	bindpoints: [dynamic]Bindpoint,
 }
 
 saveModelComponent :: proc(model: ^Model) -> SaveError {
@@ -657,6 +726,8 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 	return .None
 }
 
+TEXTURE_FORMAT_VERSION :: u32(1)
+
 TextureComponent :: struct {
 	name:      string,
 	assetPath: string,
@@ -702,3 +773,15 @@ loadTextureComponent :: proc(texture: ^Texture) -> LoadError {
 	return .None
 }
 
+SCENE_PATH :: #force_inline proc() -> string {return globals.project.scenesPath}
+RESOURCE_PATH :: #force_inline proc() -> string {return globals.project.componentsPath}
+SHADERS_PATH :: #force_inline proc() -> string {return globals.project.shadersPath}
+ASSETS_PATH :: #force_inline proc() -> string {return globals.project.assetsPath}
+
+projectPath :: proc(directory, file: string) -> string {
+	return strings.concatenate({directory, file}, context.temp_allocator)
+}
+
+projectPathC :: proc(directory: string) -> cstring {
+	return strings.clone_to_cstring(directory, context.temp_allocator)
+}
