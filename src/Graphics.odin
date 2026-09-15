@@ -3007,6 +3007,9 @@ createSamplers :: proc(using graphicsData: ^GraphicsData) -> SamplerError {
 	vk.GetPhysicalDeviceProperties2(physicalDevice, &properties)
 	samplerInfo.anisotropyEnable = true
 	samplerInfo.maxAnisotropy = properties.properties.limits.maxSamplerAnisotropy
+	samplerInfo.addressModeU = .REPEAT
+	samplerInfo.addressModeV = .REPEAT
+	samplerInfo.addressModeW = .REPEAT
 	writeSamplerDescriptor(graphicsData, .Anisotropic, &samplerInfo)
 
 	return .None

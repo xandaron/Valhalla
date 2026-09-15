@@ -65,6 +65,7 @@ checkable work in [Tasks](#tasks).
 | 9 | **Renderer performance** — buffer consolidation, resize allocation churn, pipeline state objects | Partly done |
 | 10 | **Platform coverage** — macOS is written but unrun; Linux cannot be checked end to end | Blocked |
 | 11 | **Raytracing** | Not started |
+| 12 | **Test content** — procedurally generated scenes and assets that exercise the renderer, and the generator that produces them | Partly done |
 
 ## Tasks
 
@@ -303,6 +304,35 @@ normal-map view rather than reloading the shader.
 - [ ] Scope what raytracing means here — reflections, shadows, GI, or a full path tracer
 - [ ] Acceleration structure build and update
 - [ ] Ray pipeline or ray queries
+
+### 12. Test content
+
+`tools/scenegen` generates every mesh and texture it uses from code, so the output carries no
+third party licence and regenerating is deterministic. It imports the engine's own `SceneData`,
+`ModelComponent` and `TextureComponent` and writes them through `refdisk`, so it cannot drift
+from the on-disk format. Run it with the project directory, the same argument the engine takes:
+
+```sh
+odin build tools/scenegen -out:tools/scenegen/scenegen.exe
+./tools/scenegen/scenegen.exe ./demo            # -scene:bench|environment|all, -size:N
+```
+
+- [x] Procedural generator: plane, cube, sphere and torus as OBJ; checker, brick, tile, dome and
+      plaster as PNG, with normal maps derived from the same height fields
+- [x] `bench.scene` — diagnostic. Two spheres with identical albedo and geometry differing only
+      in normal map, a non-uniformly scaled cube to exercise the inverse transpose, a torus for
+      tangent handedness across a UV seam, and low ambient so relief stays readable
+- [x] `environment.scene` — a walled courtyard, to judge whether the whole thing looks right
+      rather than whether one feature works
+- [ ] **Mipmaps.** `createImage` hardcodes `mipLevels = 1`, so every texture aliases under
+      minification; the courtyard floor moirés badly at a distance. Needs a mip chain, generation
+      at load (or offline), and `maxLod` wired to it
+- [ ] Make the startup scene selectable. `Main.odin` hardcodes `./scenes/knight.scene`, so the
+      generated scenes can only be reached through the editor's Open Scene dialog
+- [ ] Scenes that cover what these two do not: skinned animation, many lights at once, and enough
+      geometry to be a performance test
+- [ ] Decide whether the generated assets belong in git or should be produced on demand. They are
+      about 2.6 MB and fully reproducible from the generator
 
 ## License
 

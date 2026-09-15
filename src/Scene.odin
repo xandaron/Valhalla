@@ -81,7 +81,7 @@ newScene :: proc(name, path: string) -> bool {
 		deleteScene(&scene)
 	}
 
-	append(&scene.models, Model{path = strings.clone(MODELS_PATH + "cube.model")})
+	append(&scene.models, Model{path = strings.clone(RESOURCE_PATH + "cube.model")})
 	model := &scene.models[0]
 	if err := loadModelComponent(model); err != .None {
 		logf(.Error, "Failed to load the cube model component: %v", err)
@@ -93,8 +93,8 @@ newScene :: proc(name, path: string) -> bool {
 	}
 
 	texturePaths := [?]string {
-		TEXTURES_PATH + "cube.texture",
-		TEXTURES_PATH + "blank_normal.texture",
+		RESOURCE_PATH + "cube.texture",
+		RESOURCE_PATH + "blank_normal.texture",
 	}
 	assetPaths := make([]string, len(texturePaths), context.temp_allocator)
 	for texturePath, i in texturePaths {

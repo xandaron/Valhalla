@@ -33,7 +33,7 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 		float4x4 boneTransform = float4x4(0.0);
 		for (uint j = 0; j < 4; j++) {
 			boneTransform +=
-					vertex.weights[j] * Resources.Bones[boneOffset + vertex.bones[i]];
+					vertex.weights[j] * Resources.Bones[boneOffset + vertex.bones[j]];
 		}
 
 		const float4x4 vertexTransform =

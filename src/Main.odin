@@ -12,8 +12,7 @@ APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 APP_NAME :: "Valhalla Demo"
 
 SCENE_PATH :: "./scenes/"
-MODELS_PATH :: "./scene_components/models/"
-TEXTURES_PATH :: "./scene_components/textures/"
+RESOURCE_PATH :: "./components/"
 SHADERS_PATH :: "./shaders/"
 ASSETS_PATH :: "./assets/"
 
@@ -121,7 +120,7 @@ main :: proc() {
 	)
 	defer cleanupGraphics(&globals.graphicsData)
 
-	append(&globals.scenes, Scene{path = strings.clone("./scenes/knight.scene")})
+	append(&globals.scenes, Scene{path = strings.clone(len(os.args) > 2 ? os.args[2] : "./scenes/environment.scene")})
 	assert(loadScene(&globals.scenes[0]) == nil)
 	defer {
 		for &scene in globals.scenes {

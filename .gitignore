@@ -1,11 +1,16 @@
+// User files
 bin/
 logs/
+proj/
 imgui.ini
-.zed/
-.vscode/
-ols.json
+pipeline_cache.bin
+*.dbg
+
+// Generated Files
+demo/components/*
+demo/assets/*
+
+// Misc
 docs/
 dump/
-run.bat
-*.dbg
-pipeline_cache.bin
+/tools
