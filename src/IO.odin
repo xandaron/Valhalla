@@ -136,6 +136,22 @@ scrollCallback: GLFWScrollCallback : proc "c" (window: WindowHandle, xoffset, yo
 	mouseDelta.z = f32(yoffset)
 }
 
+windowRefreshCallback: GLFWWindowRefreshCallback : proc "c" (window: WindowHandle) {
+	context = globals.runtimeContext
+	tickFrame()
+}
+
+framebufferSizeCallback: GLFWFramebufferSizeCallback : proc "c" (
+	window: WindowHandle,
+	width, height: i32,
+) {
+	context = globals.runtimeContext
+	if width == 0 || height == 0 {
+		return
+	}
+	tickFrame()
+}
+
 keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, action, mods: i32) {
 	if globals.uiData.lockInput {
 		return

@@ -7,6 +7,25 @@ game. Graphics is one component of that game, not the whole project.
 
 ## House rules
 
+### The engine is cross platform
+
+Valhalla targets more than Windows. Do not reach for a platform API because it is the quickest
+way to solve something. If a problem genuinely has no portable solution, every supported target
+needs a real implementation — a Windows path plus empty stubs is not acceptable. Where a
+platform needs nothing, say why in a comment so the empty body reads as a conclusion rather
+than a gap.
+
+Platform code goes in its own file using Odin's filename suffixes rather than `when ODIN_OS`
+blocks: `Graphics_windows.odin` and `Graphics_darwin.odin` are selected implicitly, and
+`Graphics_unix.odin` carries an explicit `#+build linux, freebsd, openbsd, netbsd`. Each defines
+the same procedure, so exactly one exists per target.
+
+`odin check src -target:<target>` is the check. It currently stops on `vendor:stb` missing
+prebuilt non-Windows binaries, which is a toolchain gap rather than a code problem; to verify
+platform files in isolation, copy them to a scratch package outside the repo with a stub `main`
+and check that against each target. That also catches a missing or duplicated definition, which
+is the main hazard of this layout.
+
 ### One file per component — do not split code up
 
 Do **not** create new `.odin` files. When you add functionality, put it in the file that already
@@ -16,6 +35,10 @@ split it.
 If something genuinely warrants its own file, say so and wait — that call is the user's, not
 yours. This has already been reversed once: the memory allocator, staging ring and descriptor
 heap were each written as separate files and later folded back into `src/Graphics.odin`.
+
+The sanctioned exception is platform code, which uses Odin's filename build tags
+(`Graphics_windows.odin`, `Graphics_darwin.odin`, `Graphics_unix.odin`). Do not fold these back
+into `Graphics.odin`.
 
 Inside a file, organise with section banners instead:
 
@@ -84,12 +107,41 @@ dirty through `markCommandsDirty` with `DIRTY_ALL`, `DIRTY_GEOMETRY` or an expli
 light change does not force the scene pass to re-record. Each pass owns a primary command buffer
 and records its own barriers, so passes are independent.
 
-The frame body lives in `tickFrame`, not in the loop itself. Dragging a window border puts Win32
-into a modal message loop where `glfwPollEvents` does not return, so the window refresh and
-framebuffer size callbacks call `tickFrame` to keep rendering during the drag; a `ticking` guard
-stops it re-entering. For the same reason `recreateSwapchain` must not tear down imgui — nothing
-in its init depends on the swapchain extent, and rebuilding the context per size change makes the
-overlay vanish while resizing.
+The frame body lives in `tickFrame`, not in the loop itself. Dragging a window border or title
+bar puts Win32 into a modal message loop where `glfwPollEvents` does not return, so three things
+drive frames during a drag, and all of them are needed:
+
+- the window refresh and framebuffer size callbacks, which fire only when something *changes*
+- `installModalLoopTimer`, which covers the case the callbacks miss: holding a border still
+  produces no messages at all. It lives in the per-platform `Graphics_*.odin` files:
+  - `Graphics_windows.odin` subclasses the window proc and runs a timer between
+    `WM_ENTERSIZEMOVE` and `WM_EXITSIZEMOVE`. It imports `core:sys/windows` directly, which is
+    only possible because the file is never compiled on other targets.
+  - `Graphics_darwin.odin` schedules an `NSTimer` through `core:sys/darwin/Foundation` and adds
+    it for `NSRunLoopCommonModes`. AppKit's live resize runs the main run loop in
+    `NSEventTrackingRunLoopMode`, which is one of those modes, so the timer keeps firing through
+    the drag; the default mode alone would not. It sends
+    `scheduledTimerWithTimeInterval:repeats:block:` via `intrinsics.objc_send` rather than the
+    package's `Timer_scheduledTimerWithTimeIntervalRepeatsBlock`, which passes only two
+    arguments to that three-argument selector and so drops the interval. Recheck that wrapper
+    when Odin updates. **Untested** — written without a Mac to run it on.
+  - `Graphics_unix.odin` is empty on purpose: X11 and Wayland are driven by configure events and
+    `glfwPollEvents` returns throughout, so the callbacks already cover the drag.
+
+  The macOS timer lives for the whole process, so `pollingEvents` (set around `glfwPollEvents`
+  in `updateWindow`) tells a stalled modal loop apart from ordinary frames.
+- a `ticking` guard, because `recreateSwapchain` can pump events itself via `glfw.WaitEvents`
+
+`recreateSwapchain` must not tear down imgui. Nothing in its init depends on the swapchain
+extent — only on the colour format, which does not change — and rebuilding the context on every
+size change makes the overlay vanish while resizing.
+
+The shadow pass uses multiview: one `CmdBeginRendering` per light with `viewMask` covering all
+six cube faces, and `Light.slang` takes the face from `SV_ViewID`. Multiview view *i* maps to
+layer *i* of the *attachment view*, so each light has its own six-layer view
+(`shadowColourViews` / `shadowDepthViews`); destroy those before the images they came from. Do
+not reintroduce `SV_RenderTargetArrayIndex` there — under multiview the layer is implied by the
+view index and writing Layer as well is invalid.
 
 `drawFrame` issues two submits: transform (compute queue), then Light/Scene/PostProcess/Imgui as
 one batch on the graphics queue. Ordering inside that batch comes from pipeline barriers recorded
