@@ -196,8 +196,13 @@ Consequences worth knowing before touching pipelines, buffers or shaders:
 - Heap indices in push data are **absolute** (`bufferSlotIndex`, `imageSlotIndex`,
   `textureSlotIndex`), scaled by that descriptor type's own size — the stride is
   `OpConstantSizeOfEXT`, so each region must start on a multiple of its descriptor size.
-- Scene textures keep their source resolution; each is its own image with a slot in the heap's
-  texture region, free-list allocated up to `MAX_HEAP_TEXTURES`.
+- Scene textures keep their source resolution; each is its own image, free-list allocated from the
+  heap's texture region up to `MAX_HEAP_TEXTURES`. Each one takes **two** slots, not one: the image
+  is created `MUTABLE_FORMAT` and viewed both as `R8G8B8A8_SRGB` and as `R8G8B8A8_UNORM`, because
+  whether a texture wants the sRGB decode depends on the slot it is read through, not on the file.
+  `TEXTURE_SLOT_IS_LINEAR` maps each `TextureIndex` to a view, and `updateTextureIndexBuffer`
+  writes the matching heap index. A new `TextureIndex` must be added there too — colour data is the
+  exception, not the default.
 - Samplers are not `VkSampler` objects; `vkWriteSamplerDescriptorsEXT` takes a
   `VkSamplerCreateInfo` directly.
 - There is no fixed-function vertex input. Pipelines declare zero bindings and attributes;

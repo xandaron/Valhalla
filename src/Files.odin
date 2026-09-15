@@ -422,22 +422,35 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 		mesh.vertexOffset = u32(len(scene.vertices))
 		mesh.indexOffset = u32(len(scene.indices))
 
-		for vertexIndex in 0 ..< sceneMesh.mNumVertices {
-			append(
-				&scene.vertices,
-				Vertex {
-					position = sceneMesh.mVertices[vertexIndex],
-					normal = sceneMesh.mNormals[vertexIndex],
-					tangent = sceneMesh.mTangents[vertexIndex],
-					bitangent = sceneMesh.mBitangents[vertexIndex],
-					uv = {
-						sceneMesh.mTextureCoords[0][vertexIndex].x,
-						sceneMesh.mTextureCoords[0][vertexIndex].y,
-					},
-					weights = {0.0, 0.0, 0.0, 0.0},
-					bones = {0, 0, 0, 0},
-				},
+		hasUVs := sceneMesh.mTextureCoords[0] != nil
+		hasTangentFrame := sceneMesh.mTangents != nil && sceneMesh.mBitangents != nil
+		if !hasTangentFrame {
+			logf(
+				.Warning,
+				"Mesh %v of %v has no tangent frame, so normal maps will not light it correctly.",
+				meshIndex,
+				model.assetPath,
 			)
+		}
+
+		for vertexIndex in 0 ..< sceneMesh.mNumVertices {
+			vertex := Vertex {
+				position = sceneMesh.mVertices[vertexIndex],
+				normal   = sceneMesh.mNormals[vertexIndex],
+				weights  = {0.0, 0.0, 0.0, 0.0},
+				bones    = {0, 0, 0, 0},
+			}
+			if hasTangentFrame {
+				vertex.tangent = sceneMesh.mTangents[vertexIndex]
+				vertex.bitangent = sceneMesh.mBitangents[vertexIndex]
+			}
+			if hasUVs {
+				vertex.uv = {
+					sceneMesh.mTextureCoords[0][vertexIndex].x,
+					sceneMesh.mTextureCoords[0][vertexIndex].y,
+				}
+			}
+			append(&scene.vertices, vertex)
 		}
 
 		for faceIdx in 0 ..< sceneMesh.mNumFaces {

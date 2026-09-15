@@ -56,14 +56,15 @@ checkable work in [Tasks](#tasks).
 | --- | --- | --- |
 | 1 | **Modern Vulkan foundations** — bindless descriptors, hand-rolled allocator, vertex pulling, multiview shadows, host image copy | Complete |
 | 2 | **Colour correctness** — colour space handling and light falloff | Partly done |
-| 3 | **Own imgui backends** — replace the vendored Vulkan and GLFW integrations to get control over colour, resources and callbacks | Not started |
-| 4 | **Normal mapping** — the tangent frame is currently broken, so normal maps are sampled but contribute nothing | Not started |
-| 5 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
-| 6 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
-| 7 | **Asset and shader pipeline** — shaders are hardcoded at startup; buffers are allocated one per purpose | Not started |
-| 8 | **Renderer performance** — buffer consolidation, resize allocation churn, pipeline state objects | Partly done |
-| 9 | **Platform coverage** — macOS is written but unrun; Linux cannot be checked end to end | Blocked |
-| 10 | **Raytracing** | Not started |
+| 3 | **Reflection-driven editor** — replace hand-written inspector widgets with `imreflect` | Not started |
+| 4 | **Own imgui backends** — replace the vendored Vulkan and GLFW integrations to get control over colour, resources and callbacks | Not started |
+| 5 | **Normal mapping** — tangent frame and linear sampling are fixed; no debug view or demo asset that exercises a real normal map | Partly done |
+| 6 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
+| 7 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
+| 8 | **Asset and shader pipeline** — shaders are hardcoded at startup; buffers are allocated one per purpose | Not started |
+| 9 | **Renderer performance** — buffer consolidation, resize allocation churn, pipeline state objects | Partly done |
+| 10 | **Platform coverage** — macOS is written but unrun; Linux cannot be checked end to end | Blocked |
+| 11 | **Raytracing** | Not started |
 
 ## Tasks
 
@@ -145,7 +146,34 @@ checkable work in [Tasks](#tasks).
       lights to `(2, 3, -4)` at 1600 lm) and raised knight's ambient from 0.01 to 0.3. Checked
       in SDR, since HDR captures are not representative
 
-### 3. Own imgui backends
+### 3. Reflection-driven editor
+
+`imreflect` is already vendored and currently unused. It walks any Odin value with `core:reflect`
+and emits imgui widgets for it — `draw_value(name, value: any)` handles every type kind, including
+nested structs, slices, dynamic arrays, maps, enums, bit sets, unions, matrices and quaternions.
+`src/UI.odin` is 992 lines with 38 hand-placed widgets, each naming a field that reflection could
+find on its own, and every new field on `PointLight` or `Camera` currently means editing the
+inspector by hand.
+
+- [ ] Drive the object, light, camera, model and texture inspectors from `ImRefl.draw_value`
+      instead of per-field `DragFloat3` calls
+- [ ] Adopt the `imrefl:"..."` struct tags (`read-only`, `padding`, `callable`). `refdisk`
+      already reads the same `imrefl` tag for `padding` and `ignore`, so one tag can describe
+      both how a field serialises and how it inspects — worth keeping them consistent rather
+      than inventing a second scheme
+- [ ] Decide how edits signal the renderer. This is the real design question, not the widget
+      code: today each widget sets `reloadBuffers` or calls `markCommandsDirty` itself, and a
+      generic inspector has no idea which fields need which. Options are a change counter per
+      inspected root, dirty flags derived from tags, or simply rebuilding when anything in a
+      scene changes
+- [ ] Keep hand-written controls where the widget triggers behaviour rather than editing data —
+      the HDR toggle must call `setHDREnabled` for the swapchain rebuild, and "New Scene" and
+      the shader reload are actions, not fields
+- [ ] Check what reflection exposes that should stay hidden: `Scene` holds `buffers: SceneBuffers`
+      full of Vulkan handles, and `Model` holds vertex data. Those want `padding`/`ignore` tags
+      before anything walks a whole `Scene`
+
+### 4. Own imgui backends
 
 Replace `imgui_impl_vulkan` and `imgui_impl_glfw` with integrations we own. The vendored ones are
 fine in isolation, but they each fight a decision made elsewhere in the engine.
@@ -166,16 +194,32 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
       drag. Owning setup makes it clear what actually depends on the swapchain, which is nothing.
 - [ ] Decide what stays vendored. The aim is to replace the two backends, not imgui itself.
 
-### 4. Normal mapping
+### 5. Normal mapping
 
-- [ ] Fix the tangent frame. `Scene.slang` builds its TBN with the tangent and bitangent rows
+- [x] Fix the tangent frame. `Scene.slang` builds its TBN with the tangent and bitangent rows
       zeroed, so only the normal is meaningful and the sampled normal map has no effect
-- [ ] Verify assimp is producing usable tangents, and generate them if it is not
-- [ ] Check the `Vertex` tangent/bitangent fields survive the std430 layout correctly
-- [ ] Add a normal-map-only debug view to confirm the result (the `norm` entry point exists but
-      is only as trustworthy as the TBN)
+- [x] Verify assimp is producing usable tangents, and generate them if it is not. `CalcTangentSpace`
+      was already set and does produce them; the gap was that `Files.odin` dereferenced
+      `mTangents`/`mBitangents`/`mTextureCoords[0]` without checking for null, which is what
+      assimp returns for a mesh with no UVs. Guarded, and it now warns instead
+- [x] Check the `Vertex` tangent/bitangent fields survive the std430 layout correctly. They do —
+      the explicit `u32` padding puts every `Vec3` on a 16-byte boundary and `size_of(Vertex)` is
+      112, matching the shader struct
+- [x] Sample normal maps through a linear view. Every texture was created as `R8G8B8A8_SRGB`, so
+      the hardware applied an sRGB decode to normal maps too and a flat (128,128,255) map
+      resolved to roughly (-0.57,-0.57,1). Textures are now `MUTABLE_FORMAT` with a second UNORM
+      view in its own heap slot, and `TEXTURE_SLOT_IS_LINEAR` picks the view per texture slot
+- [ ] Add a normal-map-only debug view to confirm the result. The `norm` entry point exists and is
+      now trustworthy, and the `R` key in `IO.odin` does compile it — but only by hijacking the
+      shader reload path, which swaps the scene pipeline to it one way with no way back. Make it a
+      real toggle; see the hot reload tasks under 8
+- [ ] Add a demo asset with a real normal map. Both demo meshes use the flat map, so nothing in
+      the scene currently exercises a non-trivial tangent frame end to end
+- [ ] Reconsider `VkImageFormatListCreateInfo`. `MUTABLE_FORMAT` without a format list lets
+      drivers disable texture compression conservatively; `createImage` has no `pNext` hook to
+      pass one through yet
 
-### 5. Light types
+### 6. Light types
 
 - [ ] Directional lights
 - [ ] Spot lights
@@ -183,7 +227,7 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
       single struct in `SceneData.odin`
 - [ ] Editor support for creating and editing each type
 
-### 6. Shadow quality and cost
+### 7. Shadow quality and cost
 
 - [x] One draw per light rather than six (multiview)
 - [ ] Per-face culling — every light currently submits all geometry to all six views
@@ -191,7 +235,7 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
 - [ ] Cascaded shadow maps for directional lights (depends on roadmap 3)
 - [ ] Revisit the fixed 512x512 `SHADOW_RESOLUTION` and the 20-sample PCF loop
 
-### 7. Asset and shader pipeline
+### 8. Asset and shader pipeline
 
 - [x] Fix "Add Texture" — it passed the `.texture` descriptor path to the image loader instead
       of the asset the descriptor points at, then panicked on the failure
@@ -201,11 +245,31 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
 - [ ] Load shader descriptor files the way models and textures are loaded, instead of
       hardcoding the six `compileShader` calls in `Main.odin`
 - [ ] Compile multiple entry points in one pass (`Shaders.odin`)
+
+**Shader hot reload.** The mechanism still exists and works — `updatePipelineShaders` waits for
+idle, tears down the pipeline, rebuilds it and dirties only the affected pass, and it already
+handles all five `PipelineIndex` cases. What is missing is any usable way to reach it. Its sole
+caller is the `R` key in `IO.odin`, which is hardcoded to one pipeline and, worse, has been left
+compiling the `norm` debug entry point instead of `frag`, so pressing it swaps the scene to the
+normal-map view rather than reloading the shader.
+
+- [ ] Point the reload path back at `frag` and make the debug view a deliberate toggle of its own
+      rather than a side effect of the reload key
+- [ ] Reload every pipeline, not just `.Scene`. Needs a table mapping each `PipelineIndex` to its
+      source files, entry points and stages — the same table the descriptor-file task above wants,
+      so the two should land together
+- [ ] Handle compile failure. The `R` path discards the `CompileError` with `_` and hands the
+      result to `createScenePipeline` regardless, so a syntax error tears down a working pipeline
+      and rebuilds it from nothing. A failed compile must log and leave the existing pipeline alone
+- [ ] Watch the shader directory for changes rather than requiring a keypress, and debounce it —
+      editors write files in several steps and a reload mid-write will read a truncated source
+- [ ] Decide whether reload belongs on a key at all, given `IO.odin` already owns it. A UI button
+      is discoverable and does not collide with camera movement
 - [ ] Combine the per-purpose scene buffers into one buffer with offsets (`SceneBuffers`)
 - [ ] Improve swapchain format selection, which currently takes the first format offered
       unless HDR is enabled
 
-### 8. Renderer performance
+### 9. Renderer performance
 
 - [x] Memory blocks grow geometrically (8 MiB, doubling to a 64 MiB cap) per memory type and
       tiling, instead of every pool reserving 64 MiB up front. Host image copy added a fourth
@@ -225,7 +289,7 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
 - [ ] Dedicated transfer queue — deliberately deferred; uploads happen during scene load with
       nothing to overlap, and it would need queue family ownership transfers
 
-### 9. Platform coverage
+### 10. Platform coverage
 
 - [ ] Run the macOS build. `Graphics_darwin.odin` is written and type-checks but has never
       executed; the `NSTimer` run-loop mode handling is the most likely thing to be wrong
@@ -234,7 +298,7 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
 - [ ] Confirm resizing behaviour on X11 and Wayland, where the callbacks alone are expected to
       be sufficient
 
-### 10. Raytracing
+### 11. Raytracing
 
 - [ ] Scope what raytracing means here — reflections, shadows, GI, or a full path tracer
 - [ ] Acceleration structure build and update
