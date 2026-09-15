@@ -28,10 +28,16 @@ when HDR_ENABLED {
 	INSTANCE_EXTENSIONS: []cstring : {
 		vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
 		vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,
+		vk.KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+		vk.EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,
 	}
 } else {
 	@(private = "file")
-	INSTANCE_EXTENSIONS: []cstring : {vk.EXT_DEBUG_UTILS_EXTENSION_NAME}
+	INSTANCE_EXTENSIONS: []cstring : {
+		vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
+		vk.KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+		vk.EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,
+	}
 }
 
 @(private = "file")
@@ -41,6 +47,9 @@ DEVICE_EXTENSIONS: []cstring : {
 	vk.EXT_MEMORY_BUDGET_EXTENSION_NAME,
 	vk.EXT_DESCRIPTOR_HEAP_EXTENSION_NAME,
 	vk.KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
+	vk.EXT_MEMORY_PRIORITY_EXTENSION_NAME,
+	vk.EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME,
+	vk.EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
 }
 
 
@@ -437,6 +446,9 @@ GraphicsData :: struct {
 	// Frame Resources
 	depthFormat:         vk.Format,
 	inFlightFrames:      [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+	presentReady:        [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+	presentFences:       [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+	presentPending:      [MAX_FRAMES_IN_FLIGHT]bool,
 	semaphores:          [SemaphoreIndex][MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 
 	// Commands
@@ -651,6 +663,8 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.DestroyFence(device, inFlightFrames[index], nil)
+		vk.DestroyFence(device, presentFences[index], nil)
+		vk.DestroySemaphore(device, presentReady[index], nil)
 		for semaphoreIndex in SemaphoreIndex {
 			vk.DestroySemaphore(device, semaphores[semaphoreIndex][index], nil)
 		}
@@ -924,6 +938,9 @@ DeviceFeatures :: struct {
 	computeDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
 	descriptorHeap:     vk.PhysicalDeviceDescriptorHeapFeaturesEXT,
 	untypedPointers:    vk.PhysicalDeviceShaderUntypedPointersFeaturesKHR,
+	memoryPriority:     vk.PhysicalDeviceMemoryPriorityFeaturesEXT,
+	pageableMemory:     vk.PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT,
+	swapchainMaint1:    vk.PhysicalDeviceSwapchainMaintenance1FeaturesEXT,
 }
 
 @(private = "file")
@@ -956,6 +973,18 @@ buildDeviceFeatures :: proc(chain: ^DeviceFeatures, request: bool) {
 		},
 		untypedPointers    = {
 			sType = .PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR,
+			pNext = &chain.memoryPriority,
+		},
+		memoryPriority     = {
+			sType = .PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT,
+			pNext = &chain.pageableMemory,
+		},
+		pageableMemory     = {
+			sType = .PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT,
+			pNext = &chain.swapchainMaint1,
+		},
+		swapchainMaint1    = {
+			sType = .PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT,
 			pNext = nil,
 		},
 	}
@@ -972,9 +1001,13 @@ buildDeviceFeatures :: proc(chain: ^DeviceFeatures, request: bool) {
 	chain.vulkan13.synchronization2 = true
 	chain.vulkan13.dynamicRendering = true
 	chain.vulkan14.maintenance5 = true
+	chain.vulkan14.hostImageCopy = true
 	chain.computeDerivatives.computeDerivativeGroupQuads = true
 	chain.descriptorHeap.descriptorHeap = true
 	chain.untypedPointers.shaderUntypedPointers = true
+	chain.memoryPriority.memoryPriority = true
+	chain.pageableMemory.pageableDeviceLocalMemory = true
+	chain.swapchainMaint1.swapchainMaintenance1 = true
 }
 
 @(private = "file")
@@ -1011,6 +1044,21 @@ supportsRequestedFeatures :: proc(physicalDevice: vk.PhysicalDevice) -> bool {
 		   &request.descriptorHeap,
 		   &support.descriptorHeap,
 		   size_of(vk.PhysicalDeviceDescriptorHeapFeaturesEXT),
+	   ) ||
+	   missing(
+		   &request.memoryPriority,
+		   &support.memoryPriority,
+		   size_of(vk.PhysicalDeviceMemoryPriorityFeaturesEXT),
+	   ) ||
+	   missing(
+		   &request.pageableMemory,
+		   &support.pageableMemory,
+		   size_of(vk.PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT),
+	   ) ||
+	   missing(
+		   &request.swapchainMaint1,
+		   &support.swapchainMaint1,
+		   size_of(vk.PhysicalDeviceSwapchainMaintenance1FeaturesEXT),
 	   ) ||
 	   missing(
 		   &request.untypedPointers,
@@ -1236,7 +1284,6 @@ Swapchain :: struct {
 	extent:    vk.Extent2D,
 	images:    []vk.Image,
 	views:     []vk.ImageView,
-	presentReady: []vk.Semaphore,
 }
 
 @(private = "file")
@@ -1443,18 +1490,6 @@ createSwapchain :: proc(using graphicsData: ^GraphicsData, oldSwapchain: vk.Swap
 	swapchain.images = make([]vk.Image, imageCount)
 	vk.GetSwapchainImagesKHR(device, swapchain.handle, &imageCount, raw_data(swapchain.images))
 
-	swapchain.presentReady = make([]vk.Semaphore, imageCount)
-	semaphoreInfo: vk.SemaphoreCreateInfo = {
-		sType = .SEMAPHORE_CREATE_INFO,
-		pNext = nil,
-		flags = {},
-	}
-	for &semaphore in swapchain.presentReady {
-		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &semaphore); res != .SUCCESS {
-			logf(.Fatal, "Failed to create present semaphore! vkResult: %v", res)
-		}
-	}
-
 	swapchain.views = make([]vk.ImageView, imageCount)
 	for index in 0 ..< imageCount {
 		err: ImageError
@@ -1478,15 +1513,19 @@ cleanupSwapchain :: proc(graphicsData: ^GraphicsData, swapchain: Swapchain) {
 		vk.DestroyImageView(graphicsData.device, view, nil)
 	}
 
-	for semaphore in swapchain.presentReady {
-		vk.DestroySemaphore(graphicsData.device, semaphore, nil)
-	}
-
 	delete(swapchain.images)
 	delete(swapchain.views)
-	delete(swapchain.presentReady)
 
 	vk.DestroySwapchainKHR(graphicsData.device, swapchain.handle, nil)
+}
+
+@(private = "file")
+waitForPresent :: proc(using graphicsData: ^GraphicsData, frame: u32) {
+	if !presentPending[frame] {
+		return
+	}
+	vk.WaitForFences(device, 1, &presentFences[frame], true, max(u64))
+	presentPending[frame] = false
 }
 
 @(private = "file")
@@ -1498,6 +1537,9 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	vk.WaitForFences(device, len(inFlightFrames), &inFlightFrames[0], true, max(u64))
+	for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		waitForPresent(graphicsData, frame)
+	}
 	vk.QueueWaitIdle(presentQueue)
 
 	oldSwapchain := swapchain
@@ -1522,6 +1564,12 @@ BLOCK_SIZE: vk.DeviceSize : 64 * 1024 * 1024
 
 @(private = "file")
 DEDICATED_THRESHOLD: vk.DeviceSize : BLOCK_SIZE / 4
+
+@(private = "file")
+MEMORY_PRIORITY_DEDICATED :: f32(1.0)
+
+@(private = "file")
+MEMORY_PRIORITY_BLOCK :: f32(0.5)
 
 @(private = "file")
 MemoryUsage :: enum {
@@ -1618,7 +1666,13 @@ memoryWithinBudget :: proc(
 memoryAllocatorDestroy :: proc(allocator: ^MemoryAllocator) {
 	for block in allocator.blocks {
 		if block.mapped != nil {
-			vk.UnmapMemory(allocator.device, block.memory)
+			unmapInfo: vk.MemoryUnmapInfo = {
+				sType  = .MEMORY_UNMAP_INFO,
+				pNext  = nil,
+				flags  = {},
+				memory = block.memory,
+			}
+			vk.UnmapMemory2(allocator.device, &unmapInfo)
 		}
 		vk.FreeMemory(allocator.device, block.memory, nil)
 		delete(block.free)
@@ -1716,6 +1770,7 @@ memoryAllocate :: proc(
 			memoryTypeIndex,
 			hostVisible,
 			dedicatedInfo,
+			MEMORY_PRIORITY_DEDICATED,
 		) or_return
 		allocator.dedicatedCount += 1
 		allocator.liveDedicated += 1
@@ -1758,7 +1813,13 @@ memoryFree :: proc(allocator: ^MemoryAllocator, allocation: ^Allocation) {
 
 	if allocation.block == nil {
 		if allocation.mapped != nil {
-			vk.UnmapMemory(allocator.device, allocation.memory)
+			unmapInfo: vk.MemoryUnmapInfo = {
+				sType  = .MEMORY_UNMAP_INFO,
+				pNext  = nil,
+				flags  = {},
+				memory = allocation.memory,
+			}
+			vk.UnmapMemory2(allocator.device, &unmapInfo)
 		}
 		vk.FreeMemory(allocator.device, allocation.memory, nil)
 		allocator.liveDedicated -= 1
@@ -1797,18 +1858,21 @@ memoryAllocateRaw :: proc(
 	memoryTypeIndex: u32,
 	hostVisible: bool,
 	dedicatedInfo: ^vk.MemoryDedicatedAllocateInfo,
+	priority: f32,
 ) -> (
 	memory: vk.DeviceMemory,
 	mapped: rawptr,
 	err: MemoryError,
 ) {
-	// Blocks are shared between buffers that do and do not use device addresses, and a buffer
-	// created with SHADER_DEVICE_ADDRESS requires its memory to carry this flag. Setting it
-	// unconditionally is simpler than tracking which block holds what, and costs nothing beyond
-	// reserving address space.
+	priorityInfo: vk.MemoryPriorityAllocateInfoEXT = {
+		sType    = .MEMORY_PRIORITY_ALLOCATE_INFO_EXT,
+		pNext    = dedicatedInfo,
+		priority = priority,
+	}
+
 	flagsInfo: vk.MemoryAllocateFlagsInfo = {
 		sType = .MEMORY_ALLOCATE_FLAGS_INFO,
-		pNext = dedicatedInfo,
+		pNext = &priorityInfo,
 		flags = {.DEVICE_ADDRESS},
 		deviceMask = 0,
 	}
@@ -1825,7 +1889,15 @@ memoryAllocateRaw :: proc(
 	}
 
 	if hostVisible {
-		if res := vk.MapMemory(allocator.device, memory, 0, size, {}, &mapped); res != .SUCCESS {
+		mapInfo: vk.MemoryMapInfo = {
+			sType  = .MEMORY_MAP_INFO,
+			pNext  = nil,
+			flags  = {},
+			memory = memory,
+			offset = 0,
+			size   = size,
+		}
+		if res := vk.MapMemory2(allocator.device, &mapInfo, &mapped); res != .SUCCESS {
 			logf(.Error, "Failed to map device memory! vkResult: %v", res)
 			vk.FreeMemory(allocator.device, memory, nil)
 			return 0, nil, .FailedToMap
@@ -1869,6 +1941,7 @@ memoryAddBlock :: proc(
 		memoryTypeIndex,
 		hostVisible,
 		nil,
+		MEMORY_PRIORITY_BLOCK,
 	) or_return
 
 	block = new(MemoryBlock)
@@ -2382,8 +2455,14 @@ createBuffer :: proc(
 	buffer.allocation = allocation
 	buffer.mapped = allocation.mapped
 
-	if res := vk.BindBufferMemory(device, buffer.buffer, allocation.memory, allocation.offset);
-	   res != .SUCCESS {
+	bindInfo: vk.BindBufferMemoryInfo = {
+		sType        = .BIND_BUFFER_MEMORY_INFO,
+		pNext        = nil,
+		buffer       = buffer.buffer,
+		memory       = allocation.memory,
+		memoryOffset = allocation.offset,
+	}
+	if res := vk.BindBufferMemory2(device, 1, &bindInfo); res != .SUCCESS {
 		logf(.Error, "Failed to bind buffer memory! vkResult: %v", res)
 		return .FailedToBindBufferMemory
 	}
@@ -2523,8 +2602,14 @@ createImage :: proc(
 	}
 	image.allocation = allocation
 
-	if res := vk.BindImageMemory(device, image.vkImage, allocation.memory, allocation.offset);
-	   res != .SUCCESS {
+	bindInfo: vk.BindImageMemoryInfo = {
+		sType        = .BIND_IMAGE_MEMORY_INFO,
+		pNext        = nil,
+		image        = image.vkImage,
+		memory       = allocation.memory,
+		memoryOffset = allocation.offset,
+	}
+	if res := vk.BindImageMemory2(device, 1, &bindInfo); res != .SUCCESS {
 		logf(.Error, "Failed to bind image memory! vkResult: %v", res)
 		return .FailedToBindImageMemory
 	}
@@ -2915,7 +3000,7 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 			1,
 			{._1},
 			.OPTIMAL,
-			{.TRANSFER_DST, .SAMPLED},
+			{.HOST_TRANSFER, .SAMPLED},
 			{.DEVICE_LOCAL},
 			.EXCLUSIVE,
 			0,
@@ -2945,45 +3030,54 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		}
 		image.heapSlot = slot
 
-		offset, staging, fits := stagingReserve(graphicsData, textureSize)
-		if !fits {
-			logf(.Error, "Texture %v is larger than the staging ring.", path)
+		subresourceRange: vk.ImageSubresourceRange = {
+			aspectMask     = {.COLOR},
+			baseMipLevel   = 0,
+			levelCount     = 1,
+			baseArrayLayer = 0,
+			layerCount     = 1,
+		}
+		transition: vk.HostImageLayoutTransitionInfo = {
+			sType            = .HOST_IMAGE_LAYOUT_TRANSITION_INFO,
+			pNext            = nil,
+			image            = image.vkImage,
+			oldLayout        = .UNDEFINED,
+			newLayout        = .SHADER_READ_ONLY_OPTIMAL,
+			subresourceRange = subresourceRange,
+		}
+		if res := vk.TransitionImageLayout(device, 1, &transition); res != .SUCCESS {
+			logf(.Error, "Failed to transition %v for host copy! vkResult: %v", path, res)
+			return ImageError.TransitionFailed
+		}
+
+		region: vk.MemoryToImageCopy = {
+			sType = .MEMORY_TO_IMAGE_COPY,
+			pNext = nil,
+			pHostPointer = pixels,
+			memoryRowLength = 0,
+			memoryImageHeight = 0,
+			imageSubresource = {
+				aspectMask = {.COLOR},
+				mipLevel = 0,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+			imageOffset = {0, 0, 0},
+			imageExtent = {u32(width), u32(height), 1},
+		}
+		copyInfo: vk.CopyMemoryToImageInfo = {
+			sType          = .COPY_MEMORY_TO_IMAGE_INFO,
+			pNext          = nil,
+			flags          = {},
+			dstImage       = image.vkImage,
+			dstImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+			regionCount    = 1,
+			pRegions       = &region,
+		}
+		if res := vk.CopyMemoryToImage(device, &copyInfo); res != .SUCCESS {
+			logf(.Error, "Failed to host copy texture %v! vkResult: %v", path, res)
 			return ImageError.FailedToLoadImage
 		}
-		mem.copy(staging, pixels, int(textureSize))
-
-		commandBuffer, cmdErr := stagingCommands(graphicsData)
-		if cmdErr != .None {
-			return cmdErr
-		}
-
-		transitionImageLayout(
-			graphicsData,
-			commandBuffer,
-			image.vkImage,
-			.UNDEFINED,
-			.TRANSFER_DST_OPTIMAL,
-			{.COLOR},
-			1,
-		)
-		copyBufferToImage(
-			graphicsData,
-			commandBuffer,
-			graphicsData.staging.buffer,
-			offset,
-			image.vkImage,
-			u32(width),
-			u32(height),
-		)
-		transitionImageLayout(
-			graphicsData,
-			commandBuffer,
-			image.vkImage,
-			.TRANSFER_DST_OPTIMAL,
-			.SHADER_READ_ONLY_OPTIMAL,
-			{.COLOR},
-			1,
-		)
 
 		append(&buffers.textures, image)
 	}
@@ -4776,11 +4870,29 @@ createSyncObjects :: proc(using graphicsData: ^GraphicsData) -> SyncError {
 		flags = {},
 	}
 
+	presentFenceInfo: vk.FenceCreateInfo = {
+		sType = .FENCE_CREATE_INFO,
+		pNext = nil,
+		flags = {},
+	}
+
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		if res := vk.CreateFence(device, &fenceInfo, nil, &inFlightFrames[index]);
 		   res != .SUCCESS {
 			logf(.Fatal, "Failed to create fence! vkResult: %d", res)
 			return .FailedToCreateFence
+		}
+
+		if res := vk.CreateFence(device, &presentFenceInfo, nil, &presentFences[index]);
+		   res != .SUCCESS {
+			logf(.Fatal, "Failed to create present fence! vkResult: %d", res)
+			return .FailedToCreateFence
+		}
+
+		if res := vk.CreateSemaphore(device, &semaphoreInfo, nil, &presentReady[index]);
+		   res != .SUCCESS {
+			logf(.Fatal, "Failed to create present semaphore! vkResult: %v", res)
+			return .FailedToCreateSemaphore
 		}
 
 		for semaphoreIndex in SemaphoreIndex {
@@ -6014,6 +6126,7 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 @(require_results)
 drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	vk.WaitForFences(device, 1, &inFlightFrames[currentFrame], true, max(u64))
+	waitForPresent(graphicsData, currentFrame)
 
 	imageIndex: u32
 	if res := vk.AcquireNextImageKHR(
@@ -6139,7 +6252,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 				{
 					sType = .SEMAPHORE_SUBMIT_INFO,
 					pNext = nil,
-					semaphore = swapchain.presentReady[imageIndex],
+					semaphore = presentReady[currentFrame],
 					value = 0,
 					stageMask = {.ALL_COMMANDS},
 					deviceIndex = 0,
@@ -6153,25 +6266,37 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 		return .FailedToSubmitMainCommandBuffer
 	}
 
+	vk.ResetFences(device, 1, &presentFences[currentFrame])
+	presentFenceInfo: vk.SwapchainPresentFenceInfoKHR = {
+		sType          = .SWAPCHAIN_PRESENT_FENCE_INFO_KHR,
+		pNext          = nil,
+		swapchainCount = 1,
+		pFences        = &presentFences[currentFrame],
+	}
 	presentInfo: vk.PresentInfoKHR = {
 		sType              = .PRESENT_INFO_KHR,
-		pNext              = nil,
+		pNext              = &presentFenceInfo,
 		waitSemaphoreCount = 1,
-		pWaitSemaphores    = &swapchain.presentReady[imageIndex],
+		pWaitSemaphores    = &presentReady[currentFrame],
 		swapchainCount     = 1,
 		pSwapchains        = &swapchain.handle,
 		pImageIndices      = &imageIndex,
 		pResults           = nil,
 	}
 
-	#partial switch res := vk.QueuePresentKHR(presentQueue, &presentInfo); res {
+	presentResult := vk.QueuePresentKHR(presentQueue, &presentInfo)
+	if presentResult == .SUCCESS || presentResult == .SUBOPTIMAL_KHR {
+		presentPending[currentFrame] = true
+	}
+
+	#partial switch presentResult {
 	case .SUCCESS:
 		break
 	case .ERROR_OUT_OF_DATE_KHR, .SUBOPTIMAL_KHR:
 		recreateSwapchain(graphicsData)
 		return .UpdateCommandBuffers
 	case:
-		logf(.Error, "Failed to present swapchain image! vkResult: %v", res)
+		logf(.Error, "Failed to present swapchain image! vkResult: %v", presentResult)
 		return .FailedToPresentSwapchainImage
 	}
 

@@ -71,6 +71,12 @@ presentReady: []vk.Semaphore,
 Do not add file headers, section prose, banner-comment explanations, or restatements of a
 function's name.
 
+## Task tracking
+
+`README.md` holds the roadmap and task list. The roadmap describes large undertakings; the tasks
+section breaks each one into checkable items. Keep both current: tick items off as they land, and
+add new ones there rather than leaving TODO comments scattered in the source.
+
 ## Commands
 
 ```sh
