@@ -149,6 +149,11 @@ layer *i* of the *attachment view*, so each light has its own six-layer view
 not reintroduce `SV_RenderTargetArrayIndex` there — under multiview the layer is implied by the
 view index and writing Layer as well is invalid.
 
+Nothing called from `drawImgui` may recreate the swapchain directly. `drawFrame` has already
+reset the current frame's fence by then, so `recreateSwapchain`'s wait over every in-flight fence
+would never return. Set `swapchainDirty` instead; `drawFrame` handles it at the next frame
+boundary, before any fence is reset.
+
 `drawFrame` issues two submits: transform (compute queue), then Light/Scene/PostProcess/Imgui as
 one batch on the graphics queue. Ordering inside that batch comes from pipeline barriers recorded
 in the passes themselves, not from semaphores — if you add or reorder passes, the barriers are
