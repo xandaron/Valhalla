@@ -1,9 +1,11 @@
 // User files
 bin/
 logs/
-proj/
+projs/
 imgui.ini
 pipeline_cache.bin
+*.exe
+*.pdb
 *.dbg
 
 // Generated Files
@@ -13,4 +15,4 @@ demo/assets/*
 // Misc
 docs/
 dump/
-/tools
+/toolstools/projectgen/projectgen.exe

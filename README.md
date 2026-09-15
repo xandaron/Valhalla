@@ -42,7 +42,7 @@ Clone the repository and build the demo program:
 git clone https://github.com/xandaron/valhalla.git
 cd valhalla
 odin build src -out:bin/valhalla.exe
-./bin/valhalla.exe ./demo
+./bin/valhalla.exe ./demo/demo.project
 ```
 
 The argument is the project directory, and the app runs with it as its working directory.
@@ -66,6 +66,7 @@ checkable work in [Tasks](#tasks).
 | 10 | **Platform coverage** — macOS is written but unrun; Linux cannot be checked end to end | Blocked |
 | 11 | **Raytracing** | Not started |
 | 12 | **Test content** — procedurally generated scenes and assets that exercise the renderer, and the generator that produces them | Partly done |
+| 13 | **Project files** — the engine takes a project file rather than a directory, and tooling creates them | Partly done |
 
 ## Tasks
 
@@ -333,6 +334,43 @@ odin build tools/scenegen -out:tools/scenegen/scenegen.exe
       geometry to be a performance test
 - [ ] Decide whether the generated assets belong in git or should be produced on demand. They are
       about 2.6 MB and fully reproducible from the generator
+
+### 13. Project files
+
+The engine is given a project file, not a directory, and can only ever load one — creating a
+project is `tools/projectgen`'s job. Both the engine and the tools share `ProjectData`, so the
+format has a single definition.
+
+```sh
+./tools/projectgen/projectgen.exe ./demo -name:demo -startup:./scenes/environment.scene
+./bin/valhalla.exe ./demo/demo.project
+```
+
+- [x] `ProjectData` and `loadProject`, carrying name, root, and the scene, asset, component and
+      shader paths. A project states its whole layout — the engine infers nothing, and an unset
+      field is rejected at load rather than quietly resolved to a conventional directory. Every
+      missing field is named in one pass so a half-written project takes one run to fix
+- [x] `version` as the first field, so it sits at offset 0 where it can be read before the rest
+      of a positional format is trusted
+- [x] Startup scene in the project file, replacing the hardcoded path in `Main.odin`. Still
+      overridable as a second command line argument
+- [x] Default model, albedo and normal for new scenes. `newScene` previously hardcoded
+      `cube.model`, `cube.texture` and `blank_normal.texture`, which broke the moment those
+      assets were renamed
+- [x] `tools/projectgen`, and `tools/scenegen` reading paths from the project file instead of
+      assuming a layout
+- [ ] A user settings file, separate from the project: render resolution, window geometry, HDR
+      and paper white, gamma, exposure and tonemapper, camera and mouse speed. Per machine, so
+      gitignored — where the project file is committed and identical for everyone
+- [ ] Decide where machine state belongs. `imgui.ini` and `pipeline_cache.bin` are written into
+      the project directory today and are neither project data nor user settings
+- [ ] A shader manifest in the project file, mapping source, entry point and stage to each
+      pipeline. Would replace the eight hardcoded `compileShader` calls and supply the table the
+      hot reload work needs to cover all five pipelines rather than only `.Scene`
+- [ ] Shaders are engine-coupled but live per project, so a fresh project has none and cannot
+      start. Decide whether they ship with the engine or are copied in at creation
+- [ ] Validate paths at load and report all of them at once, rather than failing at the first
+      asset that happens to be missing
 
 ## License
 

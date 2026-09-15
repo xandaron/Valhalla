@@ -81,7 +81,17 @@ newScene :: proc(name, path: string) -> bool {
 		deleteScene(&scene)
 	}
 
-	append(&scene.models, Model{path = strings.clone(RESOURCE_PATH + "cube.model")})
+	if globals.project.defaultModel == "" ||
+	   globals.project.defaultAlbedo == "" ||
+	   globals.project.defaultNormal == "" {
+		log(
+			.Error,
+			"Project declares no default model, albedo or normal, so there is nothing to put in a new scene.",
+		)
+		return false
+	}
+
+	append(&scene.models, Model{path = strings.clone(globals.project.defaultModel)})
 	model := &scene.models[0]
 	if err := loadModelComponent(model); err != .None {
 		logf(.Error, "Failed to load the cube model component: %v", err)
@@ -93,8 +103,8 @@ newScene :: proc(name, path: string) -> bool {
 	}
 
 	texturePaths := [?]string {
-		RESOURCE_PATH + "cube.texture",
-		RESOURCE_PATH + "blank_normal.texture",
+		globals.project.defaultAlbedo,
+		globals.project.defaultNormal,
 	}
 	assetPaths := make([]string, len(texturePaths), context.temp_allocator)
 	for texturePath, i in texturePaths {
