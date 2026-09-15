@@ -101,12 +101,18 @@ checkable work in [Tasks](#tasks).
       `swapchainDirty` and `drawFrame` acts on it at the next frame boundary
 - [x] Real HDR10 output — `PostProcess.slang` now applies the ST 2084 (PQ) transfer function and
       a Rec.709 to Rec.2020 primaries conversion instead of reusing the SDR gamma path
-- [ ] **Fix the point light falloff.** `scalingFactor = 1.0 / max(lightDistance - dropoff, 1.0)`
-      clamps the denominator to 1, so everything within `dropoff + 1` units of a light gets full
-      intensity with no attenuation, then falloff starts abruptly at that radius. That is the
-      blown-out core with a hard edge. Should be inverse-square with a sensible near-field
-      clamp. Changing it will require re-tuning every light's brightness, so it is deliberately
-      separate from the colour space work
+- [x] **Physically based point lights.** `dropoff` is gone and lights are specified in
+      **lumens**. An isotropic source of flux F has intensity `F / 4pi`, giving illuminance
+      `F / (4pi d^2)`, and a Lambertian surface reflects `albedo * E * cos(theta) / pi` — so the
+      shader accumulates `lumens * cos(theta) / (4 pi^2 d^2)`. Distance squared is clamped at
+      the bottom to stand in for the light having physical size, since a true point source
+      diverges at its own position. For reference, 800 lm is a 60 W-equivalent bulb and 1600 lm
+      a 100 W equivalent
+- [x] Migrate the existing scene files. `PointLight` is serialised positionally with no version
+      field, so dropping a `f32` shifts everything after it and the old files would have
+      misparsed into garbage. Migrated with a temporary dual-struct pass (`SceneDataV1`) rather
+      than by editing the binaries; `brightness` was converted at `x355`, which is the factor
+      that reproduces the old intensity at 3 units and lands the demo lights near a 100 W bulb
 - [ ] **The imgui overlay is not transfer-function aware.** It renders into ProcessedImage
       *after* PostProcess has already encoded, and writes its raw [0,1] values with no
       conversion. In SDR that happens to be consistent. In HDR it is not: scene paper white
@@ -115,9 +121,29 @@ checkable work in [Tasks](#tasks).
       backend has no notion of a target colour space, and owning it is the clean fix
 - [ ] Verify HDR against an actual HDR display and tune paper white (default 200 nits, now a
       runtime slider in Settings rather than a constant)
-- [ ] `drawLights` overlay computes `(0.5 * 0.5) / colour`, which is unbounded as the pixel
-      approaches black. It is unreachable today because `drawLights` is never assigned, so the
-      debug overlay cannot be switched on at all — fix both together
+- [x] Removed the `drawLights` overlay entirely — it was unreachable, and its
+      `(0.5 * 0.5) / colour` was unbounded as a pixel approached black. It was also the only
+      implicit-LOD `Sample` in a compute shader, so deleting it retired
+      `computeDerivativeGroupQuads` and `VK_KHR_compute_shader_derivatives` as well. A light
+      gizmo wants a real solution, not a reciprocal in the post-process pass
+- [x] Light gizmos. An instanced camera-facing quad per light, generated from `SV_VertexID` with
+      no vertex or index buffer, drawn at the end of the Scene pass inside the same rendering
+      instance. Sharing the scene's depth buffer with `depthWrite` off gives real per-fragment
+      occlusion, which is what `drawLights` was faking with a manual depth compare, and keeping
+      it out of the post-process pass means it is not subject to the display transfer function.
+      World-sized and additive, with a blown core and a soft halo so it reads as an emitter.
+      Toggle and radius live in Settings
+- [ ] Gizmo picking — the billboards are real geometry, so clicking one to select its light is
+      now feasible
+- [x] Ambient light adds rather than acting as a floor. It is an illuminance arriving uniformly
+      from all directions, so it contributes `E / pi` exactly as the point lights do, instead of
+      `max(cumulative, ambient)`. The editor range widened from 0-1 to 0-10 to suit
+- [x] Re-tuned the demo scenes. Both were authored against the old clamped falloff, which held
+      everything within `dropoff + 1` units at full intensity — `knight.scene` had its light
+      0.5 units from the model's face, so under real inverse-square the helmet blew out while
+      the torso went black. Moved the key lights back and up (knight to `(2, 3, -3)` at 800 lm,
+      lights to `(2, 3, -4)` at 1600 lm) and raised knight's ambient from 0.01 to 0.3. Checked
+      in SDR, since HDR captures are not representative
 
 ### 3. Own imgui backends
 

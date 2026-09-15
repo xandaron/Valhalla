@@ -20,7 +20,6 @@ struct PushConstants {
 	float exposure;
 	ToneMapper tonemapper;
 	float gamma;
-	bool drawLights;
 	uint contentOffsetX;
 	uint contentOffsetY;
 	uint contentExtentX;
@@ -87,30 +86,7 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 		return;
 	}
 
-	float2 screenPosition = float2(content) / float2(contentExtent);
-
 	float3 colour = Resources.RenderedImage[int2(x, y)].xyz;
-
-	if (pushConstants.drawLights) {
-		for (uint i = 0; i < Resources.Uniforms[0].lightCount; i++) {
-			float4 lightPosition = mul(Resources.Uniforms[0].viewProjection,
-																 float4(Resources.Lights[i].position, 1.0));
-			lightPosition /= lightPosition.w;
-
-			float depth = Resources.SceneDepth.Sample(Resources.LinearSampler, screenPosition).r;
-			if (lightPosition.z <= depth && lightPosition.z >= 0) {
-				lightPosition.xy += 1.0;
-				lightPosition.xy /= 2.0;
-
-				const float radius = 0.1;
-				float2 position = screenPosition - lightPosition.xy;
-				if (dot(position, position) <=
-						(radius * radius) * (1 - lightPosition.z)) {
-					colour = (0.5 * 0.5) / colour;
-				}
-			}
-		}
-	}
 
 	colour =
 			pushConstants.contrast * (colour - 0.5) + 0.5 + pushConstants.brightness;

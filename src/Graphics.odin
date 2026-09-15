@@ -36,7 +36,6 @@ INSTANCE_EXTENSIONS: []cstring : {
 @(private = "file")
 DEVICE_EXTENSIONS: []cstring : {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
-	vk.KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
 	vk.EXT_MEMORY_BUDGET_EXTENSION_NAME,
 	vk.EXT_DESCRIPTOR_HEAP_EXTENSION_NAME,
 	vk.KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
@@ -269,6 +268,12 @@ Scene_PushConstants :: struct {
 }
 
 @(private = "file")
+Gizmo_PushConstants :: struct {
+	resources: HeapIndices,
+	radius:    f32,
+}
+
+@(private = "file")
 PostProcess_PushConstants :: struct {
 	resources:       HeapIndices,
 	contrast:   f32,
@@ -277,7 +282,6 @@ PostProcess_PushConstants :: struct {
 	exposure:   f32,
 	tonemapper: ToneMapper,
 	gamma:      f32,
-	drawLights: b32,
 	contentOffsetX: u32,
 	contentOffsetY: u32,
 	contentExtentX: u32,
@@ -315,8 +319,7 @@ Vertex :: struct #align (16) {
 LightData :: struct #align (16) {
 	position: Vec3,
 	_:        u32,
-	colour:   Vec3,
-	dropoff:  f32,
+	lumens:   Vec3,
 	near:     f32,
 	far:      f32,
 }
@@ -327,6 +330,9 @@ UniformBuffer :: struct #align (16) {
 	viewProjection: Mat4,
 	lightCount:     u32,
 	ambientLight:   f32,
+	_:              [2]u32,
+	cameraPosition: Vec3,
+	_:              u32,
 }
 
 @(private = "file")
@@ -462,11 +468,12 @@ GraphicsData :: struct {
 	// Util
 	hdrRequested:        bool,
 	hdrSupported:        bool,
+	showLightGizmos:     bool,
+	lightGizmoRadius:    f32,
 	swapchainDirty:      bool,
 	paperWhiteNits:      f32,
 	renderSize:          [2]u32,
 	currentFrame:        u32,
-	drawLights:          bool,
 	reloadBuffers:       bool,
 	dirtyCommands:       bit_set[CmdBufferIndex],
 }
@@ -504,6 +511,7 @@ InitGraphicsInfo :: struct {
 	transformShader:   []byte,
 	lightShaders:      [2][]byte,
 	sceneShaders:      [2][]byte,
+	gizmoShaders:      [2][]byte,
 	postProcessShader: []byte,
 }
 
@@ -599,6 +607,7 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	pipelines[.Scene].images[1].format = depthFormat
 	createScenePipelineImages(&graphicsData)
 	createScenePipeline(&graphicsData, initInfo.sceneShaders[:])
+	createGizmoPipeline(&graphicsData, initInfo.gizmoShaders[:])
 
 	pipelines[.PostProcess].images = make([]Image, 2)
 	pipelines[.PostProcess].images[0].format = .R16G16B16A16_SFLOAT
@@ -617,6 +626,8 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	exposure = 0.0
 	gamma = 2.2
 	paperWhiteNits = PAPER_WHITE_NITS
+	showLightGizmos = true
+	lightGizmoRadius = 0.1
 	applyHDRGrading(&graphicsData)
 
 	return graphicsData, nil
@@ -3701,6 +3712,7 @@ PipelineIndex :: enum {
 	Transform,
 	Light,
 	Scene,
+	Gizmo,
 	PostProcess,
 }
 
@@ -4499,6 +4511,178 @@ createScenePipeline :: proc(
 }
 
 @(private = "file")
+createGizmoPipeline :: proc(
+	using graphicsData: ^GraphicsData,
+	shaders: [][]byte,
+) {
+	createFlags: vk.PipelineCreateFlags2CreateInfo = {
+		sType = .PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
+		pNext = nil,
+		flags = {.DESCRIPTOR_HEAP_EXT},
+	}
+
+	shaderStages: [2]vk.PipelineShaderStageCreateInfo = {
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+							sType = .SHADER_MODULE_CREATE_INFO,
+							pNext = nil,
+							flags = nil,
+							codeSize = len(shaders[0]),
+							pCode = transmute(^u32)raw_data(shaders[0]),
+						},
+			flags = nil,
+			stage = {.VERTEX},
+			module = 0,
+			pName = "main",
+			pSpecializationInfo = nil,
+		},
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+							sType = .SHADER_MODULE_CREATE_INFO,
+							pNext = nil,
+							flags = nil,
+							codeSize = len(shaders[1]),
+							pCode = transmute(^u32)raw_data(shaders[1]),
+						},
+			flags = nil,
+			stage = {.FRAGMENT},
+			module = 0,
+			pName = "main",
+			pSpecializationInfo = nil,
+		},
+	}
+
+	renderingInfo: vk.PipelineRenderingCreateInfo = {
+		sType = .PIPELINE_RENDERING_CREATE_INFO,
+		pNext = nil,
+		viewMask = 0,
+		colorAttachmentCount = 1,
+		pColorAttachmentFormats = &pipelines[.Scene].images[0].format,
+		depthAttachmentFormat = pipelines[.Scene].images[1].format,
+		stencilAttachmentFormat = .UNDEFINED,
+	}
+	createFlags.pNext = &renderingInfo
+
+	pipelineInfo: vk.GraphicsPipelineCreateInfo = {
+		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+		pNext               = &createFlags,
+		flags               = nil,
+		stageCount          = u32(len(shaderStages)),
+		pStages             = &shaderStages[0],
+		pVertexInputState   = &{
+			sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			vertexBindingDescriptionCount = 0,
+			pVertexBindingDescriptions = nil,
+			vertexAttributeDescriptionCount = 0,
+			pVertexAttributeDescriptions = nil,
+		},
+		pInputAssemblyState = &{
+			sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			topology = .TRIANGLE_LIST,
+			primitiveRestartEnable = false,
+		},
+		pTessellationState  = nil,
+		pViewportState      = &{
+			sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			viewportCount = 1,
+			pViewports = nil,
+			scissorCount = 1,
+			pScissors = nil,
+		},
+		pRasterizationState = &{
+			sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			depthClampEnable = false,
+			rasterizerDiscardEnable = false,
+			polygonMode = .FILL,
+			cullMode = nil,
+			frontFace = .CLOCKWISE,
+			depthBiasEnable = false,
+			depthBiasConstantFactor = 0.0,
+			depthBiasClamp = 0.0,
+			depthBiasSlopeFactor = 0.0,
+			lineWidth = 1.0,
+		},
+		pMultisampleState   = &{
+			sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			rasterizationSamples = {._1},
+			sampleShadingEnable = false,
+			minSampleShading = 1.0,
+			pSampleMask = nil,
+			alphaToCoverageEnable = false,
+			alphaToOneEnable = false,
+		},
+		pDepthStencilState  = &{
+			sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			depthTestEnable = true,
+			depthWriteEnable = false,
+			depthCompareOp = .LESS,
+			depthBoundsTestEnable = false,
+			stencilTestEnable = false,
+			front = {},
+			back = {},
+			minDepthBounds = 0,
+			maxDepthBounds = 1,
+		},
+		pColorBlendState    = &{
+			sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			logicOpEnable = false,
+			logicOp = .COPY,
+			attachmentCount = 1,
+			pAttachments = &vk.PipelineColorBlendAttachmentState {
+					blendEnable = true,
+					srcColorBlendFactor = .ONE,
+					dstColorBlendFactor = .ONE,
+					colorBlendOp = .ADD,
+					srcAlphaBlendFactor = .ONE,
+					dstAlphaBlendFactor = .ONE,
+					alphaBlendOp = .ADD,
+					colorWriteMask = {.R, .G, .B, .A},
+			},
+			blendConstants = {0, 0, 0, 0},
+		},
+		pDynamicState       = &vk.PipelineDynamicStateCreateInfo {
+			sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			dynamicStateCount = len(DYNAMIC_VIEWPORT_STATES),
+			pDynamicStates = &DYNAMIC_VIEWPORT_STATES[0],
+		},
+		layout              = 0,
+		renderPass          = 0,
+		subpass             = 0,
+		basePipelineHandle  = 0,
+		basePipelineIndex   = 0,
+	}
+
+	if res := vk.CreateGraphicsPipelines(
+		device,
+		pipelineCache,
+		1,
+		&pipelineInfo,
+		nil,
+		&pipelines[.Gizmo].handle,
+	); res != .SUCCESS {
+		logf(.Fatal, "Failed to create pipeline! %v", res)
+	}
+}
+
+@(private = "file")
 createPostProcessPipelineImages :: proc(using graphicsData: ^GraphicsData) {
 	err: Error
 	err = createImage(
@@ -4710,6 +4894,9 @@ updatePipelineShaders :: proc(
 		markCommandsDirty(graphicsData, {.Light})
 	case .Scene:
 		createScenePipeline(graphicsData, shaders)
+		markCommandsDirty(graphicsData, {.Scene})
+	case .Gizmo:
+		createGizmoPipeline(graphicsData, shaders)
 		markCommandsDirty(graphicsData, {.Scene})
 	case .PostProcess:
 		createPostProcessPipeline(graphicsData, shaders[0])
@@ -5106,11 +5293,9 @@ updateLightBuffer :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, delt
 	buffers := &scene.buffers
 	lightData := make([]LightData, len(scene.lights), allocator = context.temp_allocator)
 	for &light, i in scene.lights {
-		colour := light.colour * light.brightness
 		lightData[i] = {
 			position = light.position,
-			colour   = light.colour * light.brightness,
-			dropoff  = light.dropoff,
+			lumens   = light.colour * light.lumens,
 			near     = 0.01,
 			far      = 1000.0,
 		}
@@ -5134,6 +5319,7 @@ updateUniformBuffer :: proc(
 		viewProjection = projection * view,
 		lightCount     = u32(len(scene.lights)),
 		ambientLight   = scene.ambientLight,
+		cameraPosition = scene.cameras[scene.activeCamera].eye,
 	}
 	mem.copy(uniformBuffers[currentFrame].mapped, &viewProjection, size_of(UniformBuffer))
 }
@@ -5726,6 +5912,26 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		}
 	}
 
+	if showLightGizmos && len(scene.lights) > 0 {
+		vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Gizmo].handle)
+
+		gizmoConstants: Gizmo_PushConstants = {
+			resources = heapIndices,
+			radius    = lightGizmoRadius,
+		}
+		vk.CmdPushDataEXT(
+			cmdBuffer,
+			&vk.PushDataInfoEXT {
+				sType = .PUSH_DATA_INFO_EXT,
+				pNext = nil,
+				offset = 0,
+				data = {address = &gizmoConstants, size = size_of(Gizmo_PushConstants)},
+			},
+		)
+
+		vk.CmdDraw(cmdBuffer, 6, u32(len(scene.lights)), 0, 0)
+	}
+
 	vk.CmdEndRendering(cmdBuffer)
 
 	exitBarriers := [?]vk.ImageMemoryBarrier2 {
@@ -5924,7 +6130,6 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		exposure   = pow(f32(2.0), exposure),
 		tonemapper = tonemapper,
 		gamma      = gamma,
-		drawLights = b32(drawLights),
 		contentOffsetX = u32(contentOffset.x),
 		contentOffsetY = u32(contentOffset.y),
 		contentExtentX = contentExtent.width,

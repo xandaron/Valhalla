@@ -3,6 +3,8 @@ import "Buffers.slang";
 import "Textures.slang";
 #include "Resources.slang"
 
+#define PI 3.14159265358979323846264338327950288
+
 struct PushConstants {
 	HeapIndices resources;
 	uint vertexOffset;
@@ -130,17 +132,23 @@ FragOut frag(VertOut input) {
 
 		shadow /= float(SAMPLES);
 
-		const float scalingFactor = 1.0 / max(lightDistance - light.dropoff, 1.0);
+		// Point light photometry. An isotropic source of flux F has luminous intensity
+		// I = F / 4pi, giving illuminance E = I / d^2 at the surface, and a Lambertian surface
+		// reflects L = albedo * E * cos(theta) / pi. Albedo is applied once after the loop, so
+		// what accumulates here is E * cos(theta) / pi.
+		//
+		// The distance is clamped because a true point source diverges at its own position;
+		// the clamp stands in for the light having physical size.
+		static const float MIN_DISTANCE_SQUARED = 0.0001;
+		const float attenuation =
+				1.0 / (4.0 * PI * PI * max(lightSquaredDistance, MIN_DISTANCE_SQUARED));
 
 		const float lambertainCoefficient =
 				clamp(dot(normal, negativeLightDirection), 0.0, 1.0);
-		cumulativeColour += shadow * lambertainCoefficient *
-												light.colourIntensity.xyz * scalingFactor;
+		cumulativeColour += shadow * lambertainCoefficient * light.lumens * attenuation;
 	}
 
-	cumulativeColour = max(cumulativeColour, float3(Resources.Uniforms[0].ambientLight,
-																									Resources.Uniforms[0].ambientLight,
-																									Resources.Uniforms[0].ambientLight));
+	cumulativeColour += Resources.Uniforms[0].ambientLight / PI;
 
 	output.colour = float4(albedo * cumulativeColour, 1.0);
 	return output;
