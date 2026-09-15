@@ -207,6 +207,11 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
 
 ### 8. Renderer performance
 
+- [x] Memory blocks grow geometrically (8 MiB, doubling to a 64 MiB cap) per memory type and
+      tiling, instead of every pool reserving 64 MiB up front. Host image copy added a fourth
+      pool — textures need `HOST_TRANSFER`, which restricts them to host-visible memory, so they
+      moved off plain `DEVICE_LOCAL` onto resizable-BAR memory and cannot share a block with the
+      render targets. Reserved memory went from 256 MiB to 34 MiB
 - [ ] Reduce resize allocation churn — every swapchain resize frees and reallocates both
       post-process images, and live resizing does that per frame of a drag
 - [ ] `VK_KHR_present_wait` / `present_id` for frame pacing and latency control — worth doing
