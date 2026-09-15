@@ -3,9 +3,9 @@ __exported import "Vertex.slang";
 struct UniformData {
 	float4x4 projection;
 	float4x4 viewProjection;
+	float3 cameraPosition;
 	uint lightCount;
 	float ambientLight;
-	float3 cameraPosition;
 };
 
 struct InstanceInfo {
