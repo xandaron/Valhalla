@@ -131,63 +131,79 @@ main :: proc() {
 	fpsTimer = time.now()
 	lastFrameTime = time.now()
 	gameLoop: for updateWindow(&globals.graphicsData) {
-		delta := f32(time.duration_seconds(time.since(lastFrameTime)))
-		lastFrameTime = time.now()
-
-		scene := &globals.scenes[globals.activeScene]
-		camera := &scene.cameras[scene.activeCamera]
-
-		forward := normalize(camera.center - camera.eye)
-		up := camera.up
-		right := cross(up, forward)
-
-		movement :=
-			delta *
-			cameraMoveSpeed *
-			cameraMove *
-			Mat3{right.x, right.y, right.z, up.x, up.y, up.z, forward.x, forward.y, forward.z}
-		camera.eye += movement
-		camera.center += movement
-
-		if mouseMode {
-			if mouseDelta.xy != {0, 0} {
-				mouseDelta.xy *= mouseSensitivity
-				axis: Vec3 = mouseDelta.xy * matrix[2, 3]f32{
-							up.x, up.y, up.z,
-							right.x, right.y, right.z,
-						}
-				rotation := rotate3(radians(cameraRotationSpeed), axis)
-				forward = rotation * forward
-			}
-
-			distance := length(camera.center - camera.eye) * (1 - mouseDelta.z * 0.1)
-
-			// Clamp the pitch to prevent flipping
-			MAX_Y :: 0.9396926208 // approx sin(70 degrees)
-			signY := sign(forward.y)
-			absY := signY * forward.y
-			if absY > MAX_Y {
-				forward.xz *= sqrt((1 - (MAX_Y * MAX_Y)) / (1 - (absY * absY)))
-				forward.y = signY * MAX_Y
-			}
-			camera.eye = camera.center - (forward * distance)
-
-			mouseDelta = {0, 0, 0}
-		}
-
-		if globals.paused {
-			delta = 0
-		}
-
-		update(delta)
-		if err = drawFrame(&globals.graphicsData); err != nil && err != .UpdateCommandBuffers {
-			logf(.Error, "Failed to draw frame: %v", err)
+		if !tickFrame() {
 			break gameLoop
 		}
-		calcFrameRate()
-
-		free_all(context.temp_allocator)
 	}
+}
+
+@(private = "file")
+ticking := false
+
+tickFrame :: proc() -> bool {
+	if ticking {
+		return true
+	}
+	ticking = true
+	defer ticking = false
+
+	delta := f32(time.duration_seconds(time.since(lastFrameTime)))
+	lastFrameTime = time.now()
+
+	scene := &globals.scenes[globals.activeScene]
+	camera := &scene.cameras[scene.activeCamera]
+
+	forward := normalize(camera.center - camera.eye)
+	up := camera.up
+	right := cross(up, forward)
+
+	movement :=
+		delta *
+		cameraMoveSpeed *
+		cameraMove *
+		Mat3{right.x, right.y, right.z, up.x, up.y, up.z, forward.x, forward.y, forward.z}
+	camera.eye += movement
+	camera.center += movement
+
+	if mouseMode {
+		if mouseDelta.xy != {0, 0} {
+			mouseDelta.xy *= mouseSensitivity
+			axis: Vec3 = mouseDelta.xy * matrix[2, 3]f32{
+						up.x, up.y, up.z,
+						right.x, right.y, right.z,
+					}
+			rotation := rotate3(radians(cameraRotationSpeed), axis)
+			forward = rotation * forward
+		}
+
+		distance := length(camera.center - camera.eye) * (1 - mouseDelta.z * 0.1)
+
+		// Clamp the pitch to prevent flipping
+		MAX_Y :: 0.9396926208 // approx sin(70 degrees)
+		signY := sign(forward.y)
+		absY := signY * forward.y
+		if absY > MAX_Y {
+			forward.xz *= sqrt((1 - (MAX_Y * MAX_Y)) / (1 - (absY * absY)))
+			forward.y = signY * MAX_Y
+		}
+		camera.eye = camera.center - (forward * distance)
+
+		mouseDelta = {0, 0, 0}
+	}
+
+	if globals.paused {
+		delta = 0
+	}
+
+	update(delta)
+	if err := drawFrame(&globals.graphicsData); err != nil && err != .UpdateCommandBuffers {
+		logf(.Error, "Failed to draw frame: %v", err)
+		return false
+	}
+	calcFrameRate()
+
+	free_all(context.temp_allocator)
+	return true
 }
 
 update :: proc(delta: f32) {

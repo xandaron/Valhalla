@@ -5,7 +5,7 @@ import "Textures.slang";
 
 struct PushConstants {
 	HeapIndices resources;
-	uint layerIndex;
+	uint lightIndex;
 	uint vertexOffset;
 	uint vertexCount;
 };
@@ -58,24 +58,22 @@ float4x4 view(Light light, uint face) {
 
 struct VertOut {
 	float4 position : SV_Position;
-	uint layer : SV_RenderTargetArrayIndex;
 	float depth;
 };
 
 [shader("vertex")]
-VertOut vert(uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID) {
+VertOut vert(uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID,
+						 uint face: SV_ViewID) {
 	VertOut output;
 
-	const Light light = Resources.Lights[pushConstants.layerIndex / 6];
+	const Light light = Resources.Lights[pushConstants.lightIndex];
 	const uint idx = vertexID + pushConstants.vertexOffset +
 									 instanceID * pushConstants.vertexCount;
 	const float4 vertexPosition = Resources.Positions[idx];
 
-	const uint face = pushConstants.layerIndex % 6;
 	const float4x4 viewProj = mul(projection(light), view(light, face));
 
 	output.position = mul(viewProj, vertexPosition);
-	output.layer = pushConstants.layerIndex;
 
 	const float3 relativePosition =
 			(vertexPosition.xyz / vertexPosition.w) - light.position.xyz;

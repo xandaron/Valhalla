@@ -55,6 +55,12 @@ RENDER_SIZE: [2]u32 : {1920, 1080}
 SHADOW_RESOLUTION: [2]u32 : {512, 512}
 
 @(private = "file")
+SHADOW_CUBE_FACES :: 6
+
+@(private = "file")
+SHADOW_VIEW_MASK :: u32(1 << SHADOW_CUBE_FACES) - 1
+
+@(private = "file")
 DYNAMIC_VIEWPORT_STATES := [2]vk.DynamicState{.VIEWPORT, .SCISSOR}
 
 @(private = "file")
@@ -214,6 +220,10 @@ GLFWScrollCallback :: glfw.ScrollProc
 
 GLFWErrorCallback :: glfw.ErrorProc
 
+GLFWWindowRefreshCallback :: glfw.WindowRefreshProc
+
+GLFWFramebufferSizeCallback :: glfw.FramebufferSizeProc
+
 @(private = "file")
 HeapIndices :: struct {
 	vertexBuffer:       u32,
@@ -244,7 +254,7 @@ Transform_PushConstants :: struct {
 @(private = "file")
 Light_PushConstants :: struct {
 	resources:       HeapIndices,
-	layerIndex:   u32,
+	lightIndex:   u32,
 	vertexOffset: u32,
 	vertexCount:  u32,
 }
@@ -406,6 +416,9 @@ GraphicsData :: struct {
 	memoryAllocator:     MemoryAllocator,
 	staging:             StagingRing,
 	heapProperties:      vk.PhysicalDeviceDescriptorHeapPropertiesEXT,
+	multiviewProperties: vk.PhysicalDeviceMultiviewProperties,
+	shadowColourViews:   []vk.ImageView,
+	shadowDepthViews:    []vk.ImageView,
 	heapIndices:         HeapIndices,
 	heaps:               DescriptorHeaps,
 
@@ -653,6 +666,8 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 	savePipelineCache(graphicsData)
 	vk.DestroyPipelineCache(device, pipelineCache, nil)
 
+	destroyShadowFaceViews(graphicsData)
+
 	for &pipeline in pipelines {
 		cleanupPipeline(graphicsData, &pipeline)
 
@@ -690,7 +705,9 @@ waitDeviceIdle :: proc(using graphicsData: ^GraphicsData) -> vk.Result {
 
 updateWindow :: proc(using graphicsData: ^GraphicsData) -> (ret: bool) {
 	ret = !glfw.WindowShouldClose(window)
+	pollingEvents = true
 	glfw.PollEvents()
+	pollingEvents = false
 	return
 }
 
@@ -721,6 +738,9 @@ setGLFWScrollCallback :: proc(window: WindowHandle, scrollCallback: GLFWScrollCa
 	glfw.SetScrollCallback(window, scrollCallback)
 }
 
+@(private)
+pollingEvents: bool
+
 @(private = "file")
 @(require_results)
 initWindow :: proc(using graphicsData: ^GraphicsData, windowTitle: cstring) -> WindowError {
@@ -735,6 +755,9 @@ initWindow :: proc(using graphicsData: ^GraphicsData, windowTitle: cstring) -> W
 	glfw.SetMouseButtonCallback(window, mouseButtonCallback)
 	glfw.SetCursorPosCallback(window, cursorPosCallback)
 	glfw.SetScrollCallback(window, scrollCallback)
+	glfw.SetWindowRefreshCallback(window, windowRefreshCallback)
+	glfw.SetFramebufferSizeCallback(window, framebufferSizeCallback)
+	installModalLoopTimer(window)
 
 	if res := glfw.CreateWindowSurface(instance, window, nil, &surface); res != .SUCCESS {
 		logf(.Fatal, "Failed to create surface! vkResult: %v", res)
@@ -1129,9 +1152,13 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	vk.GetPhysicalDeviceMemoryProperties2(physicalDevice, &properties)
 	memoryProperties = properties.memoryProperties
 
+	multiviewProperties = {
+		sType = .PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES,
+		pNext = nil,
+	}
 	heapProperties = {
 		sType = .PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
-		pNext = nil,
+		pNext = &multiviewProperties,
 	}
 	deviceProperties: vk.PhysicalDeviceProperties2 = {
 		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
@@ -1504,8 +1531,6 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) {
 
 	updateComputeDescriptorSets(graphicsData)
 
-	cleanupImgui(graphicsData)
-	initImgui(graphicsData)
 	markCommandsDirty(graphicsData, {.PostProcess})
 }
 
@@ -1557,6 +1582,8 @@ MemoryAllocator :: struct {
 	blocks:         [dynamic]^MemoryBlock,
 	dedicatedCount: u32,
 	suballocCount:  u32,
+	liveDedicated:  u32,
+	liveSuballocs:  u32,
 }
 
 @(private = "file")
@@ -1625,9 +1652,14 @@ memoryAllocatorDestroy :: proc(allocator: ^MemoryAllocator) {
 memoryAllocatorReportLeaks :: proc(allocator: ^MemoryAllocator) {
 	logf(
 		.Info,
-		"Memory: %v blocks + %v dedicated = %v vkAllocateMemory calls, serving %v suballocations.",
+		"Memory live: %v blocks + %v dedicated, serving %v suballocations.",
 		len(allocator.blocks),
-		allocator.dedicatedCount,
+		allocator.liveDedicated,
+		allocator.liveSuballocs,
+	)
+	logf(
+		.Info,
+		"Memory lifetime: %v vkAllocateMemory calls, %v suballocations.",
 		u32(len(allocator.blocks)) + allocator.dedicatedCount,
 		allocator.suballocCount,
 	)
@@ -1706,6 +1738,7 @@ memoryAllocate :: proc(
 			dedicatedInfo,
 		) or_return
 		allocator.dedicatedCount += 1
+		allocator.liveDedicated += 1
 		return {memory = memory, offset = 0, size = requirements.size, mapped = mapped}, .None
 	}
 
@@ -1715,6 +1748,7 @@ memoryAllocate :: proc(
 		}
 		if offset, ok := blockCarve(block, requirements.size, requirements.alignment); ok {
 			allocator.suballocCount += 1
+			allocator.liveSuballocs += 1
 			return makeAllocation(block, offset, requirements.size), .None
 		}
 	}
@@ -1732,6 +1766,7 @@ memoryAllocate :: proc(
 		return {}, .FailedToAllocate
 	}
 	allocator.suballocCount += 1
+	allocator.liveSuballocs += 1
 	return makeAllocation(block, offset, requirements.size), .None
 }
 
@@ -1746,8 +1781,10 @@ memoryFree :: proc(allocator: ^MemoryAllocator, allocation: ^Allocation) {
 			vk.UnmapMemory(allocator.device, allocation.memory)
 		}
 		vk.FreeMemory(allocator.device, allocation.memory, nil)
+		allocator.liveDedicated -= 1
 	} else {
 		blockRelease(allocation.block, allocation.offset, allocation.size)
+		allocator.liveSuballocs -= 1
 	}
 
 	allocation^ = {}
@@ -2523,6 +2560,7 @@ createImageView :: proc(
 	format: vk.Format,
 	aspectFlags: vk.ImageAspectFlags,
 	layerCount: u32,
+	baseArrayLayer: u32 = 0,
 ) -> (
 	imageView: vk.ImageView,
 	viewInfo: vk.ImageViewCreateInfo,
@@ -2540,7 +2578,7 @@ createImageView :: proc(
 			aspectMask = aspectFlags,
 			baseMipLevel = 0,
 			levelCount = 1,
-			baseArrayLayer = 0,
+			baseArrayLayer = baseArrayLayer,
 			layerCount = layerCount,
 		},
 	}
@@ -3649,6 +3687,19 @@ createTransformPipeline :: proc(
 }
 
 @(private = "file")
+destroyShadowFaceViews :: proc(using graphicsData: ^GraphicsData) {
+	for view in shadowColourViews {
+		vk.DestroyImageView(device, view, nil)
+	}
+	for view in shadowDepthViews {
+		vk.DestroyImageView(device, view, nil)
+	}
+	delete(shadowColourViews)
+	delete(shadowDepthViews)
+	shadowColourViews = nil
+	shadowDepthViews = nil
+}
+
 createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	err: Error
 
@@ -3715,6 +3766,46 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 	)
 	if err != nil {
 		log(.Fatal, "Failed to create shadow map depth image view!")
+	}
+
+	if multiviewProperties.maxMultiviewViewCount < SHADOW_CUBE_FACES {
+		logf(
+			.Fatal,
+			"Shadow mapping needs %v multiview views, device supports %v.",
+			SHADOW_CUBE_FACES,
+			multiviewProperties.maxMultiviewViewCount,
+		)
+	}
+
+	lightCount := len(scene.lights)
+	shadowColourViews = make([]vk.ImageView, lightCount)
+	shadowDepthViews = make([]vk.ImageView, lightCount)
+	for light in 0 ..< lightCount {
+		base := u32(light) * SHADOW_CUBE_FACES
+		shadowColourViews[light], _, err = createImageView(
+			graphicsData,
+			pipelines[.Light].images[0].vkImage,
+			.D2_ARRAY,
+			pipelines[.Light].images[0].format,
+			{.COLOR},
+			SHADOW_CUBE_FACES,
+			base,
+		)
+		if err != nil {
+			log(.Fatal, "Failed to create shadow map colour face view!")
+		}
+		shadowDepthViews[light], _, err = createImageView(
+			graphicsData,
+			pipelines[.Light].images[1].vkImage,
+			.D2_ARRAY,
+			pipelines[.Light].images[1].format,
+			{.DEPTH},
+			SHADOW_CUBE_FACES,
+			base,
+		)
+		if err != nil {
+			log(.Fatal, "Failed to create shadow map depth face view!")
+		}
 	}
 
 	cmdBuffer: vk.CommandBuffer
@@ -3833,7 +3924,7 @@ createLightPipeline :: proc(
 	renderingInfo: vk.PipelineRenderingCreateInfo = {
 		sType = .PIPELINE_RENDERING_CREATE_INFO,
 		pNext = nil,
-		viewMask = 0,
+		viewMask = SHADOW_VIEW_MASK,
 		colorAttachmentCount = 1,
 		pColorAttachmentFormats = &pipelines[.Light].images[0].format,
 		depthAttachmentFormat = pipelines[.Light].images[1].format,
@@ -4852,6 +4943,7 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	}
 	updateTextureIndexBuffer(graphicsData, scene)
 
+	destroyShadowFaceViews(graphicsData)
 	deleteImage(graphicsData, &pipelines[.Light].images[0])
 	deleteImage(graphicsData, &pipelines[.Light].images[1])
 	createLightPipelineImages(graphicsData, scene)
@@ -5131,7 +5223,7 @@ recordTransformCommands :: proc(using graphicsData: ^GraphicsData, index: u32, s
 @(private = "file")
 recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene: ^Scene) {
 	lightCount := u32(len(scene.lights))
-	lightImageCount := lightCount * 6
+	lightImageCount := lightCount * SHADOW_CUBE_FACES
 
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
@@ -5148,6 +5240,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 	vkBeginLabel(cmdBuffer, "Shadow Maps", {0.9, 0.8, 0.3, 1})
 
 	setViewportAndScissor(cmdBuffer, SHADOW_RESOLUTION)
+	bindDescriptorHeaps(graphicsData, cmdBuffer, index)
 
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
@@ -5183,51 +5276,6 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		},
 	)
 
-	vk.CmdBeginRendering(
-		cmdBuffer,
-		&vk.RenderingInfo {
-			sType = .RENDERING_INFO,
-			pNext = nil,
-			flags = nil,
-			renderArea = vk.Rect2D {
-					offset = {0, 0},
-					extent = {SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y},
-			},
-			layerCount = lightImageCount,
-			viewMask = 0,
-			colorAttachmentCount = 1,
-			pColorAttachments = &vk.RenderingAttachmentInfo {
-					sType = .RENDERING_ATTACHMENT_INFO,
-					pNext = nil,
-					imageView = pipelines[.Light].images[0].view,
-					imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-					resolveMode = nil,
-					resolveImageView = 0,
-					resolveImageLayout = .UNDEFINED,
-					loadOp = .CLEAR,
-					storeOp = .STORE,
-					clearValue = {color = {float32 = {0, 0, 0, 1}}},
-			},
-			pDepthAttachment = &vk.RenderingAttachmentInfo {
-					sType = .RENDERING_ATTACHMENT_INFO,
-					pNext = nil,
-					imageView = pipelines[.Light].images[1].view,
-					imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-					resolveMode = nil,
-					resolveImageView = 0,
-					resolveImageLayout = .UNDEFINED,
-					loadOp = .CLEAR,
-					storeOp = .STORE,
-					clearValue = {depthStencil = {depth = 1, stencil = 0}},
-			},
-			pStencilAttachment = nil,
-		},
-	)
-
-	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Light].handle)
-
-	bindDescriptorHeaps(graphicsData, cmdBuffer, index)
-
 	vk.CmdBindIndexBuffer2(
 		cmdBuffer,
 		scene.buffers.indexBuffer.buffer,
@@ -5238,13 +5286,57 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 
 	pushConstants: Light_PushConstants = {
 		resources = heapIndices,
-		layerIndex   = 0,
+		lightIndex   = 0,
 		vertexOffset = 0,
 		vertexCount  = 0,
 	}
-	for layerIndex: u32 = 0; layerIndex < lightImageCount; layerIndex += 1 {
+	for lightIndex: u32 = 0; lightIndex < lightCount; lightIndex += 1 {
 		OFFSET :: u32(offset_of(Light_PushConstants, vertexOffset))
-		pushConstants.layerIndex = layerIndex
+
+		vk.CmdBeginRendering(
+			cmdBuffer,
+			&vk.RenderingInfo {
+					sType = .RENDERING_INFO,
+					pNext = nil,
+					flags = nil,
+					renderArea = vk.Rect2D {
+						offset = {0, 0},
+						extent = {SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y},
+					},
+					layerCount = 1,
+					viewMask = SHADOW_VIEW_MASK,
+					colorAttachmentCount = 1,
+					pColorAttachments = &vk.RenderingAttachmentInfo {
+						sType = .RENDERING_ATTACHMENT_INFO,
+						pNext = nil,
+						imageView = shadowColourViews[lightIndex],
+						imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+						resolveMode = nil,
+						resolveImageView = 0,
+						resolveImageLayout = .UNDEFINED,
+						loadOp = .CLEAR,
+						storeOp = .STORE,
+						clearValue = {color = {float32 = {0, 0, 0, 1}}},
+					},
+					pDepthAttachment = &vk.RenderingAttachmentInfo {
+						sType = .RENDERING_ATTACHMENT_INFO,
+						pNext = nil,
+						imageView = shadowDepthViews[lightIndex],
+						imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+						resolveMode = nil,
+						resolveImageView = 0,
+						resolveImageLayout = .UNDEFINED,
+						loadOp = .CLEAR,
+						storeOp = .STORE,
+						clearValue = {depthStencil = {depth = 1, stencil = 0}},
+					},
+					pStencilAttachment = nil,
+			},
+		)
+
+		vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Light].handle)
+
+		pushConstants.lightIndex = lightIndex
 		vk.CmdPushDataEXT(
 			cmdBuffer,
 			&vk.PushDataInfoEXT {
@@ -5283,9 +5375,9 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 				pushConstants.vertexOffset += mesh.vertexCount * u32(len(model.instances))
 			}
 		}
-	}
 
-	vk.CmdEndRendering(cmdBuffer)
+		vk.CmdEndRendering(cmdBuffer)
+	}
 
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
