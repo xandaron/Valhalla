@@ -1,5 +1,6 @@
 import "Buffers.slang";
 import "Textures.slang";
+#include "Resources.slang"
 
 enum ToneMapper : uint32_t {
 	None = 0,
@@ -7,6 +8,7 @@ enum ToneMapper : uint32_t {
 }
 
 struct PushConstants {
+	HeapIndices resources;
 	float contrast;
 	float brightness;
 	float saturation;
@@ -18,6 +20,8 @@ struct PushConstants {
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pushConstants;
+
+DECLARE_RESOURCES(pushConstants)
 
 float3 narkowiczACES(float3 colour) {
 	const float A = 2.51;
@@ -36,18 +40,18 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 	uint y = dispatchThreadID.y;
 
 	uint2 imageSize;
-	renderedImage.GetDimensions(imageSize.x, imageSize.y);
+	Resources.RenderedImage.GetDimensions(imageSize.x, imageSize.y);
 	float2 screenPosition = float2(x, y) / imageSize;
 
-	float3 colour = renderedImage[int2(x, y)].xyz;
+	float3 colour = Resources.RenderedImage[int2(x, y)].xyz;
 
 	if (pushConstants.drawLights) {
-		for (uint i = 0; i < uniformBuffer.lightCount; i++) {
-			float4 lightPosition = mul(uniformBuffer.viewProjection,
-																 float4(lightBuffer[i].position, 1.0));
+		for (uint i = 0; i < Resources.Uniforms[0].lightCount; i++) {
+			float4 lightPosition = mul(Resources.Uniforms[0].viewProjection,
+																 float4(Resources.Lights[i].position, 1.0));
 			lightPosition /= lightPosition.w;
 
-			float depth = sceneDepth.Sample(screenPosition).r;
+			float depth = Resources.SceneDepth.Sample(Resources.LinearSampler, screenPosition).r;
 			if (lightPosition.z <= depth && lightPosition.z >= 0) {
 				lightPosition.xy += 1.0;
 				lightPosition.xy /= 2.0;
@@ -80,5 +84,5 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 	}
 
 	colour = pow(colour, float3(1.0 / pushConstants.gamma));
-	processedImage[int2(x, y)] = float4(colour, 1.0);
+	Resources.ProcessedImage[int2(x, y)] = float4(colour, 1.0);
 }

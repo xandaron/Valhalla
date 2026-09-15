@@ -1,7 +1,10 @@
 import "Vertex.slang";
 import "Buffers.slang";
+import "Textures.slang";
+#include "Resources.slang"
 
 struct PushConstants {
+	HeapIndices resources;
 	uint layerIndex;
 	uint vertexOffset;
 	uint vertexCount;
@@ -9,6 +12,8 @@ struct PushConstants {
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pushConstants;
+
+DECLARE_RESOURCES(pushConstants)
 
 #define PI 3.14159265358979323846264338327950288
 #define tanHalfFOVReciprocal (1.0 / tan(PI / 4.0))
@@ -62,10 +67,10 @@ VertOut vert(Vertex input, uint vertexID: SV_VertexID,
 						 uint instanceID: SV_InstanceID) {
 	VertOut output;
 
-	const Light light = lightBuffer[pushConstants.layerIndex / 6];
+	const Light light = Resources.Lights[pushConstants.layerIndex / 6];
 	const uint idx = vertexID + pushConstants.vertexOffset +
 									 instanceID * pushConstants.vertexCount;
-	const float4x4 vertexTransform = transformBufferRO[idx];
+	const float4x4 vertexTransform = Resources.Transforms[idx];
 	const float4 vertexPosition =
 			mul(vertexTransform, float4(input.position, 1.0));
 
