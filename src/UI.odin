@@ -312,8 +312,14 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			) {
 				graphicsData.reloadBuffers = true
 			}
+
+			imgui.BeginDisabled(hdrActive(graphicsData))
 			if imgui.DragFloat("Gamma", &graphicsData.gamma, 0.01) {
 				graphicsData.reloadBuffers = true
+			}
+			imgui.EndDisabled()
+			if hdrActive(graphicsData) {
+				imgui.SetItemTooltip("Unused in HDR; the PQ transfer function replaces it.")
 			}
 
 			available := hdrAvailable(graphicsData)
@@ -333,6 +339,21 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				imgui.Text(hdrActive(graphicsData) ? "(HDR10 PQ)" : "(sRGB)")
 			}
 
+			if imgui.Checkbox("Light gizmos", &graphicsData.showLightGizmos) {
+				markCommandsDirty(graphicsData, {.Scene})
+			}
+			imgui.BeginDisabled(!graphicsData.showLightGizmos)
+			if imgui.DragFloat(
+				"Gizmo radius",
+				&graphicsData.lightGizmoRadius,
+				0.01,
+				0.01,
+				5.0,
+			) {
+				markCommandsDirty(graphicsData, {.Scene})
+			}
+			imgui.EndDisabled()
+
 			imgui.BeginDisabled(!hdrActive(graphicsData))
 			if imgui.DragFloat(
 				"Paper white (nits)",
@@ -347,7 +368,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		}
 
 		if imgui.CollapsingHeader("Scene##header") {
-			if imgui.DragFloat("Ambient light##scene", &scene.ambientLight, 0.01, 0, 1) {
+			if imgui.DragFloat("Ambient light##scene", &scene.ambientLight, 0.01, 0, 10) {
 				graphicsData.reloadBuffers = true
 			}
 			if imgui.DragFloat4("Clear colour##scene", &scene.clearColour, 0.01, 0, 1) {
@@ -588,8 +609,13 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				if imgui.TreeNode(toCstring(light.name)) {
 					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &light.position, 0.1)
 					imgui.DragFloat3(fmt.ctprintf("Colour%v", suffix), &light.colour, 0.01, 0, 1)
-					imgui.DragFloat(fmt.ctprintf("Brightness%v", suffix), &light.brightness, 0.1)
-					imgui.DragFloat(fmt.ctprintf("Dropoff%v", suffix), &light.dropoff, 0.1)
+					imgui.DragFloat(
+						fmt.ctprintf("Lumens%v", suffix),
+						&light.lumens,
+						10.0,
+						0,
+						100000,
+					)
 
 					imgui.TreePop()
 				}

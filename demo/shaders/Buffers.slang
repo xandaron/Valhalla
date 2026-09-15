@@ -5,6 +5,7 @@ struct UniformData {
 	float4x4 viewProjection;
 	uint lightCount;
 	float ambientLight;
+	float3 cameraPosition;
 };
 
 struct InstanceInfo {
@@ -14,8 +15,7 @@ struct InstanceInfo {
 
 struct Light {
 	float3 position;
-	float3 colourIntensity;
-	float dropoff;
+	float3 lumens;
 	float near;
 	float far;
 };

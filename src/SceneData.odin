@@ -195,11 +195,10 @@ projection :: proc(camera: Camera) -> Mat4 {
 }
 
 PointLight :: struct {
-	name:       string,
-	position:   Vec3,
-	colour:     Vec3,
-	brightness: f32,
-	dropoff:    f32,
+	name:     string,
+	position: Vec3,
+	colour:   Vec3,
+	lumens:   f32,
 }
 
 deletePointLight :: proc(light: ^PointLight) {

@@ -96,12 +96,16 @@ main :: proc() {
 	lightFrag, _ := compileShader("./shaders/Light.slang", "frag", .FRAGMENT)
 	sceneVert, _ := compileShader("./shaders/Scene.slang", "vert", .VERTEX)
 	sceneFrag, _ := compileShader("./shaders/Scene.slang", "frag", .FRAGMENT)
+	gizmoVert, _ := compileShader("./shaders/Gizmo.slang", "vert", .VERTEX)
+	gizmoFrag, _ := compileShader("./shaders/Gizmo.slang", "frag", .FRAGMENT)
 	postProcessComp, _ := compileShader("./shaders/PostProcess.slang", "comp", .COMPUTE)
 	defer delete(transformComp)
 	defer delete(lightVert)
 	defer delete(lightFrag)
 	defer delete(sceneVert)
 	defer delete(sceneFrag)
+	defer delete(gizmoVert)
+	defer delete(gizmoFrag)
 	defer delete(postProcessComp)
 	globals.graphicsData, err = initGraphics(
 	InitGraphicsInfo {
@@ -111,6 +115,7 @@ main :: proc() {
 		transformShader   = transformComp,
 		lightShaders      = {lightVert, lightFrag},
 		sceneShaders      = {sceneVert, sceneFrag},
+		gizmoShaders      = {gizmoVert, gizmoFrag},
 		postProcessShader = postProcessComp,
 	},
 	)

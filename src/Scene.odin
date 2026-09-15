@@ -130,8 +130,7 @@ newScene :: proc(name, path: string) -> bool {
 			name = strings.clone("Light"),
 			position = Vec3{2, 3, -4},
 			colour = Vec3{1, 1, 1},
-			brightness = 1,
-			dropoff = 1,
+			lumens = 1600,
 		},
 	)
 
