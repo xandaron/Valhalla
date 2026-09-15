@@ -46,7 +46,7 @@ compileShader :: proc(
 		err = .GlobalSession
 		return
 	}
-	defer globalSession->Release()
+	defer slang.release(globalSession)
 
 	heapCapability := globalSession->FindCapability("spvDescriptorHeapEXT")
 	if heapCapability == 0 {
@@ -76,63 +76,63 @@ compileShader :: proc(
 		err = .Session
 		return
 	}
-	defer session->Release()
+	defer slang.release(session)
 
 	module, moduleDiagnostics, moduleOk := slang.load_module(
 		session,
 		strings.clone_to_cstring(file, context.temp_allocator),
 	)
-	defer if moduleDiagnostics != nil do moduleDiagnostics->Release()
+	defer slang.release(moduleDiagnostics)
 	if !moduleOk {
 		log(.Error, blobToString(moduleDiagnostics))
 		err = .Module
 		return
 	}
-	defer module->Release()
+	defer slang.release(module)
 
 	ep, epDiagnostics, epOk := slang.find_and_check_entry_point(
 		module,
 		strings.clone_to_cstring(entryPoint, context.temp_allocator),
 		stage,
 	)
-	defer if epDiagnostics != nil do epDiagnostics->Release()
+	defer slang.release(epDiagnostics)
 	if !epOk {
 		log(.Error, blobToString(epDiagnostics))
 		err = .EntryPoint
 		return
 	}
-	defer ep->Release()
+	defer slang.release(ep)
 
 	components := []^slang.IComponentType{module, ep}
 	program, programDiagnostics, programOk := slang.create_composite_component_type(
 		session,
 		components,
 	)
-	defer if programDiagnostics != nil do programDiagnostics->Release()
+	defer slang.release(programDiagnostics)
 	if !programOk {
 		log(.Error, blobToString(programDiagnostics))
 		err = .Program
 		return
 	}
-	defer program->Release()
+	defer slang.release(program)
 
 	linkedProgram, linkDiagnostics, linkOk := slang.link(program)
-	defer if linkDiagnostics != nil do linkDiagnostics->Release()
+	defer slang.release(linkDiagnostics)
 	if !linkOk {
 		log(.Error, blobToString(linkDiagnostics))
 		err = .LinkedProgram
 		return
 	}
-	defer linkedProgram->Release()
+	defer slang.release(linkedProgram)
 
 	codeBlob, codeDiagnostics, codeOk := slang.get_entry_point_code(linkedProgram, 0, 0)
-	defer if codeDiagnostics != nil do codeDiagnostics->Release()
+	defer slang.release(codeDiagnostics)
 	if !codeOk {
 		log(.Error, blobToString(codeDiagnostics))
 		err = .Code
 		return
 	}
-	defer codeBlob->Release()
+	defer slang.release(codeBlob)
 
 	size := codeBlob->GetBufferSize()
 	if size == 0 {

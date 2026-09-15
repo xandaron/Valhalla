@@ -4,11 +4,17 @@ package slang
 //
 // These bindings talk directly to Slang's COM-lite ABI (the same vtable-based
 // interfaces used from C++: ISlangUnknown, IGlobalSession, ISession, IModule,
-// IComponentType, IEntryPoint, ...) rather than a custom C shim. Interface
-// pointers behave like their C++ counterparts: call methods with Odin's
-// `obj->Method(args)` syntax (e.g. `session->loadModule(...)`), and every
-// object derived from ISlangUnknown must be released with `->Release()` once
-// you're done with it.
+// IComponentType, IEntryPoint, ...) rather than a custom C shim - our Odin
+// equivalents drop the leading `I` (Unknown, Global_Session, Session, Module,
+// Component_Type, Entry_Point, Blob, ...). Every vtable method has an
+// idiomatic snake_case free-function wrapper (e.g.
+// `slang.load_module(session, ...)` instead of `session->LoadModule(...)`) -
+// use those rather than calling through the vtable directly. Every object
+// derived from Unknown must be released once you're done with it.
+// Rather than calling `->Release()` directly, use `release(obj)` (see
+// com.odin): every interface converts implicitly to ^Unknown via Odin's
+// #subtype, and `release` is a no-op on nil, so it can be deferred
+// unconditionally even for optional outputs like diagnostics blobs.
 //
 // See include/slang.h (copied from the Slang release this binding targets)
 // for the authoritative API documentation these bindings mirror.
