@@ -95,10 +95,10 @@ FragOut frag(VertOut input) {
 
 	const uint textureIndex =
 			(pushConstants.instanceOffset + input.instanceID) * TextureIndex.COUNT;
-	const float3 albedo = pow(
-			textureAt(Resources.TextureIndices[textureIndex + TextureIndex.ALBEDO]).Sample(Resources.AnisotropicSampler, input.uv)
-					.xyz,
-			1.0 / 2.2);
+	const float3 albedo =
+			textureAt(Resources.TextureIndices[textureIndex + TextureIndex.ALBEDO])
+					.Sample(Resources.AnisotropicSampler, input.uv)
+					.xyz;
 	const float3 normal = normalize(mul(
 			input.TBN,
 			2.0 * textureAt(Resources.TextureIndices[textureIndex + TextureIndex.NORMAL]).Sample(Resources.AnisotropicSampler, input.uv)

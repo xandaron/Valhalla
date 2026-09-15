@@ -18,26 +18,19 @@ import imguiVulkan "../imgui/imgui_impl_vulkan"
 
 VERSION: u32 : (0 << 22) | (1 << 12) | (0)
 
-HDR_ENABLED: bool : false
+HDR_DEFAULT: bool : true
+
+PAPER_WHITE_NITS: f32 : 200.0
 
 @(private = "file")
 REQUESTED_LAYERS: []cstring : {"VK_LAYER_KHRONOS_validation"}
 
-when HDR_ENABLED {
-	@(private = "file")
-	INSTANCE_EXTENSIONS: []cstring : {
-		vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
-		vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,
-		vk.KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
-		vk.EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,
-	}
-} else {
-	@(private = "file")
-	INSTANCE_EXTENSIONS: []cstring : {
-		vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
-		vk.KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
-		vk.EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,
-	}
+@(private = "file")
+INSTANCE_EXTENSIONS: []cstring : {
+	vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
+	vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME,
+	vk.KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+	vk.EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,
 }
 
 @(private = "file")
@@ -289,6 +282,13 @@ PostProcess_PushConstants :: struct {
 	contentOffsetY: u32,
 	contentExtentX: u32,
 	contentExtentY: u32,
+	transferFunction: TransferFunction,
+	paperWhiteNits: f32,
+}
+
+TransferFunction :: enum u32 {
+	Gamma = 0,
+	PQ    = 1,
 }
 
 ToneMapper :: enum u32 {
@@ -460,6 +460,10 @@ GraphicsData :: struct {
 	uniformBuffers:      [MAX_FRAMES_IN_FLIGHT]Buffer,
 
 	// Util
+	hdrRequested:        bool,
+	hdrSupported:        bool,
+	swapchainDirty:      bool,
+	paperWhiteNits:      f32,
 	renderSize:          [2]u32,
 	currentFrame:        u32,
 	drawLights:          bool,
@@ -540,7 +544,13 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 		memoryProperties,
 	)
 
+	graphicsData.hdrRequested = HDR_DEFAULT
 	createSwapchain(&graphicsData)
+	if !graphicsData.hdrSupported {
+		log(.Info, "Surface offers no HDR10 format; HDR is unavailable.")
+	} else {
+		logf(.Info, "HDR10 available, currently %v.", "on" if graphicsData.swapchain.hdr else "off")
+	}
 	createCommandBuffers(&graphicsData) or_return
 	stagingInit(&graphicsData) or_return
 	createDescriptorHeaps(&graphicsData) or_return
@@ -605,14 +615,9 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	brightness = 0.0
 	saturation = 1.0
 	exposure = 0.0
-
-	when HDR_ENABLED {
-		tonemapper = .None
-		gamma = 1.0
-	} else {
-		tonemapper = .NarkowiczACES
-		gamma = 2.2
-	}
+	gamma = 2.2
+	paperWhiteNits = PAPER_WHITE_NITS
+	applyHDRGrading(&graphicsData)
 
 	return graphicsData, nil
 }
@@ -1284,6 +1289,7 @@ Swapchain :: struct {
 	extent:    vk.Extent2D,
 	images:    []vk.Image,
 	views:     []vk.ImageView,
+	hdr:       bool,
 }
 
 @(private = "file")
@@ -1380,27 +1386,39 @@ letterboxRect :: proc(
 }
 
 @(private = "file")
+@(require_results)
+isHDRSurfaceFormat :: proc(format: vk.SurfaceFormatKHR) -> bool {
+	return(
+		format.colorSpace == .HDR10_ST2084_EXT &&
+		(format.format == .A2B10G10R10_UNORM_PACK32 ||
+				format.format == .A2R10G10B10_UNORM_PACK32) 	)
+}
+
+@(private = "file")
 createSwapchain :: proc(using graphicsData: ^GraphicsData, oldSwapchain: vk.SwapchainKHR = 0) {
-	chooseFormat :: proc(formats: []vk.SurfaceFormatKHR) -> (fmt: vk.SurfaceFormatKHR) {
-		// TODO: improve this function
+	chooseFormat :: proc(
+		formats: []vk.SurfaceFormatKHR,
+		wantHDR: bool,
+	) -> (
+		fmt: vk.SurfaceFormatKHR,
+		hdr: bool,
+	) {
 		fmt = formats[0]
-		for format in formats {
-			when HDR_ENABLED {
-				if format.colorSpace == .HDR10_ST2084_EXT {
-					return format
-				} else if format.colorSpace == .SRGB_NONLINEAR && fmt.format != .R8G8B8A8_UNORM {
-					if format.format == .R8G8B8A8_UNORM || format.format == .B8G8R8A8_UNORM {
-						fmt = format
-					}
-				}
-			} else {
-				if (format.format == .B8G8R8A8_UNORM || format.format == .R8G8B8A8_UNORM) &&
-				   format.colorSpace == .SRGB_NONLINEAR {
-					fmt = format
+		if wantHDR {
+			for format in formats {
+				if isHDRSurfaceFormat(format) {
+					return format, true
 				}
 			}
 		}
-		return
+
+		for format in formats {
+			if (format.format == .B8G8R8A8_UNORM || format.format == .R8G8B8A8_UNORM) &&
+			   format.colorSpace == .SRGB_NONLINEAR {
+				return format, false
+			}
+		}
+		return fmt, false
 	}
 
 	choosePresentMode :: proc(modes: []vk.PresentModeKHR) -> (mode: vk.PresentModeKHR) {
@@ -1441,11 +1459,21 @@ createSwapchain :: proc(using graphicsData: ^GraphicsData, oldSwapchain: vk.Swap
 	min := swapchainSupport.capabilities.minImageCount
 	swapchainImageCount := max if max == 1 else (2 if 2 > min else min)
 
+	hdrSupported = false
+	for format in swapchainSupport.formats {
+		if isHDRSurfaceFormat(format) {
+			hdrSupported = true
+			break
+		}
+	}
+
+	surfaceFormat, hdrActive := chooseFormat(swapchainSupport.formats, hdrRequested && hdrSupported)
 	swapchain = {
 		transform = swapchainSupport.capabilities.currentTransform,
-		format    = chooseFormat(swapchainSupport.formats),
+		format    = surfaceFormat,
 		mode      = choosePresentMode(swapchainSupport.modes),
 		extent    = chooseExtent(graphicsData, swapchainSupport.capabilities),
+		hdr       = hdrActive,
 	}
 
 	queueFamiliesArray := make([dynamic]u32, context.temp_allocator)
@@ -1517,6 +1545,34 @@ cleanupSwapchain :: proc(graphicsData: ^GraphicsData, swapchain: Swapchain) {
 	delete(swapchain.views)
 
 	vk.DestroySwapchainKHR(graphicsData.device, swapchain.handle, nil)
+}
+
+@(private = "file")
+applyHDRGrading :: proc(using graphicsData: ^GraphicsData) {
+	tonemapper = .None if swapchain.hdr else .NarkowiczACES
+}
+
+setHDREnabled :: proc(using graphicsData: ^GraphicsData, enabled: bool) -> bool {
+	if enabled && !hdrSupported {
+		return false
+	}
+	if hdrRequested != enabled {
+		hdrRequested = enabled
+		swapchainDirty = true
+	}
+	return true
+}
+
+hdrEnabled :: proc(using graphicsData: ^GraphicsData) -> bool {
+	return hdrRequested
+}
+
+hdrActive :: proc(using graphicsData: ^GraphicsData) -> bool {
+	return swapchain.hdr
+}
+
+hdrAvailable :: proc(using graphicsData: ^GraphicsData) -> bool {
+	return hdrSupported
 }
 
 @(private = "file")
@@ -5873,6 +5929,8 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		contentOffsetY = u32(contentOffset.y),
 		contentExtentX = contentExtent.width,
 		contentExtentY = contentExtent.height,
+		transferFunction = .PQ if swapchain.hdr else .Gamma,
+		paperWhiteNits = paperWhiteNits,
 	}
 	vk.CmdPushDataEXT(
 		cmdBuffer,
@@ -6125,6 +6183,13 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 
 @(require_results)
 drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
+	if swapchainDirty {
+		swapchainDirty = false
+		recreateSwapchain(graphicsData)
+		applyHDRGrading(graphicsData)
+		return .UpdateCommandBuffers
+	}
+
 	vk.WaitForFences(device, 1, &inFlightFrames[currentFrame], true, max(u64))
 	waitForPresent(graphicsData, currentFrame)
 

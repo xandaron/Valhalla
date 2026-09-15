@@ -55,13 +55,15 @@ checkable work in [Tasks](#tasks).
 | # | Undertaking | State |
 | --- | --- | --- |
 | 1 | **Modern Vulkan foundations** — bindless descriptors, hand-rolled allocator, vertex pulling, multiview shadows, host image copy | Complete |
-| 2 | **Normal mapping** — the tangent frame is currently broken, so normal maps are sampled but contribute nothing | Not started |
-| 3 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
-| 4 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
-| 5 | **Asset and shader pipeline** — shaders are hardcoded at startup; buffers are allocated one per purpose | Not started |
-| 6 | **Renderer performance** — buffer consolidation, resize allocation churn, pipeline state objects | Partly done |
-| 7 | **Platform coverage** — macOS is written but unrun; Linux cannot be checked end to end | Blocked |
-| 8 | **Raytracing** | Not started |
+| 2 | **Colour correctness** — colour space handling and light falloff | Partly done |
+| 3 | **Own imgui backends** — replace the vendored Vulkan and GLFW integrations to get control over colour, resources and callbacks | Not started |
+| 4 | **Normal mapping** — the tangent frame is currently broken, so normal maps are sampled but contribute nothing | Not started |
+| 5 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
+| 6 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
+| 7 | **Asset and shader pipeline** — shaders are hardcoded at startup; buffers are allocated one per purpose | Not started |
+| 8 | **Renderer performance** — buffer consolidation, resize allocation churn, pipeline state objects | Partly done |
+| 9 | **Platform coverage** — macOS is written but unrun; Linux cannot be checked end to end | Blocked |
+| 10 | **Raytracing** | Not started |
 
 ## Tasks
 
@@ -86,7 +88,59 @@ checkable work in [Tasks](#tasks).
 - [x] Remaining legacy entry points replaced: `vkMapMemory2`, `vkUnmapMemory2`,
       `vkBindBufferMemory2`, `vkBindImageMemory2`
 
-### 2. Normal mapping
+### 2. Colour correctness
+
+- [x] Fix the double gamma encode. Albedo textures are `R8G8B8A8_SRGB`, so `Sample` already
+      returns linear, but `Scene.slang` re-encoded with `pow(x, 1/2.2)` and `PostProcess.slang`
+      encoded again — output was `linear^(1/4.84)`, which is what washed SDR out. Lighting now
+      runs in linear with a single display encode at the end
+- [x] Runtime HDR toggle, including reselecting the surface format. `HDR_DEFAULT` is only a
+      starting value. `setHDREnabled` cannot recreate the swapchain itself — it runs inside
+      `drawImgui`, by which point `drawFrame` has reset the current frame's fence, so
+      `recreateSwapchain`'s `waitAll` over every in-flight fence would deadlock. It sets
+      `swapchainDirty` and `drawFrame` acts on it at the next frame boundary
+- [x] Real HDR10 output — `PostProcess.slang` now applies the ST 2084 (PQ) transfer function and
+      a Rec.709 to Rec.2020 primaries conversion instead of reusing the SDR gamma path
+- [ ] **Fix the point light falloff.** `scalingFactor = 1.0 / max(lightDistance - dropoff, 1.0)`
+      clamps the denominator to 1, so everything within `dropoff + 1` units of a light gets full
+      intensity with no attenuation, then falloff starts abruptly at that radius. That is the
+      blown-out core with a hard edge. Should be inverse-square with a sensible near-field
+      clamp. Changing it will require re-tuning every light's brightness, so it is deliberately
+      separate from the colour space work
+- [ ] **The imgui overlay is not transfer-function aware.** It renders into ProcessedImage
+      *after* PostProcess has already encoded, and writes its raw [0,1] values with no
+      conversion. In SDR that happens to be consistent. In HDR it is not: scene paper white
+      encodes to about 0.58 in PQ, while imgui white writes 1.0, which PQ defines as 10000 nits.
+      The editor will be searingly bright against the scene. Blocked on roadmap 3 — the vendored
+      backend has no notion of a target colour space, and owning it is the clean fix
+- [ ] Verify HDR against an actual HDR display and tune paper white (default 200 nits, now a
+      runtime slider in Settings rather than a constant)
+- [ ] `drawLights` overlay computes `(0.5 * 0.5) / colour`, which is unbounded as the pixel
+      approaches black. It is unreachable today because `drawLights` is never assigned, so the
+      debug overlay cannot be switched on at all — fix both together
+
+### 3. Own imgui backends
+
+Replace `imgui_impl_vulkan` and `imgui_impl_glfw` with integrations we own. The vendored ones are
+fine in isolation, but they each fight a decision made elsewhere in the engine.
+
+- [ ] **Vulkan backend.** It creates its own `VkDescriptorPool`, `VkPipelineLayout`, descriptor
+      sets and sampler — every object type the renderer deliberately removed when it moved to
+      `VK_EXT_descriptor_heap`. Ours should draw the UI through the resource heap like everything
+      else, so the claim that there are no descriptor sets anywhere becomes true again.
+- [ ] **Transfer-function aware output.** The reason this became urgent: the backend writes raw
+      [0,1] values into whatever target it is given, with no idea the buffer is PQ-encoded. Owning
+      it means the UI can be composited before the display transform, or encoded to match. Fixes
+      the blown-out editor in HDR (see roadmap 2).
+- [ ] **GLFW backend.** It installs its own GLFW callbacks and, on Windows, subclasses the window
+      proc — the same window proc `installModalLoopTimer` subclasses for render-during-resize.
+      Two independent subclassers of one window is a latent ordering problem.
+- [ ] **Context lifetime.** `initImgui` calls `imgui.CreateContext`, which made the obvious
+      "recreate imgui on resize" approach destroy and rebuild the whole context every frame of a
+      drag. Owning setup makes it clear what actually depends on the swapchain, which is nothing.
+- [ ] Decide what stays vendored. The aim is to replace the two backends, not imgui itself.
+
+### 4. Normal mapping
 
 - [ ] Fix the tangent frame. `Scene.slang` builds its TBN with the tangent and bitangent rows
       zeroed, so only the normal is meaningful and the sampled normal map has no effect
@@ -95,7 +149,7 @@ checkable work in [Tasks](#tasks).
 - [ ] Add a normal-map-only debug view to confirm the result (the `norm` entry point exists but
       is only as trustworthy as the TBN)
 
-### 3. Light types
+### 5. Light types
 
 - [ ] Directional lights
 - [ ] Spot lights
@@ -103,7 +157,7 @@ checkable work in [Tasks](#tasks).
       single struct in `SceneData.odin`
 - [ ] Editor support for creating and editing each type
 
-### 4. Shadow quality and cost
+### 6. Shadow quality and cost
 
 - [x] One draw per light rather than six (multiview)
 - [ ] Per-face culling — every light currently submits all geometry to all six views
@@ -111,7 +165,12 @@ checkable work in [Tasks](#tasks).
 - [ ] Cascaded shadow maps for directional lights (depends on roadmap 3)
 - [ ] Revisit the fixed 512x512 `SHADOW_RESOLUTION` and the 20-sample PCF loop
 
-### 5. Asset and shader pipeline
+### 7. Asset and shader pipeline
+
+- [x] Fix "Add Texture" — it passed the `.texture` descriptor path to the image loader instead
+      of the asset the descriptor points at, then panicked on the failure
+- [x] Fix "Open Scene" — cancelling the dialog produced an empty path that `filepath.rel` could
+      not relate, and the resulting broken scene was appended and loaded anyway
 
 - [ ] Load shader descriptor files the way models and textures are loaded, instead of
       hardcoding the six `compileShader` calls in `Main.odin`
@@ -120,7 +179,7 @@ checkable work in [Tasks](#tasks).
 - [ ] Improve swapchain format selection, which currently takes the first format offered
       unless HDR is enabled
 
-### 6. Renderer performance
+### 8. Renderer performance
 
 - [ ] Reduce resize allocation churn — every swapchain resize frees and reallocates both
       post-process images, and live resizing does that per frame of a drag
@@ -135,7 +194,7 @@ checkable work in [Tasks](#tasks).
 - [ ] Dedicated transfer queue — deliberately deferred; uploads happen during scene load with
       nothing to overlap, and it would need queue family ownership transfers
 
-### 7. Platform coverage
+### 9. Platform coverage
 
 - [ ] Run the macOS build. `Graphics_darwin.odin` is written and type-checks but has never
       executed; the `NSTimer` run-loop mode handling is the most likely thing to be wrong
@@ -144,7 +203,7 @@ checkable work in [Tasks](#tasks).
 - [ ] Confirm resizing behaviour on X11 and Wayland, where the callbacks alone are expected to
       be sufficient
 
-### 8. Raytracing
+### 10. Raytracing
 
 - [ ] Scope what raytracing means here — reflections, shadows, GI, or a full path tracer
 - [ ] Acceleration structure build and update

@@ -106,23 +106,38 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			if imgui.BeginMenu("File") {
 				if imgui.MenuItem("Open") {
 					str := string(tinyfd.openFileDialog("Open Scene", SCENE_PATH, 0, nil, nil, 0))
-					relPath, err := filepath.rel(globals.projectDir, str, context.temp_allocator)
-					if err != nil {
-						logf(
-							.Error,
-							"Failed to get relative path: %v\nBase: %v\nPath: %v",
-							err,
+					if str != "" && os.exists(str) {
+						relPath, err := filepath.rel(
 							globals.projectDir,
 							str,
+							context.temp_allocator,
 						)
-						relPath = str
+						if err != nil {
+							logf(
+								.Error,
+								"Failed to get relative path: %v\nBase: %v\nPath: %v",
+								err,
+								globals.projectDir,
+								str,
+							)
+							relPath = str
+						}
+						path, oerr := os.replace_path_separators(
+							relPath,
+							'/',
+							context.allocator,
+						)
+						if oerr != nil {
+							log(.Error, "Failed to replace path seperators!")
+						}
+						append(&globals.scenes, Scene{path = path})
+						sceneIdx := len(globals.scenes) - 1
+						if lerr := loadScene(&globals.scenes[sceneIdx]); lerr != .None {
+							logf(.Error, "Failed to open scene \"%s\": %v", path, lerr)
+							deleteScene(&globals.scenes[sceneIdx])
+							unordered_remove(&globals.scenes, sceneIdx)
+						}
 					}
-					path, oerr := os.replace_path_separators(relPath, '/', context.allocator)
-					if oerr != nil {
-						log(.Error, "Failed to replace path seperators!")
-					}
-					append(&globals.scenes, Scene{path = path})
-					loadScene(&globals.scenes[len(globals.scenes) - 1])
 				}
 
 				if imgui.MenuItem("Save") {
@@ -230,11 +245,22 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								logf(.Error, "Failed to load texture: %v", err)
 								delete(texture.path)
 								unordered_remove(&scene.textures, len(scene.textures) - 1)
+							} else if err := addImages(
+								graphicsData,
+								scene,
+								{texture.assetPath},
+							); err != nil {
+								logf(
+									.Error,
+									"Failed to add texture image \"%s\": %v",
+									texture.assetPath,
+									err,
+								)
+								deleteTexture(texture)
+								unordered_remove(&scene.textures, len(scene.textures) - 1)
 							} else {
-								err := addImages(graphicsData, scene, {texture.path})
-								if err != nil {
-									panic("Failed to add texture image")
-								}
+								graphicsData.reloadBuffers = true
+								markCommandsDirty(graphicsData, DIRTY_ALL)
 							}
 						}
 					}
@@ -289,6 +315,35 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			if imgui.DragFloat("Gamma", &graphicsData.gamma, 0.01) {
 				graphicsData.reloadBuffers = true
 			}
+
+			available := hdrAvailable(graphicsData)
+			hdr := hdrEnabled(graphicsData)
+			imgui.BeginDisabled(!available)
+			if imgui.Checkbox("HDR", &hdr) {
+				setHDREnabled(graphicsData, hdr)
+			}
+			imgui.EndDisabled()
+			if !available {
+				imgui.SetItemTooltip("This surface offers no HDR10 format.")
+			}
+			imgui.SameLine()
+			if !available {
+				imgui.Text("(unavailable)")
+			} else {
+				imgui.Text(hdrActive(graphicsData) ? "(HDR10 PQ)" : "(sRGB)")
+			}
+
+			imgui.BeginDisabled(!hdrActive(graphicsData))
+			if imgui.DragFloat(
+				"Paper white (nits)",
+				&graphicsData.paperWhiteNits,
+				1.0,
+				50,
+				1000,
+			) {
+				graphicsData.reloadBuffers = true
+			}
+			imgui.EndDisabled()
 		}
 
 		if imgui.CollapsingHeader("Scene##header") {

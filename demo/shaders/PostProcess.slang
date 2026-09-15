@@ -7,6 +7,11 @@ enum ToneMapper : uint32_t {
 	NarkowiczACES = 1,
 }
 
+enum TransferFunction : uint32_t {
+	Gamma = 0,
+	PQ = 1,
+}
+
 struct PushConstants {
 	HeapIndices resources;
 	float contrast;
@@ -20,6 +25,8 @@ struct PushConstants {
 	uint contentOffsetY;
 	uint contentExtentX;
 	uint contentExtentY;
+	TransferFunction transferFunction;
+	float paperWhiteNits;
 };
 
 [[vk::push_constant]]
@@ -35,6 +42,26 @@ float3 narkowiczACES(float3 colour) {
 	const float E = 0.14;
 	return clamp((colour * (A * colour + B)) / (colour * (C * colour + D) + E),
 							 0.0, 1.0);
+}
+
+float3 rec709ToRec2020(float3 colour) {
+	return float3(dot(colour, float3(0.6274040, 0.3292820, 0.0433136)),
+								dot(colour, float3(0.0690970, 0.9195400, 0.0113612)),
+								dot(colour, float3(0.0163916, 0.0880132, 0.8955950)));
+}
+
+// SMPTE ST 2084. Takes absolute luminance in nits and returns the encoded signal an HDR10
+// display expects, which is why HDR cannot simply reuse the gamma path.
+float3 pqEncode(float3 nits) {
+	const float m1 = 0.1593017578125;
+	const float m2 = 78.84375;
+	const float c1 = 0.8359375;
+	const float c2 = 18.8515625;
+	const float c3 = 18.6875;
+
+	const float3 y = clamp(nits / 10000.0, 0.0, 1.0);
+	const float3 ym1 = pow(y, float3(m1));
+	return pow((c1 + c2 * ym1) / (1.0 + c3 * ym1), float3(m2));
 }
 
 [shader("compute")]
@@ -102,6 +129,13 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 		break;
 	}
 
-	colour = pow(colour, float3(1.0 / pushConstants.gamma));
+	switch (pushConstants.transferFunction) {
+	case TransferFunction.Gamma:
+		colour = pow(colour, float3(1.0 / pushConstants.gamma));
+		break;
+	case TransferFunction.PQ:
+		colour = pqEncode(rec709ToRec2020(colour) * pushConstants.paperWhiteNits);
+		break;
+	}
 	Resources.ProcessedImage[int2(x, y)] = float4(colour, 1.0);
 }
