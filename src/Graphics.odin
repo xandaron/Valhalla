@@ -328,11 +328,9 @@ LightData :: struct #align (16) {
 UniformBuffer :: struct #align (16) {
 	projection:     Mat4,
 	viewProjection: Mat4,
+	cameraPosition: Vec3,
 	lightCount:     u32,
 	ambientLight:   f32,
-	_:              [2]u32,
-	cameraPosition: Vec3,
-	_:              u32,
 }
 
 @(private = "file")
