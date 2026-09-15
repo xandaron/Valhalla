@@ -35,7 +35,7 @@ Session_Desc :: struct {
 	searchPathCount:          Int,
 	preprocessorMacros:       [^]Preprocessor_Macro_Desc,
 	preprocessorMacroCount:   Int,
-	fileSystem:               ^ISlangFileSystem,
+	fileSystem:               ^Slang_File_System,
 	enableEffectAnnotations:  Bool,
 	allowGLSLSyntax:          Bool,
 	compilerOptionEntries:    [^]Compiler_Option_Entry,
