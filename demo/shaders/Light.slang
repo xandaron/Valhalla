@@ -63,16 +63,13 @@ struct VertOut {
 };
 
 [shader("vertex")]
-VertOut vert(Vertex input, uint vertexID: SV_VertexID,
-						 uint instanceID: SV_InstanceID) {
+VertOut vert(uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID) {
 	VertOut output;
 
 	const Light light = Resources.Lights[pushConstants.layerIndex / 6];
 	const uint idx = vertexID + pushConstants.vertexOffset +
 									 instanceID * pushConstants.vertexCount;
-	const float4x4 vertexTransform = Resources.Transforms[idx];
-	const float4 vertexPosition =
-			mul(vertexTransform, float4(input.position, 1.0));
+	const float4 vertexPosition = Resources.Positions[idx];
 
 	const uint face = pushConstants.layerIndex % 6;
 	const float4x4 viewProj = mul(projection(light), view(light, face));

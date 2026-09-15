@@ -5,6 +5,7 @@ import "core:log"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
+import "core:strings"
 import "core:time"
 
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
@@ -115,7 +116,7 @@ main :: proc() {
 	)
 	defer cleanupGraphics(&globals.graphicsData)
 
-	append(&globals.scenes, Scene{path = "./scenes/knight.scene"})
+	append(&globals.scenes, Scene{path = strings.clone("./scenes/knight.scene")})
 	assert(loadScene(&globals.scenes[0]) == nil)
 	defer {
 		for &scene in globals.scenes {

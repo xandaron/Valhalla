@@ -6,7 +6,7 @@
 		property StructuredBuffer<float4x4> Bones { get { return PC.resources.Bones; } }           \
 		property StructuredBuffer<float4x4> Transforms { get { return PC.resources.Transforms; } } \
 		property RWStructuredBuffer<float4x4> TransformsRW { get { return PC.resources.TransformsRW; } } \
-		property StructuredBuffer<Light> Lights { get { return PC.resources.Lights; } }            \
+		property StructuredBuffer<float4> Positions { get { return PC.resources.Positions; } }     		property RWStructuredBuffer<float4> PositionsRW { get { return PC.resources.PositionsRW; } } 		property StructuredBuffer<Light> Lights { get { return PC.resources.Lights; } }            \
 		property StructuredBuffer<uint> TextureIndices { get { return PC.resources.TextureIndices; } } \
 		property TextureCubeArray ShadowMap { get { return PC.resources.ShadowMap; } }             \
 		property Texture2D SceneDepth { get { return PC.resources.SceneDepth; } }                  \

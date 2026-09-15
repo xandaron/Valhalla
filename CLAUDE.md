@@ -97,8 +97,8 @@ reach them through `ResourceHeapEXT`/`SamplerHeapEXT` builtins.
 Shaders declare no bindings. Each pass's push constants start with a `resources: HeapIndices`
 block of plain integer indices; `HeapIndices` exposes each resource as a `property` that builds a
 `DescriptorHandle<T>` from the matching index, so shaders read
-`pushConstants.resources.Lights[i]`. Properties carry no storage, so the block stays 13 uints
-(52 bytes) — verified from the emitted push-constant member offsets.
+`pushConstants.resources.Lights[i]`. Properties carry no storage, so the block is exactly one
+uint per resource (currently 14, 56 bytes).
 
 Call sites use a bare `Resources.Vertices[i]`. That comes from `DECLARE_RESOURCES(pushConstants)`
 in `Resources.slang`, which each pass **`#include`s** — it must be `#include`, not `import`,
@@ -130,6 +130,12 @@ Consequences worth knowing before touching pipelines, buffers or shaders:
   texture region, free-list allocated up to `MAX_HEAP_TEXTURES`.
 - Samplers are not `VkSampler` objects; `vkWriteSamplerDescriptorsEXT` takes a
   `VkSamplerCreateInfo` directly.
+- There is no fixed-function vertex input. Pipelines declare zero bindings and attributes;
+  vertex shaders pull from `Resources.Vertices`. Index with
+  `SV_VertexID + SV_StartVertexLocation` — Slang's `SV_VertexID` follows HLSL and excludes the
+  draw's `vertexOffset`, which the buffer *is* indexed by.
+- `Vertex`'s manual padding is std430 alignment for that storage-buffer read, not fixed-function
+  alignment. `size_of(Vertex)` is 112 and must stay identical to the shader struct.
 
 **Memory.** A hand-rolled sub-allocator, deliberately not VMA. First-fit with coalescing, one
 `vkAllocateMemory` block per memory type, persistent mapping for host-visible blocks, dedicated
