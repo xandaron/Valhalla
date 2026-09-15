@@ -36,8 +36,12 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 					vertex.weights[j] * Resources.Bones[boneOffset + vertex.bones[i]];
 		}
 
-		Resources.TransformsRW[pushConstants.transformOffset + dispatchThreadID.x +
-											i * pushConstants.vertexCount] =
+		const float4x4 vertexTransform =
 				mul(Resources.Instances[instanceIndex].model, boneTransform);
+		const uint idx = pushConstants.transformOffset + dispatchThreadID.x +
+										 i * pushConstants.vertexCount;
+
+		Resources.TransformsRW[idx] = vertexTransform;
+		Resources.PositionsRW[idx] = mul(vertexTransform, float4(vertex.position, 1.0));
 	}
 }

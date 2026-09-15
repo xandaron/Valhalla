@@ -43,6 +43,14 @@ clearBuffer :: proc(buffer: ^[100]byte) {
 	}
 }
 
+bufferText :: proc(buffer: ^[100]byte) -> string {
+	length := 0
+	for length < len(buffer) && buffer[length] != 0 {
+		length += 1
+	}
+	return string(buffer[:length])
+}
+
 clearComponentData :: proc(componentInfo: ^CreateComponentData) {
 	clearBuffer(&componentInfo.name)
 	clearBuffer(&componentInfo.savePath)
@@ -64,11 +72,13 @@ saveAs :: proc(scene: ^Scene) {
 			)
 			relPath = string(str)
 		}
-		oerr: os.Error
-		scene.path, oerr = os.replace_path_separators(relPath, '/', context.allocator)
+		newPath, oerr := os.replace_path_separators(relPath, '/', context.allocator)
 		if oerr != nil {
 			log(.Error, "Failed to replace path seperators!")
+			return
 		}
+		delete(scene.path)
+		scene.path = newPath
 		saveScene(scene)
 	}
 }
@@ -619,97 +629,22 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		}
 
 		if imgui.Button("Create") {
-			scene := &globals.scenes[globals.activeScene]
+			name := bufferText(&createComponentInfo.name)
+			savePath := bufferText(&createComponentInfo.savePath)
 
-			if createComponentInfo.name[0] != 0 && createComponentInfo.savePath[0] != 0 {
-				name, path: string
-				oerr: os.Error
-
-				name, oerr = os.replace_path_separators(
-					string(createComponentInfo.name[:]),
+			if name != "" && savePath != "" {
+				path, oerr := os.replace_path_separators(
+					savePath,
 					'/',
-					context.allocator,
+					context.temp_allocator,
 				)
 				if oerr != nil {
 					log(.Error, "Failed to replace path seperators!")
+				} else if newScene(name, path) {
+					clearComponentData(createComponentInfo)
+					uiData.lockInput = false
+					imgui.CloseCurrentPopup()
 				}
-
-				path, oerr = os.replace_path_separators(
-					string(createComponentInfo.savePath[:]),
-					'/',
-					context.allocator,
-				)
-				if oerr != nil {
-					log(.Error, "Failed to replace path seperators!")
-				}
-
-				append(&globals.scenes, Scene{name = name, path = path})
-				scene := &globals.scenes[len(globals.scenes) - 1]
-				if err := saveScene(scene); err != nil {
-					delete(name)
-					delete(path)
-					unordered_remove(&globals.scenes, len(globals.scenes) - 1)
-					logf(.Error, "Failed to make new scene: %v", err)
-				}
-
-				append(
-					&scene.models,
-					Model{path = strings.clone("scene_components/models/cube.model")},
-				)
-				loadModelComponent(&scene.models[0])
-				loadModel(scene, &scene.models[0])
-
-				append(
-					&scene.textures,
-					Texture{path = strings.clone("scene_components/textures/cube.texture")},
-				)
-				loadTextureComponent(&scene.textures[0])
-
-				append(
-					&scene.cameras,
-					Camera {
-						name = strings.clone("Main"),
-						mode = .PERSPECTIVE,
-						eye = Vec3{0, 0, -5},
-						center = Vec3{0, 0, 0},
-						up = Vec3{0, 1, 0},
-						fov = 45,
-						near = 0.1,
-						far = 100,
-					},
-				)
-
-				append(
-					&scene.lights,
-					PointLight {
-						name = strings.clone("Light"),
-						position = Vec3{0, 5, 0},
-						colour = Vec3{1, 1, 1},
-						brightness = 1,
-						dropoff = 1,
-					},
-				)
-
-				scene.boneCount = 1
-				append(
-					&scene.objects,
-					Object {
-						name = strings.clone("Cube"),
-						position = Vec3{0, 0, 0},
-						rotation = IQUAT,
-						scale = Vec3{1, 1, 1},
-						modelIdx = 0,
-						instanceIdx = 0,
-						textureIdxs = make([][TextureIndex]u32, 1),
-						animation = ObjectAnimation{idx = -1},
-						attachment = Attachment{targetIdx = -1},
-					},
-				)
-				addInstance(scene, &scene.models[0], 0)
-
-				clearComponentData(createComponentInfo)
-				uiData.lockInput = false
-				imgui.CloseCurrentPopup()
 			}
 		}
 

@@ -45,9 +45,11 @@ struct VertOut {
 };
 
 [shader("vertex")]
-VertOut vert(Vertex vertex, uint vertexID: SV_VertexID,
+VertOut vert(uint vertexID: SV_VertexID, uint baseVertex: SV_StartVertexLocation,
 						 uint instanceID: SV_InstanceID) {
 	VertOut output;
+
+	const Vertex vertex = Resources.Vertices[vertexID + baseVertex];
 
 	const uint idx = vertexID + pushConstants.vertexOffset +
 									 instanceID * pushConstants.vertexCount;

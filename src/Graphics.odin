@@ -44,53 +44,7 @@ DEVICE_EXTENSIONS: []cstring : {
 	vk.KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
 }
 
-@(private = "file")
-VERTEX_BINDING_DESCRIPTION: vk.VertexInputBindingDescription : {
-	binding = 0,
-	stride = size_of(Vertex),
-	inputRate = .VERTEX,
-}
 
-@(private = "file")
-VERTEX_ATTRIBUTE_DESCRIPTION: []vk.VertexInputAttributeDescription : {
-	{
-		location = 0,
-		binding = 0,
-		format = .R32G32B32_SFLOAT,
-		offset = u32(offset_of(Vertex, position)),
-	},
-	{
-		location = 1,
-		binding = 0,
-		format = .R32G32B32_SFLOAT,
-		offset = u32(offset_of(Vertex, normal)),
-	},
-	{
-		location = 2,
-		binding = 0,
-		format = .R32G32B32_SFLOAT,
-		offset = u32(offset_of(Vertex, tangent)),
-	},
-	{
-		location = 3,
-		binding = 0,
-		format = .R32G32B32_SFLOAT,
-		offset = u32(offset_of(Vertex, bitangent)),
-	},
-	{location = 4, binding = 0, format = .R32G32_SFLOAT, offset = u32(offset_of(Vertex, uv))},
-	{
-		location = 5,
-		binding = 0,
-		format = .R32G32B32A32_UINT,
-		offset = u32(offset_of(Vertex, bones)),
-	},
-	{
-		location = 6,
-		binding = 0,
-		format = .R32G32B32A32_SFLOAT,
-		offset = u32(offset_of(Vertex, weights)),
-	},
-}
 
 @(private = "file")
 MAX_FRAMES_IN_FLIGHT: u32 : 2
@@ -264,6 +218,7 @@ HeapIndices :: struct {
 	instanceBuffer:     u32,
 	boneBuffer:         u32,
 	transformBuffer:    u32,
+	positionBuffer:     u32,
 	lightBuffer:        u32,
 	textureIndexBuffer: u32,
 	shadowMap:          u32,
@@ -397,6 +352,7 @@ SceneBuffers :: struct {
 	boneBuffers:        [MAX_FRAMES_IN_FLIGHT]Buffer,
 	lightBuffers:       [MAX_FRAMES_IN_FLIGHT]Buffer,
 	transformBuffers:   [MAX_FRAMES_IN_FLIGHT]Buffer,
+	positionBuffers:    [MAX_FRAMES_IN_FLIGHT]Buffer,
 	textureIndexBuffer: Buffer,
 }
 
@@ -409,6 +365,7 @@ deleteSceneBuffers :: proc(using graphicsData: ^GraphicsData, buffers: ^SceneBuf
 		deleteBuffer(graphicsData, &buffers.boneBuffers[idx])
 		deleteBuffer(graphicsData, &buffers.lightBuffers[idx])
 		deleteBuffer(graphicsData, &buffers.transformBuffers[idx])
+		deleteBuffer(graphicsData, &buffers.positionBuffers[idx])
 	}
 	deleteBuffer(graphicsData, &buffers.textureIndexBuffer)
 
@@ -3004,15 +2961,20 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			.STORAGE_BUFFER,
 		)
 
-		// Bindings 4 and 5 were the same buffer under the old set layout, differing only in which
-		// stages could see it. The heap has no stage concept, so both slots get the same write.
-		transformSize := vk.DeviceSize(size_of(Mat4) * scene.vertexCount)
 		writeBufferDescriptor(
 			graphicsData,
 			frame,
 			.Transform,
 			buffers.transformBuffers[frame].buffer,
-			transformSize,
+			vk.DeviceSize(size_of(Mat4) * scene.vertexCount),
+			.STORAGE_BUFFER,
+		)
+		writeBufferDescriptor(
+			graphicsData,
+			frame,
+			.Position,
+			buffers.positionBuffers[frame].buffer,
+			vk.DeviceSize(size_of(Vec4) * scene.vertexCount),
 			.STORAGE_BUFFER,
 		)
 
@@ -3110,8 +3072,9 @@ BufferSlot :: enum u32 {
 	Instance     = 2,
 	Bone         = 3,
 	Transform    = 4,
-	Light        = 5,
-	TextureIndex = 6,
+	Position     = 5,
+	Light        = 6,
+	TextureIndex = 7,
 }
 
 @(private = "file")
@@ -3306,6 +3269,7 @@ createDescriptorHeaps :: proc(using graphicsData: ^GraphicsData) -> DescriptorHe
 		instanceBuffer     = bufferSlotIndex(graphicsData, .Instance),
 		boneBuffer         = bufferSlotIndex(graphicsData, .Bone),
 		transformBuffer    = bufferSlotIndex(graphicsData, .Transform),
+		positionBuffer     = bufferSlotIndex(graphicsData, .Position),
 		lightBuffer        = bufferSlotIndex(graphicsData, .Light),
 		textureIndexBuffer = bufferSlotIndex(graphicsData, .TextureIndex),
 		shadowMap          = imageSlotIndex(graphicsData, .ShadowMap),
@@ -3774,8 +3738,6 @@ createLightPipeline :: proc(
 		flags = {.DESCRIPTOR_HEAP_EXT},
 	}
 
-	vertexBindingDescription := VERTEX_BINDING_DESCRIPTION
-
 	shaderStages := [?]vk.PipelineShaderStageCreateInfo {
 		{
 			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -3830,10 +3792,10 @@ createLightPipeline :: proc(
 			sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 			pNext = nil,
 			flags = nil,
-			vertexBindingDescriptionCount = 1,
-			pVertexBindingDescriptions = &vertexBindingDescription,
-			vertexAttributeDescriptionCount = u32(len(VERTEX_ATTRIBUTE_DESCRIPTION)),
-			pVertexAttributeDescriptions = raw_data(VERTEX_ATTRIBUTE_DESCRIPTION),
+			vertexBindingDescriptionCount = 0,
+			pVertexBindingDescriptions = nil,
+			vertexAttributeDescriptionCount = 0,
+			pVertexAttributeDescriptions = nil,
 		},
 		pInputAssemblyState = &vk.PipelineInputAssemblyStateCreateInfo {
 			sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -4099,8 +4061,6 @@ createScenePipeline :: proc(
 		flags = {.DESCRIPTOR_HEAP_EXT},
 	}
 
-	vertexBindingDescription := VERTEX_BINDING_DESCRIPTION
-
 	shaderStages: [2]vk.PipelineShaderStageCreateInfo = {
 		{
 			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -4155,10 +4115,10 @@ createScenePipeline :: proc(
 			sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 			pNext = nil,
 			flags = {},
-			vertexBindingDescriptionCount = 1,
-			pVertexBindingDescriptions = &vertexBindingDescription,
-			vertexAttributeDescriptionCount = u32(len(VERTEX_ATTRIBUTE_DESCRIPTION)),
-			pVertexAttributeDescriptions = raw_data(VERTEX_ATTRIBUTE_DESCRIPTION),
+			vertexBindingDescriptionCount = 0,
+			pVertexBindingDescriptions = nil,
+			vertexAttributeDescriptionCount = 0,
+			pVertexAttributeDescriptions = nil,
 		},
 		pInputAssemblyState = &{
 			sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -4725,6 +4685,7 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 		panic("Failed to wait for device idle!")
 	}
 
+	deleteBuffer(graphicsData, &buffers.vertexBuffer)
 	err = loadBufferToGPU(
 		graphicsData,
 		size_of(Vertex) * len(scene.vertices),
@@ -4736,6 +4697,7 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 		logf(.Fatal, "Failed to load vertex buffer! Error: %v", err)
 	}
 
+	deleteBuffer(graphicsData, &buffers.indexBuffer)
 	err = loadBufferToGPU(
 		graphicsData,
 		size_of(u32) * len(scene.indices),
@@ -4753,6 +4715,7 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	boneBufferSize := size_of(Mat4) * scene.boneCount
 	lightBufferSize := size_of(LightData) * len(scene.lights)
 	transformBufferSize := size_of(Mat4) * scene.vertexCount
+	positionBufferSize := size_of(Vec4) * scene.vertexCount
 
 	textureIndexSize := 0
 	for &model in scene.models {
@@ -4807,6 +4770,18 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 		)
 		if err != nil {
 			logf(.Fatal, "Failed to create transform buffer! Error: %v", err)
+		}
+
+		deleteBuffer(graphicsData, &buffers.positionBuffers[i])
+		err = createBuffer(
+			graphicsData,
+			int(positionBufferSize),
+			{.STORAGE_BUFFER},
+			{.DEVICE_LOCAL},
+			&buffers.positionBuffers[i],
+		)
+		if err != nil {
+			logf(.Fatal, "Failed to create position buffer! Error: %v", err)
 		}
 	}
 
@@ -5197,13 +5172,6 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 
 	bindDescriptorHeaps(graphicsData, cmdBuffer, index)
 
-	vk.CmdBindVertexBuffers(
-		cmdBuffer,
-		0,
-		1,
-		&scene.buffers.vertexBuffer.buffer,
-		raw_data([]vk.DeviceSize{0}),
-	)
 	vk.CmdBindIndexBuffer2(
 		cmdBuffer,
 		scene.buffers.indexBuffer.buffer,
@@ -5420,13 +5388,6 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 	bindDescriptorHeaps(graphicsData, cmdBuffer, index)
 	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Scene].handle)
 
-	vk.CmdBindVertexBuffers(
-		cmdBuffer,
-		0,
-		1,
-		&scene.buffers.vertexBuffer.buffer,
-		raw_data([]vk.DeviceSize{0}),
-	)
 	vk.CmdBindIndexBuffer2(
 		cmdBuffer,
 		scene.buffers.indexBuffer.buffer,

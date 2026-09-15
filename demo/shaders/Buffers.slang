@@ -35,6 +35,7 @@ struct HeapIndices {
 	uint instanceBuffer;
 	uint boneBuffer;
 	uint transformBuffer;
+	uint positionBuffer;
 	uint lightBuffer;
 	uint textureIndexBuffer;
 	uint shadowMap;
@@ -82,6 +83,20 @@ struct HeapIndices {
 	property RWStructuredBuffer<float4x4> TransformsRW {
 		get {
 			DescriptorHandle<RWStructuredBuffer<float4x4>> d = { transformBuffer };
+			return d;
+		}
+	}
+
+	property StructuredBuffer<float4> Positions {
+		get {
+			DescriptorHandle<StructuredBuffer<float4>> d = { positionBuffer };
+			return d;
+		}
+	}
+
+	property RWStructuredBuffer<float4> PositionsRW {
+		get {
+			DescriptorHandle<RWStructuredBuffer<float4>> d = { positionBuffer };
 			return d;
 		}
 	}
