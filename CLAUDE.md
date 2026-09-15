@@ -84,6 +84,13 @@ dirty through `markCommandsDirty` with `DIRTY_ALL`, `DIRTY_GEOMETRY` or an expli
 light change does not force the scene pass to re-record. Each pass owns a primary command buffer
 and records its own barriers, so passes are independent.
 
+The frame body lives in `tickFrame`, not in the loop itself. Dragging a window border puts Win32
+into a modal message loop where `glfwPollEvents` does not return, so the window refresh and
+framebuffer size callbacks call `tickFrame` to keep rendering during the drag; a `ticking` guard
+stops it re-entering. For the same reason `recreateSwapchain` must not tear down imgui — nothing
+in its init depends on the swapchain extent, and rebuilding the context per size change makes the
+overlay vanish while resizing.
+
 `drawFrame` issues two submits: transform (compute queue), then Light/Scene/PostProcess/Imgui as
 one batch on the graphics queue. Ordering inside that batch comes from pipeline barriers recorded
 in the passes themselves, not from semaphores — if you add or reorder passes, the barriers are

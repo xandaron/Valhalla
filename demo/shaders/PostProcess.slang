@@ -16,6 +16,10 @@ struct PushConstants {
 	ToneMapper tonemapper;
 	float gamma;
 	bool drawLights;
+	uint contentOffsetX;
+	uint contentOffsetY;
+	uint contentExtentX;
+	uint contentExtentY;
 };
 
 [[vk::push_constant]]
@@ -41,7 +45,22 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 
 	uint2 imageSize;
 	Resources.RenderedImage.GetDimensions(imageSize.x, imageSize.y);
-	float2 screenPosition = float2(x, y) / imageSize;
+	if (x >= imageSize.x || y >= imageSize.y) {
+		return;
+	}
+
+	const uint2 contentOffset =
+			uint2(pushConstants.contentOffsetX, pushConstants.contentOffsetY);
+	const uint2 contentExtent =
+			uint2(pushConstants.contentExtentX, pushConstants.contentExtentY);
+	const uint2 content = uint2(x, y) - contentOffset;
+	if (x < contentOffset.x || y < contentOffset.y || content.x >= contentExtent.x ||
+			content.y >= contentExtent.y) {
+		Resources.ProcessedImage[int2(x, y)] = float4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+
+	float2 screenPosition = float2(content) / float2(contentExtent);
 
 	float3 colour = Resources.RenderedImage[int2(x, y)].xyz;
 
