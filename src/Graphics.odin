@@ -1628,6 +1628,9 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) {
 BLOCK_SIZE: vk.DeviceSize : 64 * 1024 * 1024
 
 @(private = "file")
+BLOCK_FIRST_SIZE: vk.DeviceSize : 8 * 1024 * 1024
+
+@(private = "file")
 DEDICATED_THRESHOLD: vk.DeviceSize : BLOCK_SIZE / 4
 
 @(private = "file")
@@ -1983,7 +1986,24 @@ memoryAddBlock :: proc(
 	block: ^MemoryBlock,
 	err: MemoryError,
 ) {
-	blockSize := BLOCK_SIZE
+	existing := 0
+	for other in allocator.blocks {
+		if other.memoryTypeIndex == memoryTypeIndex && other.usage == usage {
+			existing += 1
+		}
+	}
+	blockSize := BLOCK_FIRST_SIZE
+	for _ in 0 ..< existing {
+		blockSize *= 2
+		if blockSize >= BLOCK_SIZE {
+			blockSize = BLOCK_SIZE
+			break
+		}
+	}
+	if blockSize < minimumSize {
+		blockSize = minimumSize
+	}
+
 	for !memoryWithinBudget(allocator, memoryTypeIndex, blockSize) {
 		if blockSize <= minimumSize {
 			logf(
