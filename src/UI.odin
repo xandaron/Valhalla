@@ -165,7 +165,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				imgui.SeparatorText("Assets")
 				if imgui.BeginMenu("Import") {
 					if imgui.MenuItem("Model") {
-						path := tinyfd.openFileDialog("Open Model", MODELS_PATH, 0, nil, nil, 0)
+						path := tinyfd.openFileDialog("Open Model", RESOURCE_PATH, 0, nil, nil, 0)
 						if str := string(path);
 						   str != "" && os.exists(str) && filepath.ext(string(str)) == ".model" {
 							relPath, err := filepath.rel(
@@ -208,7 +208,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					if imgui.MenuItem("Texture") {
 						path := tinyfd.openFileDialog(
 							"Open Texture",
-							TEXTURES_PATH,
+							RESOURCE_PATH,
 							0,
 							nil,
 							nil,
@@ -783,7 +783,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.InputText("##savepath", cstring(&createComponentInfo.savePath[0]), 100)
 		imgui.SameLine()
 		if imgui.Button("Browse##save") {
-			absPath, _ := filepath.abs(MODELS_PATH, context.temp_allocator)
+			absPath, _ := filepath.abs(RESOURCE_PATH, context.temp_allocator)
 			str := tinyfd.saveFileDialog("Save As", fmt.ctprintf("%s/", absPath), 0, nil, nil)
 			if str != "" {
 				relPath, err := filepath.rel(
@@ -909,7 +909,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.InputText("##savepath", cstring(&createComponentInfo.savePath[0]), 100)
 		imgui.SameLine()
 		if imgui.Button("Browse##save") {
-			absPath, _ := filepath.abs(MODELS_PATH, context.temp_allocator)
+			absPath, _ := filepath.abs(RESOURCE_PATH, context.temp_allocator)
 			str := tinyfd.saveFileDialog("Save As", fmt.ctprintf("%s/", absPath), 0, nil, nil)
 			if str != "" {
 				relPath, err := filepath.rel(
