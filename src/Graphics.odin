@@ -38,7 +38,6 @@ when HDR_ENABLED {
 DEVICE_EXTENSIONS: []cstring : {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	vk.KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME,
-	vk.KHR_MAINTENANCE_7_EXTENSION_NAME,
 	vk.EXT_MEMORY_BUDGET_EXTENSION_NAME,
 	vk.EXT_DESCRIPTOR_HEAP_EXTENSION_NAME,
 	vk.KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
@@ -923,7 +922,6 @@ DeviceFeatures :: struct {
 	vulkan13:           vk.PhysicalDeviceVulkan13Features,
 	vulkan14:           vk.PhysicalDeviceVulkan14Features,
 	computeDerivatives: vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
-	maintenance7:       vk.PhysicalDeviceMaintenance7FeaturesKHR,
 	descriptorHeap:     vk.PhysicalDeviceDescriptorHeapFeaturesEXT,
 	untypedPointers:    vk.PhysicalDeviceShaderUntypedPointersFeaturesKHR,
 }
@@ -950,10 +948,6 @@ buildDeviceFeatures :: proc(chain: ^DeviceFeatures, request: bool) {
 		},
 		computeDerivatives = {
 			sType = .PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
-			pNext = &chain.maintenance7,
-		},
-		maintenance7       = {
-			sType = .PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR,
 			pNext = &chain.descriptorHeap,
 		},
 		descriptorHeap     = {
@@ -973,21 +967,12 @@ buildDeviceFeatures :: proc(chain: ^DeviceFeatures, request: bool) {
 	chain.features.features = {imageCubeArray = true, samplerAnisotropy = true}
 	chain.vulkan11.multiview = true
 	chain.vulkan11.shaderDrawParameters = true
-	chain.vulkan12.shaderOutputViewportIndex = true
-	chain.vulkan12.shaderOutputLayer = true
 	chain.vulkan12.timelineSemaphore = true
 	chain.vulkan12.bufferDeviceAddress = true
-	// The unbounded texture array: sized at bind time, sparsely populated, and indexed with a
-	// value read from a buffer rather than a uniform.
-	chain.vulkan12.runtimeDescriptorArray = true
-	chain.vulkan12.descriptorBindingPartiallyBound = true
-	chain.vulkan12.shaderSampledImageArrayNonUniformIndexing = true
-	chain.vulkan13.shaderDemoteToHelperInvocation = true
 	chain.vulkan13.synchronization2 = true
 	chain.vulkan13.dynamicRendering = true
 	chain.vulkan14.maintenance5 = true
 	chain.computeDerivatives.computeDerivativeGroupQuads = true
-	chain.maintenance7.maintenance7 = true
 	chain.descriptorHeap.descriptorHeap = true
 	chain.untypedPointers.shaderUntypedPointers = true
 }
@@ -1021,11 +1006,6 @@ supportsRequestedFeatures :: proc(physicalDevice: vk.PhysicalDevice) -> bool {
 		   &request.computeDerivatives,
 		   &support.computeDerivatives,
 		   size_of(vk.PhysicalDeviceComputeShaderDerivativesFeaturesKHR),
-	   ) ||
-	   missing(
-		   &request.maintenance7,
-		   &support.maintenance7,
-		   size_of(vk.PhysicalDeviceMaintenance7FeaturesKHR),
 	   ) ||
 	   missing(
 		   &request.descriptorHeap,
