@@ -49,10 +49,13 @@ DEVICE_EXTENSIONS: []cstring : {
 @(private = "file")
 MAX_FRAMES_IN_FLIGHT: u32 : 2
 
-RENDER_SIZE: [2]u32 : {1980, 1080}
+RENDER_SIZE: [2]u32 : {1920, 1080}
 
 @(private = "file")
 SHADOW_RESOLUTION: [2]u32 : {512, 512}
+
+@(private = "file")
+DYNAMIC_VIEWPORT_STATES := [2]vk.DynamicState{.VIEWPORT, .SCISSOR}
 
 @(private = "file")
 DEPTH_BIAS_CONSTANT: f32 : 1.25
@@ -264,6 +267,10 @@ PostProcess_PushConstants :: struct {
 	tonemapper: ToneMapper,
 	gamma:      f32,
 	drawLights: b32,
+	contentOffsetX: u32,
+	contentOffsetY: u32,
+	contentExtentX: u32,
+	contentExtentY: u32,
 }
 
 ToneMapper :: enum u32 {
@@ -429,6 +436,7 @@ GraphicsData :: struct {
 	uniformBuffers:      [MAX_FRAMES_IN_FLIGHT]Buffer,
 
 	// Util
+	renderSize:          [2]u32,
 	currentFrame:        u32,
 	drawLights:          bool,
 	reloadBuffers:       bool,
@@ -540,6 +548,8 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 
 	createSyncObjects(&graphicsData) or_return
 	createSamplers(&graphicsData) or_return
+
+	graphicsData.renderSize = RENDER_SIZE
 
 	createPipelineCache(&graphicsData)
 
@@ -1283,6 +1293,36 @@ querySwapchainSupport :: proc(
 
 getSwapcahainAspectRatio :: proc(using graphicsData: ^GraphicsData) -> f32 {
 	return f32(swapchain.extent.width) / f32(swapchain.extent.height)
+}
+
+getRenderAspectRatio :: proc(using graphicsData: ^GraphicsData) -> f32 {
+	return f32(renderSize.x) / f32(renderSize.y)
+}
+
+// The render target has its own resolution and aspect, so fitting it to the swapchain leaves
+// black bars on one axis whenever the two aspects differ.
+@(private = "file")
+@(require_results)
+letterboxRect :: proc(
+	renderSize: [2]u32,
+	target: vk.Extent2D,
+) -> (
+	offset: vk.Offset2D,
+	extent: vk.Extent2D,
+) {
+	scale := min(
+		f32(target.width) / f32(renderSize.x),
+		f32(target.height) / f32(renderSize.y),
+	)
+	extent = {
+		width  = max(u32(f32(renderSize.x) * scale), 1),
+		height = max(u32(f32(renderSize.y) * scale), 1),
+	}
+	offset = {
+		x = i32((target.width - extent.width) / 2),
+		y = i32((target.height - extent.height) / 2),
+	}
+	return
 }
 
 @(private = "file")
@@ -2643,10 +2683,29 @@ copyBufferToImage :: proc(
 
 
 @(private = "file")
+setViewportAndScissor :: proc(commandBuffer: vk.CommandBuffer, size: [2]u32) {
+	vk.CmdSetViewport(
+		commandBuffer,
+		0,
+		1,
+		&vk.Viewport {
+			x = 0,
+			y = 0,
+			width = f32(size.x),
+			height = f32(size.y),
+			minDepth = 0,
+			maxDepth = 1,
+		},
+	)
+	vk.CmdSetScissor(commandBuffer, 0, 1, &vk.Rect2D{offset = {0, 0}, extent = {size.x, size.y}})
+}
+
+@(private = "file")
 upscaleImage :: proc(
 	commandBuffer: vk.CommandBuffer,
 	src, dst: vk.Image,
 	srcSize, dstSize: vk.Extent2D,
+	dstOffset: vk.Offset2D,
 	srcLayer, dstLayer: u32,
 ) {
 	blit: vk.ImageBlit2 = {
@@ -2669,8 +2728,8 @@ upscaleImage :: proc(
 			layerCount = 1,
 		},
 		dstOffsets = {
-			{x = 0, y = 0, z = 0},
-			{x = i32(dstSize.width), y = i32(dstSize.height), z = 1},
+			{x = dstOffset.x, y = dstOffset.y, z = 0},
+			{x = dstOffset.x + i32(dstSize.width), y = dstOffset.y + i32(dstSize.height), z = 1},
 		},
 	}
 
@@ -3810,19 +3869,9 @@ createLightPipeline :: proc(
 			pNext = nil,
 			flags = nil,
 			viewportCount = 1,
-			pViewports = &vk.Viewport {
-					x = 0,
-					y = 0,
-					width = f32(SHADOW_RESOLUTION.x),
-					height = f32(SHADOW_RESOLUTION.y),
-					minDepth = 0,
-					maxDepth = 1,
-			},
+			pViewports = nil,
 			scissorCount = 1,
-			pScissors = &vk.Rect2D {
-					offset = {0, 0},
-					extent = {SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y},
-			},
+			pScissors = nil,
 		},
 		pRasterizationState = &vk.PipelineRasterizationStateCreateInfo {
 			sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -3891,7 +3940,13 @@ createLightPipeline :: proc(
 			},
 			blendConstants = {0, 0, 0, 0},
 		},
-		pDynamicState       = nil,
+		pDynamicState       = &vk.PipelineDynamicStateCreateInfo {
+			sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			dynamicStateCount = len(DYNAMIC_VIEWPORT_STATES),
+			pDynamicStates = &DYNAMIC_VIEWPORT_STATES[0],
+		},
 		layout              = 0,
 		renderPass          = 0,
 		subpass             = 0,
@@ -3920,8 +3975,8 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		&pipelines[.Scene].images[0],
 		{},
 		.D2,
-		RENDER_SIZE.x,
-		RENDER_SIZE.y,
+		renderSize.x,
+		renderSize.y,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -3952,8 +4007,8 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		&pipelines[.Scene].images[1],
 		{},
 		.D2,
-		RENDER_SIZE.x,
-		RENDER_SIZE.y,
+		renderSize.x,
+		renderSize.y,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -4133,16 +4188,9 @@ createScenePipeline :: proc(
 			pNext = nil,
 			flags = {},
 			viewportCount = 1,
-			pViewports = &vk.Viewport {
-					x = 0,
-					y = 0,
-					width = f32(RENDER_SIZE.x),
-					height = f32(RENDER_SIZE.y),
-					minDepth = 0,
-					maxDepth = 1,
-			},
+			pViewports = nil,
 			scissorCount = 1,
-			pScissors = &vk.Rect2D{offset = {0, 0}, extent = {RENDER_SIZE.x, RENDER_SIZE.y}},
+			pScissors = nil,
 		},
 		pRasterizationState = &{
 			sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -4203,7 +4251,13 @@ createScenePipeline :: proc(
 			},
 			blendConstants = {0, 0, 0, 0},
 		},
-		pDynamicState       = nil,
+		pDynamicState       = &vk.PipelineDynamicStateCreateInfo {
+			sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			dynamicStateCount = len(DYNAMIC_VIEWPORT_STATES),
+			pDynamicStates = &DYNAMIC_VIEWPORT_STATES[0],
+		},
 		layout              = 0,
 		renderPass          = 0,
 		subpass             = 0,
@@ -5093,6 +5147,8 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 
 	vkBeginLabel(cmdBuffer, "Shadow Maps", {0.9, 0.8, 0.3, 1})
 
+	setViewportAndScissor(cmdBuffer, SHADOW_RESOLUTION)
+
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
 		&vk.DependencyInfo {
@@ -5288,6 +5344,8 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 
 	vkBeginLabel(cmdBuffer, "Scene", {0.4, 0.6, 0.9, 1})
 
+	setViewportAndScissor(cmdBuffer, renderSize)
+
 	entryBarriers := [?]vk.ImageMemoryBarrier2 {
 		{
 			sType = .IMAGE_MEMORY_BARRIER_2,
@@ -5353,7 +5411,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			sType = .RENDERING_INFO,
 			pNext = nil,
 			flags = nil,
-			renderArea = vk.Rect2D{offset = {0, 0}, extent = {RENDER_SIZE.x, RENDER_SIZE.y}},
+			renderArea = vk.Rect2D{offset = {0, 0}, extent = {renderSize.x, renderSize.y}},
 			layerCount = 1,
 			viewMask = 0,
 			colorAttachmentCount = 1,
@@ -5511,6 +5569,8 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 
 	vkBeginLabel(cmdBuffer, "Post Process", {0.8, 0.4, 0.8, 1})
 
+	contentOffset, contentExtent := letterboxRect(renderSize, swapchain.extent)
+
 	imageBarriers := [?]vk.ImageMemoryBarrier2 {
 		{
 			sType = .IMAGE_MEMORY_BARRIER_2,
@@ -5573,8 +5633,9 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		cmdBuffer,
 		pipelines[.Scene].images[0].vkImage,
 		pipelines[.PostProcess].images[0].vkImage,
-		{RENDER_SIZE.x, RENDER_SIZE.y},
-		{swapchain.extent.width, swapchain.extent.height},
+		{renderSize.x, renderSize.y},
+		contentExtent,
+		contentOffset,
 		0,
 		0,
 	)
@@ -5624,6 +5685,10 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		tonemapper = tonemapper,
 		gamma      = gamma,
 		drawLights = b32(drawLights),
+		contentOffsetX = u32(contentOffset.x),
+		contentOffsetY = u32(contentOffset.y),
+		contentExtentX = contentExtent.width,
+		contentExtentY = contentExtent.height,
 	}
 	vk.CmdPushDataEXT(
 		cmdBuffer,
