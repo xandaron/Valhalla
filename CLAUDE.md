@@ -66,6 +66,9 @@ The app is a GUI program, so a change is not verified until it has been run. Two
   reporting runs, and teardown validation errors surface. Close the window instead
   (`Process.CloseMainWindow()` from PowerShell) so shutdown actually executes.
 - Validation output goes to **stderr**, ordinary logging to stdout. Check both.
+- Never minimise or close the user's other windows to get a clean screenshot. To raise the app,
+  use `BringWindowToTop` / `SetForegroundWindow` on its own `MainWindowHandle` and capture that
+  window's rect; if something still occludes it, capture anyway and say so.
 
 Validation layers and `SYNCHRONIZATION_VALIDATION` are enabled in `createInstance`, so
 synchronisation mistakes are caught at runtime. A silent run is meaningful evidence; take it
@@ -86,20 +89,45 @@ one batch on the graphics queue. Ordering inside that batch comes from pipeline 
 in the passes themselves, not from semaphores — if you add or reorder passes, the barriers are
 what keeps it correct.
 
-**Descriptors.** Uses `VK_EXT_descriptor_heap`; there are no descriptor sets, pools, set layouts
-or `VkPipelineLayout` objects anywhere. Two heaps (resource and sampler) are bound per command
-buffer by device address. Shaders are unmodified and still declare `set`/`binding`: the extension's
-*typed* model maps those to heap offsets via `VkShaderDescriptorSetAndBindingMappingInfoEXT`,
-chained into each **shader stage's** `pNext` (not the pipeline's — validation rejects that).
+**Descriptors.** Uses `VK_EXT_descriptor_heap` in its **untyped** model; there are no descriptor
+sets, pools, set layouts or `VkPipelineLayout` objects anywhere, and no set/binding mappings.
+Two heaps (resource and sampler) are bound per command buffer by device address, and shaders
+reach them through `ResourceHeapEXT`/`SamplerHeapEXT` builtins.
 
-Consequences worth knowing before touching pipelines or buffers:
+Shaders declare no bindings. Each pass's push constants start with a `resources: HeapIndices`
+block of plain integer indices; `HeapIndices` exposes each resource as a `property` that builds a
+`DescriptorHandle<T>` from the matching index, so shaders read
+`pushConstants.resources.Lights[i]`. Properties carry no storage, so the block stays 13 uints
+(52 bytes) — verified from the emitted push-constant member offsets.
 
+Call sites use a bare `Resources.Vertices[i]`. That comes from `DECLARE_RESOURCES(pushConstants)`
+in `Resources.slang`, which each pass **`#include`s** — it must be `#include`, not `import`,
+because the macro forwards to that file's own push constant and Slang's imports do not carry
+preprocessor definitions. It expands to an empty struct plus a global instance, so it costs
+nothing.
+
+`HeapIndices` in `Buffers.slang` mirrors the Odin struct of the same name. Adding a resource
+means adding a field to *both* structs in the same order, a property on `HeapIndices`, a
+forwarding property in the `DECLARE_RESOURCES` macro, and a slot to the matching enum. Texture
+and sampler properties live in `Textures.slang` via `extension HeapIndices`.
+
+Consequences worth knowing before touching pipelines, buffers or shaders:
+
+- `Shaders.odin` must set the `spvDescriptorHeapEXT` capability on the target
+  (`FindCapability` + a `Compiler_Option_Entry` of `.Capability`). Without it Slang silently falls
+  back to descriptor-indexing and the pipelines fail validation. The `+capability` suffix on a
+  profile string does **not** work through the API.
+- `VK_KHR_shader_untyped_pointers` and `shaderUntypedPointers` are required, because the untyped
+  heap lowers to `OpTypeUntypedPointerKHR`.
 - `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` requires `layout == VK_NULL_HANDLE`, which is
   why push constants are `vkCmdPushDataEXT` rather than `vkCmdPushConstants2`.
 - Every buffer is created with `SHADER_DEVICE_ADDRESS` and every allocation carries
   `VkMemoryAllocateFlagsInfo{DEVICE_ADDRESS}`, because heap writes describe buffers by address.
-- Descriptor slots are a static table (`BufferSlot`, `ImageSlot`, `SamplerSlot`) matching the
-  set/binding pairs the shaders declare. Adding a binding means adding a slot and a mapping.
+- Heap indices in push data are **absolute** (`bufferSlotIndex`, `imageSlotIndex`,
+  `textureSlotIndex`), scaled by that descriptor type's own size — the stride is
+  `OpConstantSizeOfEXT`, so each region must start on a multiple of its descriptor size.
+- Scene textures keep their source resolution; each is its own image with a slot in the heap's
+  texture region, free-list allocated up to `MAX_HEAP_TEXTURES`.
 - Samplers are not `VkSampler` objects; `vkWriteSamplerDescriptorsEXT` takes a
   `VkSamplerCreateInfo` directly.
 
@@ -115,7 +143,8 @@ resource. `beginSingleTimeCommands`/`endSingleTimeCommands` still exist but are 
 one-off layout transitions; they block, so do not use them for uploads.
 
 **Other files.** `Main.odin` owns the `globals` struct and the frame loop. `Files.odin` handles
-scene/model/texture serialisation (assimp). `Shaders.odin` compiles `.slang` sources at runtime;
+scene/model/texture serialisation (assimp). `Shaders.odin` compiles `.slang` sources at runtime through Slang's COM-lite
+interfaces (`slang/`, bound directly — there is no C shim);
 `IO.odin` hot-reloads them through `updatePipelineShaders`, which dirties only the affected pass.
 `UI.odin` is the imgui editor. `Debug.odin` has the log wrappers and the Vulkan debug-utils
 helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived objects in

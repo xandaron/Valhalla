@@ -1,14 +1,52 @@
-[[vk::binding(0, 1)]]
-Sampler2DArray textures;
+import "Buffers.slang";
 
-[[vk::binding(1, 1)]]
-SamplerCubeArrayShadow shadowMap;
+// Scene textures live at their source resolution in the heap's texture region; the index comes
+// from HeapIndices.TextureIndices rather than an array layer.
+Texture2D textureAt(uint index) {
+	DescriptorHandle<Texture2D> d = { index };
+	return d;
+}
 
-[[vk::binding(2, 1)]]
-Sampler2D sceneDepth;
+extension HeapIndices {
+	property TextureCubeArray ShadowMap {
+		get {
+			DescriptorHandle<TextureCubeArray> d = { shadowMap };
+			return d;
+		}
+	}
 
-[[vk::binding(3, 1)]]
-RWTexture2D renderedImage;
+	property Texture2D SceneDepth {
+		get {
+			DescriptorHandle<Texture2D> d = { sceneDepth };
+			return d;
+		}
+	}
 
-[[vk::binding(4, 1)]]
-RWTexture2D processedImage;
+	property RWTexture2D<float4> RenderedImage {
+		get {
+			DescriptorHandle<RWTexture2D<float4>> d = { renderedImage };
+			return d;
+		}
+	}
+
+	property RWTexture2D<float4> ProcessedImage {
+		get {
+			DescriptorHandle<RWTexture2D<float4>> d = { processedImage };
+			return d;
+		}
+	}
+
+	property SamplerState LinearSampler {
+		get {
+			DescriptorHandle<SamplerState> d = { linearSampler };
+			return d;
+		}
+	}
+
+	property SamplerState AnisotropicSampler {
+		get {
+			DescriptorHandle<SamplerState> d = { anisotropicSampler };
+			return d;
+		}
+	}
+}

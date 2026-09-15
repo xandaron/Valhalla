@@ -1,8 +1,10 @@
 import "Vertex.slang";
 import "Buffers.slang";
 import "Textures.slang";
+#include "Resources.slang"
 
 struct PushConstants {
+	HeapIndices resources;
 	uint vertexOffset;
 	uint vertexCount;
 	uint instanceOffset;
@@ -10,6 +12,8 @@ struct PushConstants {
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pushConstants;
+
+DECLARE_RESOURCES(pushConstants)
 
 float3x3 inverse3x3(float3x3 m) {
 	float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
@@ -47,10 +51,10 @@ VertOut vert(Vertex vertex, uint vertexID: SV_VertexID,
 
 	const uint idx = vertexID + pushConstants.vertexOffset +
 									 instanceID * pushConstants.vertexCount;
-	const float4x4 vertexTransform = transformBufferRO[idx];
+	const float4x4 vertexTransform = Resources.Transforms[idx];
 	const float4 worldPosition =
 			mul(vertexTransform, float4(vertex.position, 1.0));
-	output.position = mul(uniformBuffer.viewProjection, worldPosition);
+	output.position = mul(Resources.Uniforms[0].viewProjection, worldPosition);
 	output.worldPosition = worldPosition.xyz / worldPosition.w;
 
 	// I need to figue this out. I think the tangent and bitangent are not being
@@ -90,22 +94,17 @@ FragOut frag(VertOut input) {
 	const uint textureIndex =
 			(pushConstants.instanceOffset + input.instanceID) * TextureIndex.COUNT;
 	const float3 albedo = pow(
-			textures
-					.Sample(float3(
-							input.uv, textureIndexBuffer[textureIndex + TextureIndex.ALBEDO]))
+			textureAt(Resources.TextureIndices[textureIndex + TextureIndex.ALBEDO]).Sample(Resources.AnisotropicSampler, input.uv)
 					.xyz,
 			1.0 / 2.2);
 	const float3 normal = normalize(mul(
 			input.TBN,
-			2.0 * textures
-									.Sample(float3(
-											input.uv,
-											textureIndexBuffer[textureIndex + TextureIndex.NORMAL]))
+			2.0 * textureAt(Resources.TextureIndices[textureIndex + TextureIndex.NORMAL]).Sample(Resources.AnisotropicSampler, input.uv)
 									.xyz -
 					1.0));
 
-	for (uint index = 0; index < uniformBuffer.lightCount; index++) {
-		const Light light = lightBuffer[index];
+	for (uint index = 0; index < Resources.Uniforms[0].lightCount; index++) {
+		const Light light = Resources.Lights[index];
 
 		const float3 relativePosition = light.position.xyz - input.worldPosition;
 		const float lightSquaredDistance = dot(relativePosition, relativePosition);
@@ -119,7 +118,7 @@ FragOut frag(VertOut input) {
 			const float3 offsetDir =
 					DISK_RADIUS * sampleOffsetDirections[i] - relativePosition;
 			const float sampleDepth =
-					shadowMap.Sample(float4(offsetDir, float(index))).r;
+					Resources.ShadowMap.Sample(Resources.LinearSampler, float4(offsetDir, float(index))).r;
 
 			static const float BIAS = 0.005;
 			if (lightSquaredDistance < sampleDepth + BIAS) {
@@ -137,9 +136,9 @@ FragOut frag(VertOut input) {
 												light.colourIntensity.xyz * scalingFactor;
 	}
 
-	cumulativeColour = max(cumulativeColour, float3(uniformBuffer.ambientLight,
-																									uniformBuffer.ambientLight,
-																									uniformBuffer.ambientLight));
+	cumulativeColour = max(cumulativeColour, float3(Resources.Uniforms[0].ambientLight,
+																									Resources.Uniforms[0].ambientLight,
+																									Resources.Uniforms[0].ambientLight));
 
 	output.colour = float4(albedo * cumulativeColour, 1.0);
 	return output;
@@ -153,10 +152,7 @@ FragOut norm(VertOut input) {
 			(pushConstants.instanceOffset + input.instanceID) * TextureIndex.COUNT;
 	const float3 normal = normalize(mul(
 			input.TBN,
-			2.0 * textures
-									.Sample(float3(
-											input.uv,
-											textureIndexBuffer[textureIndex + TextureIndex.NORMAL]))
+			2.0 * textureAt(Resources.TextureIndices[textureIndex + TextureIndex.NORMAL]).Sample(Resources.AnisotropicSampler, input.uv)
 									.xyz -
 					1.0));
 

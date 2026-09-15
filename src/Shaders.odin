@@ -7,6 +7,7 @@ import "core:strings"
 CompileError :: enum {
 	None = 0,
 	GlobalSession,
+	Capability,
 	Session,
 	Module,
 	EntryPoint,
@@ -24,131 +25,127 @@ compileShader :: proc(
 	err: CompileError,
 ) {
 	// TODO: Add ability to compile for multiple entry points at once.
-	blobToString :: proc(blob: ^slang.Blob, allocator := context.temp_allocator) -> string {
+	blobToString :: proc(blob: ^slang.IBlob, allocator := context.temp_allocator) -> string {
 		if blob == nil {
 			return ""
 		}
-		size := slang.getBlobSize(blob)
+		size := blob->GetBufferSize()
 		if size == 0 {
 			return ""
 		}
-
 		return strings.clone_from_bytes(
-			([^]u8)(slang.getBlobData(blob))[:size],
+			([^]u8)(blob->GetBufferPointer())[:size],
 			allocator = allocator,
 		)
 	}
 
-	diagnosticsBlob: ^slang.Blob
-	desc := slang.Global_Session_Desc {
-		searchPaths     = nil,
-		searchPathCount = 0,
-	}
-	globalSession := slang.createGlobalSessionWithDesc(&desc)
-	if globalSession == nil {
+	globalSessionDesc := slang.global_session_desc_default()
+	globalSession, globalSessionOk := slang.create_global_session2(&globalSessionDesc)
+	if !globalSessionOk {
 		log(.Error, "Failed to start slang compiler session!")
 		err = .GlobalSession
 		return
 	}
-	defer slang.releaseGlobalSession(globalSession)
+	defer globalSession->Release()
 
-	compileTargets := []slang.Compile_Target{.SPIRV}
-	sessionDesc := slang.Session_Desc {
-		targets                = raw_data(compileTargets),
-		targetCount            = i32(len(compileTargets)),
-		searchPaths            = nil,
-		searchPathCount        = 0,
-		preprocessorMacros     = nil,
-		preprocessorMacroCount = 0,
-		matrixLayoutMode       = .COLUMN_MAJOR,
+	heapCapability := globalSession->FindCapability("spvDescriptorHeapEXT")
+	if heapCapability == 0 {
+		log(.Error, "Slang does not know the spvDescriptorHeapEXT capability!")
+		err = .Capability
+		return
 	}
-	session := slang.createSessionWithProfile(
-		globalSession,
-		slang.findProfile(globalSession, "spirv_1_6"),
-		&sessionDesc,
-	)
-	if session == nil {
+
+	targetOptions := []slang.Compiler_Option_Entry {
+		{name = .Capability, value = {kind = .Int, intValue0 = i32(heapCapability)}},
+	}
+
+	target := slang.target_desc_default()
+	target.format = .SPIRV
+	target.profile = globalSession->FindProfile("spirv_1_6")
+	target.compilerOptionEntries = raw_data(targetOptions)
+	target.compilerOptionEntryCount = u32(len(targetOptions))
+
+	sessionDesc := slang.session_desc_default()
+	sessionDesc.targets = &target
+	sessionDesc.targetCount = 1
+	sessionDesc.defaultMatrixLayoutMode = .COLUMN_MAJOR
+
+	session, sessionOk := slang.create_session(globalSession, &sessionDesc)
+	if !sessionOk {
 		log(.Error, "Failed to start slang compiler session!")
 		err = .Session
 		return
 	}
-	defer slang.releaseSession(session)
+	defer session->Release()
 
-	module := slang.loadModule(
+	module, moduleDiagnostics, moduleOk := slang.load_module(
 		session,
 		strings.clone_to_cstring(file, context.temp_allocator),
-		&diagnosticsBlob,
 	)
-	if module == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
+	defer if moduleDiagnostics != nil do moduleDiagnostics->Release()
+	if !moduleOk {
+		log(.Error, blobToString(moduleDiagnostics))
 		err = .Module
 		return
 	}
-	defer slang.releaseModule(module)
+	defer module->Release()
 
-	ep := slang.findEntryPoint(
+	ep, epDiagnostics, epOk := slang.find_and_check_entry_point(
 		module,
 		strings.clone_to_cstring(entryPoint, context.temp_allocator),
 		stage,
-		&diagnosticsBlob,
 	)
-	if ep == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
+	defer if epDiagnostics != nil do epDiagnostics->Release()
+	if !epOk {
+		log(.Error, blobToString(epDiagnostics))
 		err = .EntryPoint
 		return
 	}
-	defer slang.releaseEntryPoint(ep)
+	defer ep->Release()
 
-	components: [2]slang.Component_Type = {
-		{kind = .MODULE, module = module},
-		{kind = .ENTRY_POINT, entryPoint = ep},
-	}
-
-	program := slang.createCompositeComponentType(
+	components := []^slang.IComponentType{module, ep}
+	program, programDiagnostics, programOk := slang.create_composite_component_type(
 		session,
-		&components[0],
-		i32(len(components)),
-		&diagnosticsBlob,
+		components,
 	)
-	if program == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
+	defer if programDiagnostics != nil do programDiagnostics->Release()
+	if !programOk {
+		log(.Error, blobToString(programDiagnostics))
 		err = .Program
 		return
 	}
-	defer slang.releaseComponentType(program)
+	defer program->Release()
 
-	linkedProgram := slang.linkComponentType(program, &diagnosticsBlob)
-	if linkedProgram == nil {
-		log(.Error, blobToString(diagnosticsBlob))
-		slang.releaseBlob(diagnosticsBlob)
+	linkedProgram, linkDiagnostics, linkOk := slang.link(program)
+	defer if linkDiagnostics != nil do linkDiagnostics->Release()
+	if !linkOk {
+		log(.Error, blobToString(linkDiagnostics))
 		err = .LinkedProgram
 		return
 	}
-	defer slang.releaseComponentType(linkedProgram)
+	defer linkedProgram->Release()
 
-	codeBlob := slang.getEntryPointCode(linkedProgram, 0, 0, &diagnosticsBlob)
-	defer slang.releaseBlob(codeBlob)
-	if codeBlob == nil {
-		log(.Error, blobToString(diagnosticsBlob))
+	codeBlob, codeDiagnostics, codeOk := slang.get_entry_point_code(linkedProgram, 0, 0)
+	defer if codeDiagnostics != nil do codeDiagnostics->Release()
+	if !codeOk {
+		log(.Error, blobToString(codeDiagnostics))
+		err = .Code
+		return
+	}
+	defer codeBlob->Release()
+
+	size := codeBlob->GetBufferSize()
+	if size == 0 {
+		log(.Error, "Shader code length is zero")
 		err = .Code
 		return
 	}
 
-	if slang.getBlobSize(codeBlob) <= 0 {
-		log(.Error, "Shader code length <= 0; %v", slang.getBlobSize(codeBlob))
-		err = .Code
-		return
-	}
-
-	shaderCode = make([]u8, slang.getBlobSize(codeBlob))
-	mem.copy(raw_data(shaderCode), slang.getBlobData(codeBlob), (int)(slang.getBlobSize(codeBlob)))
+	shaderCode = make([]u8, size)
+	mem.copy(raw_data(shaderCode), codeBlob->GetBufferPointer(), int(size))
 	return
 }
 
 endSlang :: proc() {
 	slang.shutdown()
 }
-

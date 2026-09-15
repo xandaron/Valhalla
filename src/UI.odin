@@ -221,12 +221,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								delete(texture.path)
 								unordered_remove(&scene.textures, len(scene.textures) - 1)
 							} else {
-								err := addImages(
-									graphicsData,
-									&scene.buffers.textures,
-									u32(len(scene.textures)) - 1,
-									{texture.path},
-								)
+								err := addImages(graphicsData, scene, {texture.path})
 								if err != nil {
 									panic("Failed to add texture image")
 								}
