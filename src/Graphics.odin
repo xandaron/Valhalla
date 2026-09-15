@@ -400,6 +400,7 @@ deleteSceneBuffers :: proc(using graphicsData: ^GraphicsData, buffers: ^SceneBuf
 
 	for &texture in buffers.textures {
 		releaseTextureSlot(graphicsData, texture.heapSlot)
+		releaseTextureSlot(graphicsData, texture.linearHeapSlot)
 		deleteImage(graphicsData, &texture)
 	}
 	delete(buffers.textures)
@@ -492,13 +493,16 @@ Buffer :: struct {
 
 @(private = "file")
 Image :: struct {
-	vkImage:    vk.Image,
-	allocation: Allocation,
-	view:       vk.ImageView,
-	viewInfo:   vk.ImageViewCreateInfo,
-	format:     vk.Format,
-	sampler:    u32,
-	heapSlot:   u32,
+	vkImage:        vk.Image,
+	allocation:     Allocation,
+	view:           vk.ImageView,
+	viewInfo:       vk.ImageViewCreateInfo,
+	linearView:     vk.ImageView,
+	linearViewInfo: vk.ImageViewCreateInfo,
+	format:         vk.Format,
+	sampler:        u32,
+	heapSlot:       u32,
+	linearHeapSlot: u32,
 }
 
 InitGraphicsInfo :: struct {
@@ -3011,9 +3015,11 @@ createSamplers :: proc(using graphicsData: ^GraphicsData) -> SamplerError {
 @(private = "file")
 deleteImage :: proc(using graphicsData: ^GraphicsData, image: ^Image) {
 	vk.DestroyImageView(device, image.view, nil)
+	vk.DestroyImageView(device, image.linearView, nil)
 	vk.DestroyImage(device, image.vkImage, nil)
 	memoryFree(&graphicsData.memoryAllocator, &image.allocation)
 	image.view = 0
+	image.linearView = 0
 	image.vkImage = 0
 }
 
@@ -3039,6 +3045,14 @@ findSupportedDepthFormat :: proc(
 
 
 // ===[ Texture Loading ]======================================================
+
+TEXTURE_COLOUR_FORMAT :: vk.Format.R8G8B8A8_SRGB
+TEXTURE_LINEAR_FORMAT :: vk.Format.R8G8B8A8_UNORM
+
+TEXTURE_SLOT_IS_LINEAR := [TextureIndex]bool {
+	.Albedo    = false,
+	.NormalMap = true,
+}
 
 @(require_results)
 loadImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: []string) -> Error {
@@ -3072,13 +3086,13 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		textureSize := vk.DeviceSize(width * height * 4)
 
 		image: Image = {
-			format  = .R8G8B8A8_SRGB,
+			format  = TEXTURE_COLOUR_FORMAT,
 			sampler = u32(SamplerSlot.Anisotropic),
 		}
 		if err := createImage(
 			graphicsData,
 			&image,
-			{},
+			{.MUTABLE_FORMAT},
 			.D2,
 			u32(width),
 			u32(height),
@@ -3109,11 +3123,30 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 			return viewErr
 		}
 
+		image.linearView, image.linearViewInfo, viewErr = createImageView(
+			graphicsData,
+			image.vkImage,
+			.D2,
+			TEXTURE_LINEAR_FORMAT,
+			{.COLOR},
+			1,
+		)
+		if viewErr != .None {
+			logf(.Error, "Failed to create linear image view for %v! Error: %v", path, viewErr)
+			return viewErr
+		}
+
 		slot, ok := acquireTextureSlot(graphicsData)
 		if !ok {
 			return DescriptorHeapError.OutOfTextureSlots
 		}
 		image.heapSlot = slot
+
+		linearSlot, linearOk := acquireTextureSlot(graphicsData)
+		if !linearOk {
+			return DescriptorHeapError.OutOfTextureSlots
+		}
+		image.linearHeapSlot = linearSlot
 
 		subresourceRange: vk.ImageSubresourceRange = {
 			aspectMask     = {.COLOR},
@@ -3253,6 +3286,12 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 
 		for &texture in buffers.textures {
 			writeTextureDescriptor(graphicsData, frame, texture.heapSlot, &texture.viewInfo)
+			writeTextureDescriptor(
+				graphicsData,
+				frame,
+				texture.linearHeapSlot,
+				&texture.linearViewInfo,
+			)
 		}
 		writeImageDescriptor(
 			graphicsData,
@@ -5429,10 +5468,12 @@ updateTextureIndexBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
 					for val in TextureIndex {
 						textureIdx := int(object.textureIdxs[meshIdx][val])
 						if textureIdx < len(scene.buffers.textures) {
-							textureIndices[idx + int(val)] = textureSlotIndex(
-								graphicsData,
-								scene.buffers.textures[textureIdx].heapSlot,
-							)
+							texture := &scene.buffers.textures[textureIdx]
+							slot :=
+								TEXTURE_SLOT_IS_LINEAR[val] \
+								? texture.linearHeapSlot \
+								: texture.heapSlot
+							textureIndices[idx + int(val)] = textureSlotIndex(graphicsData, slot)
 						}
 					}
 					idx += len(TextureIndex)

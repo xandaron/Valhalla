@@ -61,14 +61,26 @@ VertOut vert(uint vertexID: SV_VertexID, uint baseVertex: SV_StartVertexLocation
 	output.position = mul(Resources.Uniforms[0].viewProjection, worldPosition);
 	output.worldPosition = worldPosition.xyz / worldPosition.w;
 
-	// I need to figue this out. I think the tangent and bitangent are not being
-	// set correctly.
 	const float3x3 transform = (float3x3)vertexTransform;
 	const float3x3 transposedInverse = transpose(inverse3x3(transform));
-	output.TBN = transpose(
-			float3x3(float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.tangent)),
-							 float3(0.0, 0.0, 0.0), // normalize(mul(t, vertex.bitangent)),
-							 normalize(mul(transposedInverse, vertex.normal)), ));
+
+	const float3 normal = normalize(mul(transposedInverse, vertex.normal));
+	float3 tangent = mul(transform, vertex.tangent);
+
+	tangent -= normal * dot(normal, tangent);
+	const float tangentLength = length(tangent);
+	if (tangentLength > 1e-6) {
+		tangent /= tangentLength;
+	} else {
+		tangent = normalize(
+				abs(normal.z) < 0.99 ? cross(float3(0.0, 0.0, 1.0), normal) : float3(1.0, 0.0, 0.0));
+	}
+
+	const float3 crossBitangent = cross(normal, tangent);
+	const float handedness =
+			dot(crossBitangent, mul(transform, vertex.bitangent)) < 0.0 ? -1.0 : 1.0;
+
+	output.TBN = transpose(float3x3(tangent, crossBitangent * handedness, normal));
 	output.uv = vertex.uv;
 
 	output.instanceID = instanceID;
