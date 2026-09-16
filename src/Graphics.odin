@@ -1,6 +1,7 @@
 #+feature using-stmt
 package Valhalla
 
+import "core:c"
 import "core:fmt"
 import "core:mem"
 import "core:os"
@@ -10,8 +11,8 @@ import img "vendor:stb/image"
 import vk "vendor:vulkan"
 
 import "../imgui"
-import imguiGLFW "../imgui/imgui_impl_glfw"
-import imguiVulkan "../imgui/imgui_impl_vulkan"
+import imguiGLFW "../imgui/glfw"
+import imguiVulkan "../imgui/vulkan"
 
 
 // ===[ Configuration ]========================================================
@@ -417,7 +418,7 @@ GraphicsData :: struct {
 
 	// GLFW + IMGUI
 	window:              WindowHandle,
-	imguiContext:        ^imgui.Context,
+	imguiContext:        ^imgui.GuiContext,
 
 	// Vulkan Data
 	instance:            vk.Instance,
@@ -6480,9 +6481,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	imguiVulkan.NewFrame()
 	imguiGLFW.NewFrame()
 	imgui.NewFrame()
-
 	drawImgui(graphicsData)
-
 	imgui.EndFrame()
 
 	vk.ResetCommandBuffer(commandBuffers[.Imgui][currentFrame], {})
@@ -6640,22 +6639,30 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 // ===[ Dear ImGui ]===========================================================
 
 @(private = "file")
+imguiAlloc :: proc "c" (size: c.size_t, user_data: rawptr) -> rawptr {
+	context = globals.runtimeContext
+	ptr, err := mem.alloc(int(size), allocator = (^mem.Allocator)(user_data)^)
+	if err != nil do return nil
+	return ptr
+}
+
+@(private = "file")
+imguiFree :: proc "c" (ptr: rawptr, user_data: rawptr) {
+	context = globals.runtimeContext
+	mem.free(ptr, allocator = (^mem.Allocator)(user_data)^)
+}
+
+@(private = "file")
 initImgui :: proc(using graphicsData: ^GraphicsData) {
+	imgui.SetAllocatorFunctions(imguiAlloc, imguiFree, &globals.runtimeContext.allocator)
+
 	if !imgui.CHECKVERSION() {
 		log(.Fatal, "Wrong imgui version!")
 	}
 
-	imguiContext = imgui.CreateContext()
+	imguiContext = imgui.CreateContext(nil)
 	io := imgui.GetIO()
-	imgui.StyleColorsClassic()
-
-	imguiVulkan.LoadFunctions(
-		vk.API_VERSION_1_4,
-		proc "c" (function_name: cstring, user_data: rawptr) -> vk.ProcVoidFunction {
-			return vk.GetInstanceProcAddr(transmute(vk.Instance)user_data, function_name)
-		},
-		instance,
-	)
+	imgui.StyleColorsClassic(nil)
 
 	if !imguiGLFW.InitForVulkan(window, true) {
 		log(.Fatal, "Failed to initialize imgui for vulkan.")

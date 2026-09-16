@@ -66,11 +66,11 @@ Model :: struct {
 	position:   Vec3,
 	rotation:   Quat,
 	scale:      Vec3,
-	meshes:     []Mesh,
-	skeleton:   []Bone,
-	animations: []Animation,
+	meshes:     []Mesh `imrefl:"ignore"`,
+	skeleton:   []Bone `imrefl:"ignore"`,
+	animations: []Animation `imrefl:"read-only"`,
 	bindpoints: [dynamic]Bindpoint,
-	instances:  [dynamic]u32, // Index of game objects using this model
+	instances:  [dynamic]u32 `imrefl:"read-only"`,
 }
 
 deleteModel :: proc(model: ^Model) {
@@ -204,4 +204,3 @@ PointLight :: struct {
 deletePointLight :: proc(light: ^PointLight) {
 	delete(light.name)
 }
-

@@ -157,17 +157,36 @@ nested structs, slices, dynamic arrays, maps, enums, bit sets, unions, matrices 
 find on its own, and every new field on `PointLight` or `Camera` currently means editing the
 inspector by hand.
 
-- [ ] Drive the object, light, camera, model and texture inspectors from `ImRefl.draw_value`
-      instead of per-field `DragFloat3` calls
-- [ ] Adopt the `imrefl:"..."` struct tags (`read-only`, `padding`, `callable`). `refdisk`
-      already reads the same `imrefl` tag for `padding` and `ignore`, so one tag can describe
-      both how a field serialises and how it inspects — worth keeping them consistent rather
-      than inventing a second scheme
-- [ ] Decide how edits signal the renderer. This is the real design question, not the widget
-      code: today each widget sets `reloadBuffers` or calls `markCommandsDirty` itself, and a
-      generic inspector has no idea which fields need which. Options are a change counter per
-      inspected root, dirty flags derived from tags, or simply rebuilding when anything in a
-      scene changes
+Four changes were needed in `imreflect` itself before any of this could work; it is a package we
+maintain, so they were made there rather than worked around.
+
+- [x] **Make `draw_value` report whether it edited anything.** Every `draw_*` now returns
+      `changed: bool` and aggregates over children. imgui already returns this per widget and the
+      package was discarding it, which left a caller no way to tell an edit from a repaint. This
+      is what answers the dirty-signal question below
+- [x] **Fix the imgui binding mismatch.** `imreflect` called `imgui.Gui_TreeNode` and friends,
+      but the vendored bindings expose them unprefixed, so the package could not compile against
+      this project at all. All 18 symbols existed under the shorter name with matching signatures
+- [x] **Handle `Fixed_Capacity_Dynamic_Array`**, a type kind newer than the package. Its elements
+      are stored inline with the length after them, so it reads through `len_offset` rather than a
+      `Raw_` header
+- [x] **Draw 2 to 4 component numeric arrays inline.** A `Vec3` is an array of three floats, which
+      reflected as a collapsible node with three rows — a bad trade for the most common type in a
+      3D editor. They now render as one `DragScalarN` row, matching the hand-written `DragFloat3`
+- [x] Light and camera inspectors now come from `ImRefl.draw_value`
+- [ ] Objects, models and textures. These interleave actions with fields — model and texture
+      selection are dropdowns over other scene arrays, not edits to the struct — so they need the
+      split below rather than a straight swap
+- [x] Adopt the `imrefl:"..."` struct tags. **The two consumers disagreed on vocabulary:** `refdisk`
+      accepted `ignore` and `padding`, `imreflect` accepted only `padding`, so an `ignore` tag
+      silently hid a field from serialisation while still drawing it. `padding` is now dropped from
+      both packages and `ignore` is the single spelling; `Draw_Flag.Padding` became `.Ignore` to
+      match. `Scene.vertices`, `Scene.indices` and `Scene.buffers` are tagged, as are `Model.meshes`
+      and `Model.skeleton`
+- [x] Decide how edits signal the renderer. `sceneEdited` rebuilds everything when `draw_value`
+      reports a change — deliberately blunt, but it only fires on frames where a value actually
+      changed, which is only knowable because `draw_value` now returns that. Narrow it per field
+      if it ever shows up in a profile
 - [ ] Keep hand-written controls where the widget triggers behaviour rather than editing data —
       the HDR toggle must call `setHDREnabled` for the swapchain rebuild, and "New Scene" and
       the shader reload are actions, not fields

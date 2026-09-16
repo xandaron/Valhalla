@@ -5,15 +5,16 @@ import "core:reflect"
 import "core:strings"
 
 // Determines whether a struct field should be skipped based on struct tags.
-// Supports refdisk:"ignore", refdisk:"padding", refdisk:"-", and imrefl:"padding", imrefl:"ignore".
+// Supports refdisk:"ignore", refdisk:"-", and imrefl:"ignore". `imreflect` reads the same
+// `imrefl` tag, so both must agree on its vocabulary.
 should_skip_field :: proc(tag: reflect.Struct_Tag) -> bool {
 	if val, ok := reflect.struct_tag_lookup(tag, "refdisk"); ok {
-		if val == "ignore" || val == "padding" || val == "-" {
+		if val == "ignore" || val == "-" {
 			return true
 		}
 	}
 	if val, ok := reflect.struct_tag_lookup(tag, "imrefl"); ok {
-		if strings.contains(val, "padding") || strings.contains(val, "ignore") {
+		if strings.contains(val, "ignore") {
 			return true
 		}
 	}
