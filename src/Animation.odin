@@ -50,11 +50,13 @@ InterpolationType :: enum {
 }
 
 ObjectAnimation :: struct {
-	idx:     i32,
-	timer:   f64,
+	// Selecting a clip resets the timer and the interpolation cache, so the editor owns it.
+	idx:     i32 `imrefl:"ignore"`,
+	timer:   f64 `imrefl:"speed=0.01"`,
 	playing: bool,
-	state:   []Mat4,
-	cache:   []ObjectAnimationCache,
+	// Sized to the skeleton and rewritten every frame; nothing here is user facing.
+	state:   []Mat4 `imrefl:"ignore"`,
+	cache:   []ObjectAnimationCache `imrefl:"ignore"`,
 	end:     ObjectAnimationEnd,
 }
 

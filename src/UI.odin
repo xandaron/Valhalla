@@ -363,10 +363,10 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		}
 
 		if imgui.CollapsingHeader("Scene##header") {
-			if imgui.DragFloat("Ambient light##scene", &scene.ambientLight, 0.01, 0, 10) {
+			if ImRefl.draw_value("Ambient light", scene.ambientLight) {
 				graphicsData.reloadBuffers = true
 			}
-			if imgui.DragFloat4("Clear colour##scene", &scene.clearColour, 0.01, 0, 1) {
+			if ImRefl.draw_value("Clear colour", scene.clearColour, {flags = {.Colour}}) {
 				graphicsData.reloadBuffers = true
 			}
 		}
@@ -384,96 +384,15 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				if imgui.TreeNode(toCstring(object.name)) {
 					defer imgui.TreePop()
 
-					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &object.position, 0.1)
-
-					x, y, z := quatToEuler(object.rotation)
-					x = degrees(x)
-					y = degrees(y)
-					z = degrees(z)
-					rotation := Vec3{x, y, z}
-					if imgui.DragFloat3(fmt.ctprintf("Rotation%v", suffix), &rotation, 0.1) {
-						delta := rotation - Vec3{x, y, z}
-						object.rotation *= quatFromEuler(
-							radians(delta.x),
-							radians(delta.y),
-							radians(delta.z),
-							.XYZ,
-						)
-					}
-					imgui.DragFloat3(fmt.ctprintf("Scale%v", suffix), &object.scale, 0.1)
-
-					if imgui.TreeNode("Flags:") {
-						for flag in ObjectFlag {
-							present := flag in object.flags
-							if imgui.Checkbox(fmt.ctprintf("%v", flag), &present) {
-								if present {
-									object.flags += {flag}
-								} else {
-									object.flags -= {flag}
-								}
-							}
-						}
-						imgui.TreePop()
+					// Flattened so the reflected fields and the hand-written pickers below share
+					// one tree node instead of the pickers hanging off the end as siblings.
+					if ImRefl.draw_value(object.name, object, {flags = {.Using_Flatten}}) {
+						sceneEdited(graphicsData)
 					}
 
-					imgui.SeparatorText("Animation")
-					animationData := &object.animation
-					if len(scene.models[object.modelIdx].animations) > 0 {
-						animationName: string
-						if animationData.idx >= 0 {
-							animationName =
-								scene.models[object.modelIdx].animations[animationData.idx].name
-						} else {
-							animationName = "None"
-						}
-
-						if imgui.BeginCombo(fmt.ctprintf("Animation Clip%v", suffix), toCstring(animationName)) {
-							if animationData.idx >= 0 {
-								if imgui.Selectable("None") {
-									animationData.idx = -1
-									animationData.timer = 0
-								}
-							}
-
-							for &animation, animationIdx in scene.models[object.modelIdx].animations {
-								if i32(animationIdx) == animationData.idx {
-									continue
-								}
-
-								if imgui.Selectable(toCstring(animation.name)) {
-									animationData.idx = i32(animationIdx)
-									animationData.timer = 0
-									for &node in animationData.cache {
-										node.positionIdx = 0
-										node.rotationIdx = 0
-										node.scaleIdx = 0
-									}
-								}
-							}
-							imgui.EndCombo()
-						}
-					}
-
-					imgui.Checkbox(fmt.ctprintf("Playing%v", suffix), &animationData.playing)
-
-					timer := f32(animationData.timer)
-					if imgui.DragFloat(fmt.ctprintf("Animation time%v", suffix), &timer, 0.01) {
-						animationData.timer = f64(timer)
-					}
-
-					if imgui.BeginCombo(fmt.ctprintf("Animation Behavior%v", suffix), fmt.ctprintf("%v", animationData.end.behavior)) {
-						for behavior in AnimationBehavior {
-							if behavior == animationData.end.behavior {
-								continue
-							}
-
-							if imgui.Selectable(fmt.ctprintf("%v", behavior)) {
-								animationData.end.behavior = behavior
-							}
-						}
-						imgui.EndCombo()
-					}
-
+					// Everything past here changes engine state rather than a field, which is why
+					// the matching struct fields are tagged `ignore`.
+					imgui.SeparatorText("Model")
 					if imgui.BeginCombo(fmt.ctprintf("Model%v", suffix), toCstring(scene.models[object.modelIdx].name)) {
 						defer imgui.EndCombo()
 						for modelIdx in 0 ..< len(scene.models) {
@@ -505,46 +424,64 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						}
 					}
 
+					animationData := &object.animation
+					if len(scene.models[object.modelIdx].animations) > 0 {
+						imgui.SeparatorText("Animation")
+						animationName: string
+						if animationData.idx >= 0 {
+							animationName =
+								scene.models[object.modelIdx].animations[animationData.idx].name
+						} else {
+							animationName = "None"
+						}
+
+						if imgui.BeginCombo(fmt.ctprintf("Animation Clip%v", suffix), toCstring(animationName)) {
+							defer imgui.EndCombo()
+							if animationData.idx >= 0 {
+								if imgui.Selectable("None") {
+									animationData.idx = -1
+									animationData.timer = 0
+								}
+							}
+
+							for &animation, animationIdx in scene.models[object.modelIdx].animations {
+								if i32(animationIdx) == animationData.idx {
+									continue
+								}
+
+								if imgui.Selectable(toCstring(animation.name)) {
+									animationData.idx = i32(animationIdx)
+									animationData.timer = 0
+									for &node in animationData.cache {
+										node.positionIdx = 0
+										node.rotationIdx = 0
+										node.scaleIdx = 0
+									}
+								}
+							}
+						}
+					}
+
+					imgui.SeparatorText("Textures")
 					for mesh, meshIdx in scene.models[object.modelIdx].meshes {
 						meshSuffix := fmt.ctprintf("%v##mesh%v", suffix, meshIdx)
 						if imgui.TreeNode(toCstring(mesh.name)) {
-							if imgui.BeginCombo(fmt.ctprintf("Albedo%v", meshSuffix), toCstring(
-									scene.textures[object.textureIdxs[meshIdx][.Albedo]].name,
-								)) {
-								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][.Albedo] ==
-									   u32(textureIdx) {
-										continue
-									}
-
-									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][.Albedo] = u32(
-											textureIdx,
-										)
-										graphicsData.reloadBuffers = true
-									}
-								}
-								imgui.EndCombo()
-							}
-
-							if imgui.BeginCombo(fmt.ctprintf("Normal Map%v", meshSuffix), toCstring(
-									scene.textures[object.textureIdxs[meshIdx][.NormalMap]].name,
-								)) {
-								for &texture, textureIdx in scene.textures {
-									if object.textureIdxs[meshIdx][.NormalMap] ==
-									   u32(textureIdx) {
-										continue
-									}
-									if imgui.Selectable(toCstring(texture.name)) {
-										object.textureIdxs[meshIdx][.NormalMap] = u32(
-											textureIdx,
-										)
-										graphicsData.reloadBuffers = true
+							defer imgui.TreePop()
+							for slot in TextureIndex {
+								current := &object.textureIdxs[meshIdx][slot]
+								if imgui.BeginCombo(fmt.ctprintf("%v%v", slot, meshSuffix), toCstring(scene.textures[current^].name)) {
+									defer imgui.EndCombo()
+									for &texture, textureIdx in scene.textures {
+										if current^ == u32(textureIdx) {
+											continue
+										}
+										if imgui.Selectable(toCstring(texture.name)) {
+											current^ = u32(textureIdx)
+											graphicsData.reloadBuffers = true
+										}
 									}
 								}
-								imgui.EndCombo()
 							}
-							imgui.TreePop()
 						}
 					}
 				}
@@ -573,24 +510,9 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				imgui.OpenPopup("New Model")
 			}
 
-			for &model, modelIdx in scene.models {
-				suffix := fmt.tprintf("##model%v", modelIdx)
-				if imgui.TreeNode(toCstring(model.name)) {
-					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &model.position, 0.1)
-
-					x, y, z := quatToEuler(model.rotation)
-					rotation := Vec3{degrees(x), degrees(y), degrees(z)}
-					if imgui.DragFloat3(fmt.ctprintf("Rotation%v", suffix), &rotation, 0.1) {
-						model.rotation = quatFromEuler(
-							radians(rotation.x),
-							radians(rotation.y),
-							radians(rotation.z),
-							.XYZ,
-						)
-					}
-
-					imgui.DragFloat3(fmt.ctprintf("Scale%v", suffix), &model.scale, 0.1)
-					imgui.TreePop()
+			for &model in scene.models {
+				if ImRefl.draw_value(model.name, model) {
+					sceneEdited(graphicsData)
 				}
 			}
 		}
@@ -601,14 +523,8 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				imgui.OpenPopup("New Texture")
 			}
 
-			for &texture, textureIdx in scene.textures {
-				suffix := fmt.tprintf("##texture%v", textureIdx)
-				if imgui.TreeNode(toCstring(texture.name)) {
-					imgui.Text("Asset Path: ")
-					imgui.SameLine()
-					imgui.Text(toCstring(texture.assetPath))
-					imgui.TreePop()
-				}
+			for &texture in scene.textures {
+				ImRefl.draw_value(texture.name, texture)
 			}
 		}
 	}
