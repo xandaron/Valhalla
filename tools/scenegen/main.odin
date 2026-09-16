@@ -5,6 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 
 import stbi "vendor:stb/image"
@@ -446,6 +447,79 @@ checkerImage :: proc(size: int) -> Image {
 	return image
 }
 
+// Deliberately the busiest map in the set: panel seams, bevels, rivet domes, diagonal ribs and a
+// hammered surface, all at different frequencies. A normal map only proves itself on detail the
+// geometry does not have, so this is the one to judge normal mapping by.
+ornamentPattern :: proc(size: int, seed: u32) -> Pattern {
+	PANELS :: 2
+	SEAM :: f32(0.045)
+	BEVEL :: f32(0.07)
+	RIVETS :: 7
+	RIVET_RADIUS :: f32(0.30)
+
+	pattern := Pattern {
+		albedo = imageMake(size, size),
+		height = make([]f32, size * size),
+	}
+
+	for y in 0 ..< size {
+		for x in 0 ..< size {
+			u := f32(x) / f32(size)
+			v := f32(y) / f32(size)
+
+			panelU := u * PANELS
+			panelV := v * PANELS
+			localU := panelU - math.floor(panelU)
+			localV := panelV - math.floor(panelV)
+			edge := min(min(localU, 1.0 - localU), min(localV, 1.0 - localV))
+
+			hammered := fbm(u * 64, v * 64, 64, 4, seed)
+
+			h: f32
+			metal: f32
+			if edge < SEAM {
+				h = 0.06 + 0.05 * hammered
+				metal = 0.26
+			} else {
+				bevel := smoothstep(clamp((edge - SEAM) / BEVEL, 0, 1))
+				h = 0.34 + 0.44 * bevel
+				metal = 0.50
+
+				rib := math.sin((localU + localV) * math.PI * 8)
+				h += 0.055 * rib * bevel
+				metal += 0.06 * rib * bevel
+			}
+
+			// Rivets march around the inside of each panel border, which is where the relief is
+			// most obviously three dimensional under a moving light.
+			rivetU := localU * RIVETS
+			rivetV := localV * RIVETS
+			cellU := int(rivetU)
+			cellV := int(rivetV)
+			onBorder :=
+				cellU == 0 || cellU == RIVETS - 1 || cellV == 0 || cellV == RIVETS - 1
+			if onBorder && edge > SEAM {
+				offsetU := rivetU - f32(cellU) - 0.5
+				offsetV := rivetV - f32(cellV) - 0.5
+				distance := math.sqrt(offsetU * offsetU + offsetV * offsetV)
+				if distance < RIVET_RADIUS {
+					t := distance / RIVET_RADIUS
+					dome := math.sqrt(max(0, 1.0 - t * t))
+					h += 0.20 * dome
+					metal += 0.12 * dome
+				}
+			}
+
+			h = clamp(h + 0.035 * (hammered - 0.5), 0, 1)
+			pattern.height[y * size + x] = h
+
+			shade := clamp(metal + 0.07 * (hammered - 0.5), 0, 1)
+			imageSet(&pattern.albedo, x, y, {shade * 1.00, shade * 0.94, shade * 0.84})
+		}
+	}
+	return pattern
+}
+
 plasterPattern :: proc(size: int, seed: u32) -> Pattern {
 	pattern := Pattern {
 		albedo = imageMake(size, size),
@@ -667,6 +741,379 @@ writeOBJ :: proc(path, name: string, mesh: ^Mesh) -> bool {
 }
 
 
+// ===[ Rigged Meshes and glTF ]===============================================
+
+// OBJ carries no skeleton, so anything rigged is written as glTF 2.0: a JSON document beside a
+// binary buffer. assimp matches bones to nodes by name and keeps four weights per vertex, which
+// is exactly what the engine's Vertex stores.
+
+Joint :: struct {
+	name:        string,
+	translation: V.Vec3,
+}
+
+RiggedMesh :: struct {
+	mesh:    Mesh,
+	joints:  [dynamic][4]u8,
+	weights: [dynamic]V.Vec4,
+	bones:   [dynamic]Joint,
+}
+
+riggedMeshDelete :: proc(rigged: ^RiggedMesh) {
+	meshDelete(&rigged.mesh)
+	delete(rigged.joints)
+	delete(rigged.weights)
+	delete(rigged.bones)
+}
+
+// A tapered column bound to a chain of bones running up its length. Every ring blends between the
+// two bones it sits between, so a bend deforms the surface smoothly instead of hinging, which is
+// the thing worth being able to see.
+makeRiggedColumn :: proc(
+	rings, segments, boneCount: int,
+	height, baseRadius, tipRadius: f32,
+) -> RiggedMesh {
+	rigged: RiggedMesh
+	segmentLength := height / f32(boneCount - 1)
+
+	for i in 0 ..< boneCount {
+		append(
+			&rigged.bones,
+			Joint {
+				name = fmt.aprintf("Bone_%02d", i, allocator = context.temp_allocator),
+				translation = {0, i == 0 ? 0 : segmentLength, 0},
+			},
+		)
+	}
+
+	// The side of a cone is not radial: the taper tilts the normal by the slope dr/dv.
+	slope := tipRadius - baseRadius
+	stride := u32(segments + 1)
+
+	for ring in 0 ..= rings {
+		v := f32(ring) / f32(rings)
+		y := v * height
+		radius := linalg.lerp(baseRadius, tipRadius, v)
+
+		bonePosition := v * f32(boneCount - 1)
+		lower := clamp(int(bonePosition), 0, boneCount - 2)
+		blend := clamp(bonePosition - f32(lower), 0, 1)
+
+		for segment in 0 ..= segments {
+			u := f32(segment) / f32(segments)
+			theta := u * 2 * math.PI
+			normal := linalg.normalize(
+				V.Vec3{height * math.cos(theta), -slope, height * math.sin(theta)},
+			)
+			addVertex(
+				&rigged.mesh,
+				{math.cos(theta) * radius, y, math.sin(theta) * radius},
+				normal,
+				{u * 2, v * 2},
+			)
+			append(&rigged.joints, [4]u8{u8(lower), u8(lower + 1), 0, 0})
+			append(&rigged.weights, V.Vec4{1 - blend, blend, 0, 0})
+		}
+	}
+
+	for ring in 0 ..< u32(rings) {
+		for segment in 0 ..< u32(segments) {
+			i00 := ring * stride + segment
+			addQuad(&rigged.mesh, i00, i00 + stride, i00 + stride + 1, i00 + 1)
+		}
+	}
+	return rigged
+}
+
+GLTF_FLOAT :: 5126
+GLTF_UNSIGNED_INT :: 5125
+GLTF_UNSIGNED_BYTE :: 5121
+
+GltfWriter :: struct {
+	bin:         [dynamic]u8,
+	bufferViews: [dynamic]string,
+	accessors:   [dynamic]string,
+}
+
+gltfDelete :: proc(writer: ^GltfWriter) {
+	delete(writer.bin)
+	delete(writer.bufferViews)
+	delete(writer.accessors)
+}
+
+// Every bufferView has to start on a four byte boundary, which is why the padding lives here
+// rather than being left to each caller to remember.
+gltfAdd :: proc(
+	writer: ^GltfWriter,
+	data: []u8,
+	count: int,
+	componentType: int,
+	type: string,
+	extra: string = "",
+) -> int {
+	for len(writer.bin) % 4 != 0 {
+		append(&writer.bin, 0)
+	}
+	offset := len(writer.bin)
+	append(&writer.bin, ..data)
+
+	append(
+		&writer.bufferViews,
+		fmt.aprintf(
+			`{{"buffer":0,"byteOffset":%v,"byteLength":%v}`,
+			offset,
+			len(data),
+			allocator = context.temp_allocator,
+		),
+	)
+	append(
+		&writer.accessors,
+		fmt.aprintf(
+			`{{"bufferView":%v,"componentType":%v,"count":%v,"type":"%s"%s}`,
+			len(writer.bufferViews) - 1,
+			componentType,
+			count,
+			type,
+			extra,
+			allocator = context.temp_allocator,
+		),
+	)
+	return len(writer.accessors) - 1
+}
+
+RIG_ANIMATION_KEYS :: 33
+RIG_ANIMATION_PERIOD :: f32(2.4)
+
+writeGLTF :: proc(directory, file, name: string, rigged: ^RiggedMesh) -> bool {
+	writer: GltfWriter
+	defer gltfDelete(&writer)
+
+	positions := rigged.mesh.positions[:]
+	minimum := positions[0]
+	maximum := positions[0]
+	for position in positions {
+		minimum = linalg.min(minimum, position)
+		maximum = linalg.max(maximum, position)
+	}
+
+	// POSITION is the one accessor the spec requires bounds on.
+	bounds := fmt.tprintf(
+		`,"min":[%.6f,%.6f,%.6f],"max":[%.6f,%.6f,%.6f]`,
+		minimum.x,
+		minimum.y,
+		minimum.z,
+		maximum.x,
+		maximum.y,
+		maximum.z,
+	)
+
+	count := len(positions)
+	positionAccessor := gltfAdd(
+		&writer,
+		slice.to_bytes(positions),
+		count,
+		GLTF_FLOAT,
+		"VEC3",
+		bounds,
+	)
+	normalAccessor := gltfAdd(
+		&writer,
+		slice.to_bytes(rigged.mesh.normals[:]),
+		count,
+		GLTF_FLOAT,
+		"VEC3",
+	)
+	uvAccessor := gltfAdd(&writer, slice.to_bytes(rigged.mesh.uvs[:]), count, GLTF_FLOAT, "VEC2")
+	jointAccessor := gltfAdd(
+		&writer,
+		slice.to_bytes(rigged.joints[:]),
+		count,
+		GLTF_UNSIGNED_BYTE,
+		"VEC4",
+	)
+	weightAccessor := gltfAdd(&writer, slice.to_bytes(rigged.weights[:]), count, GLTF_FLOAT, "VEC4")
+	indexAccessor := gltfAdd(
+		&writer,
+		slice.to_bytes(rigged.mesh.indices[:]),
+		len(rigged.mesh.indices),
+		GLTF_UNSIGNED_INT,
+		"SCALAR",
+	)
+
+	// The bind pose is the column standing straight, so each bone's inverse bind is just a
+	// translation back down to the origin. Column major, as glTF requires.
+	boneCount := len(rigged.bones)
+	inverseBinds := make([]f32, boneCount * 16, context.temp_allocator)
+	heightSoFar := f32(0)
+	for boneIndex in 0 ..< boneCount {
+		heightSoFar += rigged.bones[boneIndex].translation.y
+		base := boneIndex * 16
+		inverseBinds[base + 0] = 1
+		inverseBinds[base + 5] = 1
+		inverseBinds[base + 10] = 1
+		inverseBinds[base + 13] = -heightSoFar
+		inverseBinds[base + 15] = 1
+	}
+	inverseBindAccessor := gltfAdd(
+		&writer,
+		slice.to_bytes(inverseBinds),
+		boneCount,
+		GLTF_FLOAT,
+		"MAT4",
+	)
+
+	times := make([]f32, RIG_ANIMATION_KEYS, context.temp_allocator)
+	for key in 0 ..< RIG_ANIMATION_KEYS {
+		times[key] = f32(key) / f32(RIG_ANIMATION_KEYS - 1) * RIG_ANIMATION_PERIOD
+	}
+	timeAccessor := gltfAdd(
+		&writer,
+		slice.to_bytes(times),
+		RIG_ANIMATION_KEYS,
+		GLTF_FLOAT,
+		"SCALAR",
+		fmt.tprintf(`,"min":[%.6f],"max":[%.6f]`, times[0], times[RIG_ANIMATION_KEYS - 1]),
+	)
+
+	// A travelling sine up the chain. The root stays put so the column reads as planted rather
+	// than sliding, and the last key repeats the first so the loop has no seam.
+	rotationAccessors := make([]int, boneCount, context.temp_allocator)
+	for boneIndex in 0 ..< boneCount {
+		samples := make([]f32, RIG_ANIMATION_KEYS * 4, context.temp_allocator)
+		for key in 0 ..< RIG_ANIMATION_KEYS {
+			angle := f32(0)
+			if boneIndex > 0 {
+				phase := 2 * math.PI * (times[key] / RIG_ANIMATION_PERIOD) - f32(boneIndex) * 0.6
+				angle = 0.28 * math.sin(phase)
+			}
+			samples[key * 4 + 0] = 0
+			samples[key * 4 + 1] = 0
+			samples[key * 4 + 2] = math.sin(angle * 0.5)
+			samples[key * 4 + 3] = math.cos(angle * 0.5)
+		}
+		rotationAccessors[boneIndex] = gltfAdd(
+			&writer,
+			slice.to_bytes(samples),
+			RIG_ANIMATION_KEYS,
+			GLTF_FLOAT,
+			"VEC4",
+		)
+	}
+
+	binName := fmt.tprintf("%s.bin", file)
+	json := strings.builder_make(context.temp_allocator)
+
+	fmt.sbprintf(&json, `{{"asset":{{"version":"2.0","generator":"Valhalla scenegen"},`)
+	fmt.sbprintf(&json, `"scene":0,"scenes":[{{"nodes":[0,1]}],"nodes":[`)
+	fmt.sbprintf(&json, `{{"name":"%s","mesh":0,"skin":0}`, name)
+	for boneIndex in 0 ..< boneCount {
+		bone := rigged.bones[boneIndex]
+		fmt.sbprintf(
+			&json,
+			`,{{"name":"%s","translation":[%.6f,%.6f,%.6f]`,
+			bone.name,
+			bone.translation.x,
+			bone.translation.y,
+			bone.translation.z,
+		)
+		if boneIndex < boneCount - 1 {
+			fmt.sbprintf(&json, `,"children":[%v]`, boneIndex + 2)
+		}
+		fmt.sbprint(&json, "}")
+	}
+	fmt.sbprintf(&json, `],"meshes":[{{"name":"%s","primitives":[{{"attributes":{{`, name)
+	fmt.sbprintf(
+		&json,
+		`"POSITION":%v,"NORMAL":%v,"TEXCOORD_0":%v,"JOINTS_0":%v,"WEIGHTS_0":%v},"indices":%v}]}],`,
+		positionAccessor,
+		normalAccessor,
+		uvAccessor,
+		jointAccessor,
+		weightAccessor,
+		indexAccessor,
+	)
+
+	fmt.sbprintf(
+		&json,
+		`"skins":[{{"skeleton":1,"inverseBindMatrices":%v,"joints":[`,
+		inverseBindAccessor,
+	)
+	for boneIndex in 0 ..< boneCount {
+		if boneIndex > 0 {
+			fmt.sbprint(&json, ",")
+		}
+		fmt.sbprintf(&json, "%v", boneIndex + 1)
+	}
+	fmt.sbprint(&json, "]}],")
+
+	fmt.sbprintf(&json, `"animations":[{{"name":"Sway","samplers":[`)
+	for boneIndex in 0 ..< boneCount {
+		if boneIndex > 0 {
+			fmt.sbprint(&json, ",")
+		}
+		fmt.sbprintf(
+			&json,
+			`{{"input":%v,"interpolation":"LINEAR","output":%v}`,
+			timeAccessor,
+			rotationAccessors[boneIndex],
+		)
+	}
+	fmt.sbprint(&json, `],"channels":[`)
+	for boneIndex in 0 ..< boneCount {
+		if boneIndex > 0 {
+			fmt.sbprint(&json, ",")
+		}
+		fmt.sbprintf(
+			&json,
+			`{{"sampler":%v,"target":{{"node":%v,"path":"rotation"}}}}`,
+			boneIndex,
+			boneIndex + 1,
+		)
+	}
+	fmt.sbprint(&json, "]}],")
+
+	fmt.sbprintf(
+		&json,
+		`"buffers":[{{"uri":"%s","byteLength":%v}],"bufferViews":[`,
+		binName,
+		len(writer.bin),
+	)
+	for view, index in writer.bufferViews {
+		if index > 0 {
+			fmt.sbprint(&json, ",")
+		}
+		fmt.sbprint(&json, view)
+	}
+	fmt.sbprint(&json, `],"accessors":[`)
+	for accessor, index in writer.accessors {
+		if index > 0 {
+			fmt.sbprint(&json, ",")
+		}
+		fmt.sbprint(&json, accessor)
+	}
+	fmt.sbprint(&json, "]}")
+
+	gltfPath := fmt.tprintf("%s%s.gltf", directory, file)
+	binPath := fmt.tprintf("%s%s.bin", directory, file)
+	if err := os.write_entire_file(gltfPath, strings.to_string(json)); err != nil {
+		fmt.eprintfln("Failed to write %q: %v", gltfPath, err)
+		return false
+	}
+	if err := os.write_entire_file(binPath, writer.bin[:]); err != nil {
+		fmt.eprintfln("Failed to write %q: %v", binPath, err)
+		return false
+	}
+	fmt.printfln(
+		"  %s  (%v vertices, %v triangles, %v bones)",
+		gltfPath,
+		len(rigged.mesh.positions),
+		len(rigged.mesh.indices) / 3,
+		boneCount,
+	)
+	return true
+}
+
+
 // ===[ Descriptors ]==========================================================
 
 // These go through refdisk against the engine's own structs rather than writing the byte layout
@@ -787,6 +1234,7 @@ Model :: enum u32 {
 	Cube,
 	Sphere,
 	Torus,
+	Rig,
 }
 
 Tex :: enum u32 {
@@ -799,31 +1247,42 @@ Tex :: enum u32 {
 	BumpNormal,
 	PlasterAlbedo,
 	PlasterNormal,
+	OrnamentAlbedo,
+	OrnamentNormal,
 }
 
+// `rigged` selects glTF over OBJ, because only glTF can carry the skeleton and animation.
 MODEL_ASSETS := [Model]struct {
-	name: string,
-	file: string,
+	name:   string,
+	file:   string,
+	rigged: bool,
 } {
-	.Plane  = {"Generated Plane", "gen_plane"},
-	.Cube   = {"Generated Cube", "gen_cube"},
-	.Sphere = {"Generated Sphere", "gen_sphere"},
-	.Torus  = {"Generated Torus", "gen_torus"},
+	.Plane  = {"Generated Plane", "gen_plane", false},
+	.Cube   = {"Generated Cube", "gen_cube", false},
+	.Sphere = {"Generated Sphere", "gen_sphere", false},
+	.Torus  = {"Generated Torus", "gen_torus", false},
+	.Rig    = {"Generated Rig", "gen_rig", true},
 }
 
 TEXTURE_ASSETS := [Tex]struct {
 	name: string,
 	file: string,
 } {
-	.Checker       = {"Generated Checker", "gen_checker"},
-	.FlatNormal    = {"Generated Flat Normal", "gen_flat_normal"},
-	.BrickAlbedo   = {"Generated Brick", "gen_brick_albedo"},
-	.BrickNormal   = {"Generated Brick Normal", "gen_brick_normal"},
-	.TileAlbedo    = {"Generated Tile", "gen_tile_albedo"},
-	.TileNormal    = {"Generated Tile Normal", "gen_tile_normal"},
-	.BumpNormal    = {"Generated Bump Normal", "gen_bump_normal"},
-	.PlasterAlbedo = {"Generated Plaster", "gen_plaster_albedo"},
-	.PlasterNormal = {"Generated Plaster Normal", "gen_plaster_normal"},
+	.Checker        = {"Generated Checker", "gen_checker"},
+	.FlatNormal     = {"Generated Flat Normal", "gen_flat_normal"},
+	.BrickAlbedo    = {"Generated Brick", "gen_brick_albedo"},
+	.BrickNormal    = {"Generated Brick Normal", "gen_brick_normal"},
+	.TileAlbedo     = {"Generated Tile", "gen_tile_albedo"},
+	.TileNormal     = {"Generated Tile Normal", "gen_tile_normal"},
+	.BumpNormal     = {"Generated Bump Normal", "gen_bump_normal"},
+	.PlasterAlbedo  = {"Generated Plaster", "gen_plaster_albedo"},
+	.PlasterNormal  = {"Generated Plaster Normal", "gen_plaster_normal"},
+	.OrnamentAlbedo = {"Generated Ornament", "gen_ornament_albedo"},
+	.OrnamentNormal = {"Generated Ornament Normal", "gen_ornament_normal"},
+}
+
+modelExtension :: proc(model: Model) -> string {
+	return MODEL_ASSETS[model].rigged ? "gltf" : "obj"
 }
 
 StressModel :: enum u32 {
@@ -942,9 +1401,13 @@ generateMeshes :: proc(opts: Options) -> bool {
 		.Cube   = makeCube(1, 1),
 		.Sphere = makeSphere(32, 64, 0.5, 1),
 		.Torus  = makeTorus(64, 32, 0.75, 0.28, 1),
+		.Rig    = {},
 	}
 
 	for model in Model {
+		if MODEL_ASSETS[model].rigged {
+			continue
+		}
 		mesh := meshes[model]
 		defer meshDelete(&mesh)
 		path := fmt.tprintf("%s%s.obj", dir, MODEL_ASSETS[model].file)
@@ -952,6 +1415,14 @@ generateMeshes :: proc(opts: Options) -> bool {
 			return false
 		}
 		fmt.printfln("  %s  (%v vertices, %v triangles)", path, len(mesh.positions), len(mesh.indices) / 3)
+	}
+
+	// Enough rings that the bend between bones is carried by the surface rather than by a handful
+	// of faces, which is the whole point of having it in the demo.
+	rig := makeRiggedColumn(48, 32, 8, 3.0, 0.30, 0.12)
+	defer riggedMeshDelete(&rig)
+	if !writeGLTF(dir, MODEL_ASSETS[.Rig].file, MODEL_ASSETS[.Rig].name, &rig) {
+		return false
 	}
 	return true
 }
@@ -994,6 +1465,17 @@ generateTextures :: proc(opts: Options) -> bool {
 	plasterNormal := heightToNormal(plaster.height, size, size, f32(size) / 96.0, opts.flipNormalY)
 	defer imageDelete(&plasterNormal)
 
+	ornament := ornamentPattern(size, 4242)
+	defer patternDelete(&ornament)
+	ornamentNormal := heightToNormal(
+		ornament.height,
+		size,
+		size,
+		f32(size) / 40.0,
+		opts.flipNormalY,
+	)
+	defer imageDelete(&ornamentNormal)
+
 	if !write(dir, .Checker, &checker) do return false
 	if !write(dir, .FlatNormal, &flat) do return false
 	if !write(dir, .BrickAlbedo, &brick.albedo) do return false
@@ -1003,6 +1485,8 @@ generateTextures :: proc(opts: Options) -> bool {
 	if !write(dir, .BumpNormal, &bumpNormal) do return false
 	if !write(dir, .PlasterAlbedo, &plaster.albedo) do return false
 	if !write(dir, .PlasterNormal, &plasterNormal) do return false
+	if !write(dir, .OrnamentAlbedo, &ornament.albedo) do return false
+	if !write(dir, .OrnamentNormal, &ornamentNormal) do return false
 	return true
 }
 
@@ -1018,7 +1502,12 @@ generateDescriptors :: proc(opts: Options) -> bool {
 					opts.componentsRel,
 					entry.file,
 				),
-				assetPath = fmt.tprintf("%s%s.obj", opts.generatedRel, entry.file),
+				assetPath = fmt.tprintf(
+					"%s%s.%s",
+					opts.generatedRel,
+					entry.file,
+					modelExtension(model),
+				),
 			},
 		) {
 			return false
@@ -1102,6 +1591,27 @@ buildBenchScene :: proc(opts: Options) -> bool {
 
 	addObject(&builder, "Back Wall", u32(Model.Cube), {0, 3, 6.5}, {16, 6, 0.4}, u32(Tex.BrickAlbedo), u32(Tex.BrickNormal))
 
+	// Flat geometry carrying the busiest normal map in the set, so anything that looks like relief
+	// on it is normal mapping and nothing else.
+	addObject(&builder, "Ornament Panel", u32(Model.Cube), {-7.5, 1.6, 2.5}, {0.3, 3.2, 3.2}, u32(Tex.OrnamentAlbedo), u32(Tex.OrnamentNormal))
+
+	// Skinned and animated. The sway runs up a chain of eight bones, so a broken bind pose or a
+	// bad weight shows as a kink rather than something subtle.
+	addObject(
+		&builder,
+		"Rig",
+		u32(Model.Rig),
+		{7.5, 0, 2.5},
+		{1, 1, 1},
+		u32(Tex.Checker),
+		u32(Tex.OrnamentNormal),
+		animation = V.AnimationComponent {
+			idx = 0,
+			playing = true,
+			end = {behavior = .Loop},
+		},
+	)
+
 	// Two opposed coloured lights make the relief direction readable: a bump lit from the left
 	// and from the right should shade on opposite sides.
 	addLight(&builder, "Key (warm)", {-5, 4, -4}, {1.0, 0.78, 0.55}, 2200)
@@ -1183,6 +1693,29 @@ buildEnvironmentScene :: proc(opts: Options) -> bool {
 	addObject(&builder, "Monument", u32(Model.Torus), {0, 1.5, 0}, {2.4, 2.4, 2.4}, u32(Tex.PlasterAlbedo), u32(Tex.PlasterNormal))
 	addObject(&builder, "Orb East", u32(Model.Sphere), {3.5, 0.8, -2}, {1.6, 1.6, 1.6}, u32(Tex.Checker), u32(Tex.BumpNormal))
 	addObject(&builder, "Orb West", u32(Model.Sphere), {-3.5, 0.8, 2}, {1.6, 1.6, 1.6}, u32(Tex.Checker), u32(Tex.BumpNormal))
+
+	addObject(&builder, "Ornament Plaque", u32(Model.Cube), {0, 2.2, 9.4}, {5, 3.4, 0.35}, u32(Tex.OrnamentAlbedo), u32(Tex.OrnamentNormal))
+
+	// Set across the view rather than along it, so both read as columns instead of overlapping.
+	// Checker albedo because the sway is the thing to see; the ornament normal rides on top to
+	// show a normal map surviving skinning, where the tangent frame is rebuilt per frame.
+	for position, i in ([2]V.Vec3{{-3.6, 0, 3.6}, {3.6, 0, -3.6}}) {
+		addObject(
+			&builder,
+			fmt.tprintf("Standard %v", i + 1),
+			u32(Model.Rig),
+			position,
+			{1.4, 1.4, 1.4},
+			u32(Tex.Checker),
+			u32(Tex.OrnamentNormal),
+			animation = V.AnimationComponent {
+				idx = 0,
+				timer = f64(i) * 1.2,
+				playing = true,
+				end = {behavior = .Loop},
+			},
+		)
+	}
 
 	// Deliberately dim and neutral: it reads the monument's shape without competing with the
 	// pillar lights, which are what actually colour the courtyard.

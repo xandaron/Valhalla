@@ -122,7 +122,7 @@ checkable work in [Tasks](#tasks).
       encodes to about 0.58 in PQ, while imgui white writes 1.0, which PQ defines as 10000 nits.
       The editor will be searingly bright against the scene. Blocked on roadmap 3 — the vendored
       backend has no notion of a target colour space, and owning it is the clean fix
-- [ ] Verify HDR against an actual HDR display and tune paper white (default 200 nits, now a
+- [x] Verify HDR against an actual HDR display and tune paper white (default 200 nits, now a
       runtime slider in Settings rather than a constant)
 - [x] Removed the `drawLights` overlay entirely — it was unreachable, and its
       `(0.5 * 0.5) / colour` was unbounded as a pixel approached black. It was also the only
