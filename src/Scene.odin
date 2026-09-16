@@ -7,8 +7,8 @@ Scene :: struct {
 	name:         string,
 
 	// Scene Settings
-	ambientLight: f32,
-	clearColour:  Vec4,
+	ambientLight: f32 `imrefl:"min=0,max=10,speed=0.01"`,
+	clearColour:  Vec4 `imrefl:"colour"`,
 
 	// Assets
 	models:       [dynamic]Model,

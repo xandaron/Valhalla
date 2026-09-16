@@ -174,9 +174,27 @@ maintain, so they were made there rather than worked around.
       reflected as a collapsible node with three rows — a bad trade for the most common type in a
       3D editor. They now render as one `DragScalarN` row, matching the hand-written `DragFloat3`
 - [x] Light and camera inspectors now come from `ImRefl.draw_value`
-- [ ] Objects, models and textures. These interleave actions with fields — model and texture
-      selection are dropdowns over other scene arrays, not edits to the struct — so they need the
-      split below rather than a straight swap
+- [x] Objects, models, textures and scene settings. `Using_Flatten` lets the reflected fields and
+      the hand-written pickers share one tree node instead of the pickers hanging off the end
+- [x] **Four tags so reflection can describe the data rather than the editor working around it:**
+      `euler` draws a quaternion as XYZ degrees, applying a delta to the existing rotation rather
+      than rebuilding from the displayed angles (Euler extraction is not injective, so rebuilding
+      makes the numbers jump mid-drag near a pole); `colour` routes a 3 or 4 component float
+      vector to a colour picker; `normalized` renormalises a vector after an edit; and
+      `min=`/`max=`/`speed=` give a field a range. Bounds are values rather than flags, so
+      `Draw_Flags` became `Draw_Info{flags, min, max, speed}` threaded through every draw proc
+- [x] **Draw the line at engine behaviour.** Hooks and reference tags were both considered and
+      rejected: reflection should describe data, and anything that changes engine state stays
+      hand-written. `modelIdx`, `instanceIdx`, `textureIdxs` and `attachment` are tagged `ignore`
+      because none of them is a plain assignment — changing a model resizes `textureIdxs` and the
+      animation state, and `attachment.targetIdx`/`bindpointIdx` index `scene.objects` and the
+      model's bindpoints with only a `>= 0` guard, so a free-form integer reads out of bounds
+- [ ] Settings still hand-written. `GraphicsData` mixes six settings fields with about forty
+      Vulkan handles, so it needs the settings struct that the user settings file under 13 would
+      produce anyway. Conditional disabling (gamma in HDR, paper white, gizmo radius) needs no new
+      feature — `Read_Only` can be passed at the call site
+- [ ] A `label=` tag, the one remaining cosmetic gap: field names give `paperWhiteNits` rather
+      than "Paper white (nits)"
 - [x] Adopt the `imrefl:"..."` struct tags. **The two consumers disagreed on vocabulary:** `refdisk`
       accepted `ignore` and `padding`, `imreflect` accepted only `padding`, so an `ignore` tag
       silently hid a field from serialisation while still drawing it. `padding` is now dropped from

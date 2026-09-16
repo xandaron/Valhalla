@@ -6800,5 +6800,4 @@ nameCoreObjects :: proc(using graphicsData: ^GraphicsData) {
 			)
 		}
 	}
-
 }
