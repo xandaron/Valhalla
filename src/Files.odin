@@ -534,6 +534,7 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 			boneIdx := boneMap[aiStringToString(&sceneBone.mName, context.temp_allocator)]
 
 			model.skeleton[boneIdx].offsetMatrix = aiMatrixToMat4(&sceneBone.mOffsetMatrix)
+			model.skeleton[boneIdx].bindTransform = inverse(model.skeleton[boneIdx].offsetMatrix)
 
 			for weightIdx in 0 ..< sceneBone.mNumWeights {
 				weight := &sceneBone.mWeights[weightIdx]

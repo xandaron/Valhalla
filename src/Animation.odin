@@ -4,6 +4,7 @@ Bone :: struct {
 	name:         string,
 	parentIdx:    u32,
 	offsetMatrix: Mat4,
+	bindTransform: Mat4,
 }
 
 deleteBone :: proc(bone: ^Bone) {
@@ -204,8 +205,8 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 					)
 			}
 		} else {
-			for &node in objectAnimation.state {
-				node = IMAT4
+			for &node, nodeIdx in objectAnimation.state {
+				node = model.skeleton[nodeIdx].bindTransform
 			}
 		}
 	}
