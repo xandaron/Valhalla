@@ -3,19 +3,13 @@ package Valhalla
 Object :: struct {
 	name:        string,
 	flags:       ObjectFlags,
-	position:    Vec3 `imrefl:"speed=0.1"`,
-	rotation:    Quat `imrefl:"euler"`,
-	scale:       Vec3 `imrefl:"speed=0.1"`,
-	// Hand-written in the editor rather than reflected. Changing modelIdx has to resize
-	// textureIdxs and the animation state to the new model, instanceIdx is bookkeeping that
-	// model.instances mirrors, and textureIdxs is an index into scene.textures. None of that is a
-	// plain assignment, so reflection must not offer one.
+	position:    Vec3 `imrefl:"label=Position,speed=0.1"`,
+	rotation:    Quat `imrefl:"label=Rotation,euler"`,
+	scale:       Vec3 `imrefl:"label=Scale,speed=0.1"`,
 	modelIdx:    u32 `imrefl:"ignore"`,
 	instanceIdx: u32 `imrefl:"ignore"`,
 	textureIdxs: [][TextureIndex]u32 `imrefl:"ignore"`,
 	animation:   ObjectAnimation,
-	// targetIdx indexes scene.objects and bindpointIdx indexes that model's bindpoints; both are
-	// only checked for >= 0, so a free-form integer here reads out of bounds.
 	attachment:  Attachment `imrefl:"ignore"`,
 }
 
@@ -51,12 +45,6 @@ Texture :: struct {
 	path:      string,
 	assetPath: string,
 	name:      string,
-	// I want to transition to having multiple vk.Images and binding them as opposed to how I do it right now.
-	// vkImage: vk.Image,
-	// memory:  vk.DeviceMemory,
-	// view:    vk.ImageView,
-	// format:  vk.Format,
-	// sampler: u32,
 }
 
 deleteTexture :: proc(texture: ^Texture) {
@@ -69,9 +57,9 @@ Model :: struct {
 	path:       string,
 	assetPath:  string,
 	name:       string,
-	position:   Vec3 `imrefl:"speed=0.1"`,
-	rotation:   Quat `imrefl:"euler"`,
-	scale:      Vec3 `imrefl:"speed=0.1"`,
+	position:   Vec3 `imrefl:"label=Position,speed=0.1"`,
+	rotation:   Quat `imrefl:"label=Rotation,euler"`,
+	scale:      Vec3 `imrefl:"label=Scale,speed=0.1"`,
 	meshes:     []Mesh `imrefl:"ignore"`,
 	skeleton:   []Bone `imrefl:"ignore"`,
 	animations: []Animation `imrefl:"read-only"`,
@@ -157,14 +145,14 @@ deleteBindpoint :: proc(bindpoint: ^Bindpoint) {
 }
 
 Camera :: struct {
-	name:   string,
-	mode:   CameraMode,
-	eye:    Vec3 `imrefl:"speed=0.1"`,
-	center: Vec3 `imrefl:"speed=0.1"`,
-	up:     Vec3 `imrefl:"speed=0.1,normalized"`,
-	fov:    f32 `imrefl:"min=1,max=179,speed=0.1"`,
-	near:   f32 `imrefl:"min=0.001,max=1000,speed=0.1"`,
-	far:    f32 `imrefl:"min=0.002,max=10000,speed=0.1"`,
+	name:   string `imrefl:"label=Name"`,
+	mode:   CameraMode `imrefl:"label=Mode"`,
+	eye:    Vec3 `imrefl:"label=Eye,speed=0.1"`,
+	center: Vec3 `imrefl:"label=Center,speed=0.1"`,
+	up:     Vec3 `imrefl:"label=Up,speed=0.1,normalized"`,
+	fov:    f32 `imrefl:"label=FOV,min=1,max=179,speed=0.1"`,
+	near:   f32 `imrefl:"label=Near plane,min=0.001,max=1000,speed=0.1"`,
+	far:    f32 `imrefl:"label=Far plane,min=0.002,max=10000,speed=0.1"`,
 }
 
 deleteCamera :: proc(camera: ^Camera) {
@@ -201,10 +189,10 @@ projection :: proc(camera: Camera) -> Mat4 {
 }
 
 PointLight :: struct {
-	name:     string,
-	position: Vec3 `imrefl:"speed=0.1"`,
-	colour:   Vec3 `imrefl:"colour"`,
-	lumens:   f32 `imrefl:"min=0,max=100000,speed=10"`,
+	name:     string `imrefl:"label=Name"`,
+	position: Vec3 `imrefl:"label=Position,speed=0.1"`,
+	colour:   Vec3 `imrefl:"label=Colour,colour"`,
+	lumens:   f32 `imrefl:"label=Lumens,min=0,max=100000,speed=10"`,
 }
 
 deletePointLight :: proc(light: ^PointLight) {

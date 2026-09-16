@@ -17,7 +17,7 @@ Draw_Flag :: enum {
 	Euler,
 	Colour,
 	Normalized,
-	Using_Flatten,
+	Flatten,
 	Ignore,
 	Has_Min,
 	Has_Max,
@@ -30,9 +30,10 @@ Draw_Info :: struct {
 	min:   f64,
 	max:   f64,
 	speed: f64,
+	label: string,
 }
 
-DONT_PROPAGATE :: Draw_Flags{.Callable, .Using_Flatten, .Euler, .Colour, .Normalized}
+DONT_PROPAGATE :: Draw_Flags{.Callable, .Flatten, .Euler, .Colour, .Normalized}
 
 draw_value :: proc(name: string, value: any, info: Draw_Info = {}, ptr: rawptr = nil) -> (changed: bool) {
 	switch reflect.type_kind(value.id) {
@@ -219,6 +220,9 @@ tag_value_to_flag :: proc(str: string) -> (Draw_Flag, bool) {
 	case "euler":     return .Euler, true
 	case "colour", "color": return .Colour, true
 	case "normalized", "normalised": return .Normalized, true
+	// Draws a struct's fields inline instead of behind its own tree node. Set automatically for an
+	// anonymous `using _` field, and writable by hand on any struct.
+	case "flatten":   return .Flatten, true
 	}
 	return nil, false
 }
@@ -226,7 +230,7 @@ tag_value_to_flag :: proc(str: string) -> (Draw_Flag, bool) {
 @(private)
 without_flatten :: proc(info: Draw_Info) -> (out: Draw_Info) {
 	out = info
-	out.flags -= {.Using_Flatten}
+	out.flags -= {.Flatten}
 	return
 }
 
@@ -250,7 +254,15 @@ info_from_field_tag :: proc(tag: reflect.Struct_Tag, base: Draw_Info) -> (info: 
 
 		if eq := strings.index_byte(str, '='); eq != -1 {
 			key := strings.trim_space(str[:eq])
-			number, parsed := strconv.parse_f64(strings.trim_space(str[eq + 1:]))
+			text := strings.trim_space(str[eq + 1:])
+
+			// Values are split on commas, so a label cannot contain one.
+			if key == "label" {
+				info.label = text
+				continue
+			}
+
+			number, parsed := strconv.parse_f64(text)
 			if !parsed {
 				continue
 			}
@@ -275,16 +287,19 @@ draw_struct_type :: proc(name: string, value: any, info: Draw_Info) -> (changed:
 		bytes := ([^]byte)(value.data)
 		propagate := info
 		propagate.flags -= DONT_PROPAGATE
+		propagate.label = ""
 		for &field in reflect.struct_fields_zipped(value.id) {
 			field_info := info_from_field_tag(field.tag, propagate)
 			if .Ignore in field_info.flags {
 				continue
 			}
 
+			// An anonymous `using` field has no name worth showing, so it always flattens.
 			if field.is_using && field.name == "_" {
-				field_info.flags += {.Using_Flatten}
+				field_info.flags += {.Flatten}
 			}
-			changed |= draw_value(field.name, any{&bytes[field.offset], field.type.id}, field_info, value.data)
+			label := field_info.label if field_info.label != "" else field.name
+			changed |= draw_value(label, any{&bytes[field.offset], field.type.id}, field_info, value.data)
 		}
 		return
 	}
@@ -293,7 +308,7 @@ draw_struct_type :: proc(name: string, value: any, info: Draw_Info) -> (changed:
 	imgui.PushIDPtr(value.data)
 	defer imgui.PopID()
 
-	if .Using_Flatten not_in info.flags {
+	if .Flatten not_in info.flags {
 		if imgui.TreeNode(fmt.ctprint(name)) {
 			defer imgui.TreePop()
 			changed = struct_content(name, value, info)
@@ -316,6 +331,8 @@ draw_bit_field_type :: proc(name: string, value: any, info: Draw_Info) -> (chang
 		}
 
 		buf := ([^]byte)(value.data)
+		bit_field_base := info
+		bit_field_base.label = ""
 		for &field in reflect.bit_fields_zipped(value.id) {
 			mask: u64 = (1 << field.size) - 1
 			idx := field.offset / 8
@@ -334,7 +351,9 @@ draw_bit_field_type :: proc(name: string, value: any, info: Draw_Info) -> (chang
 				value_u64 |= ~mask // Sign extend if negative.
 			}
 
-			changed |= draw_value(field.name, any{&value_u64, strip_endianness(field.type.id)}, info_from_field_tag(field.tag, info))
+			field_info := info_from_field_tag(field.tag, bit_field_base)
+			label := field_info.label if field_info.label != "" else field.name
+			changed |= draw_value(label, any{&value_u64, strip_endianness(field.type.id)}, field_info)
 
 			if reflect.is_signed(field.type) {
 				// We can't just check tmp < 0 as draw_value won't set the upper bits if size_of(field.type.id) < 8
@@ -360,7 +379,7 @@ draw_bit_field_type :: proc(name: string, value: any, info: Draw_Info) -> (chang
 	imgui.PushIDPtr(value.data)
 	defer imgui.PopID()
 
-	if .Using_Flatten not_in info.flags {
+	if .Flatten not_in info.flags {
 		if imgui.TreeNode(fmt.ctprint(name)) {
 			defer imgui.TreePop()
 			changed = bit_field_content(name, value, info)

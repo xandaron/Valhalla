@@ -384,14 +384,10 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				if imgui.TreeNode(toCstring(object.name)) {
 					defer imgui.TreePop()
 
-					// Flattened so the reflected fields and the hand-written pickers below share
-					// one tree node instead of the pickers hanging off the end as siblings.
-					if ImRefl.draw_value(object.name, object, {flags = {.Using_Flatten}}) {
+					if ImRefl.draw_value(object.name, object, {flags = {.Flatten}}) {
 						sceneEdited(graphicsData)
 					}
 
-					// Everything past here changes engine state rather than a field, which is why
-					// the matching struct fields are tagged `ignore`.
 					imgui.SeparatorText("Model")
 					if imgui.BeginCombo(fmt.ctprintf("Model%v", suffix), toCstring(scene.models[object.modelIdx].name)) {
 						defer imgui.EndCombo()

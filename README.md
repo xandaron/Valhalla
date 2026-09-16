@@ -56,7 +56,7 @@ checkable work in [Tasks](#tasks).
 | --- | --- | --- |
 | 1 | **Modern Vulkan foundations** — bindless descriptors, hand-rolled allocator, vertex pulling, multiview shadows, host image copy | Complete |
 | 2 | **Colour correctness** — colour space handling and light falloff | Partly done |
-| 3 | **Reflection-driven editor** — replace hand-written inspector widgets with `imreflect` | Not started |
+| 3 | **Reflection-driven editor** — inspectors are driven by `imreflect`; only engine behaviour stays hand-written | Complete |
 | 4 | **Own imgui backends** — replace the vendored Vulkan and GLFW integrations to get control over colour, resources and callbacks | Not started |
 | 5 | **Normal mapping** — tangent frame and linear sampling are fixed; no debug view or demo asset that exercises a real normal map | Partly done |
 | 6 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
@@ -148,7 +148,7 @@ checkable work in [Tasks](#tasks).
       lights to `(2, 3, -4)` at 1600 lm) and raised knight's ambient from 0.01 to 0.3. Checked
       in SDR, since HDR captures are not representative
 
-### 3. Reflection-driven editor
+### 3. Reflection-driven editor — complete
 
 `imreflect` is already vendored and currently unused. It walks any Odin value with `core:reflect`
 and emits imgui widgets for it — `draw_value(name, value: any)` handles every type kind, including
@@ -164,9 +164,12 @@ maintain, so they were made there rather than worked around.
       `changed: bool` and aggregates over children. imgui already returns this per widget and the
       package was discarding it, which left a caller no way to tell an edit from a repaint. This
       is what answers the dirty-signal question below
-- [x] **Fix the imgui binding mismatch.** `imreflect` called `imgui.Gui_TreeNode` and friends,
-      but the vendored bindings expose them unprefixed, so the package could not compile against
-      this project at all. All 18 symbols existed under the shorter name with matching signatures
+- [x] **Settle the imgui naming mismatch.** `imreflect` called `imgui.Gui_TreeNode` while the
+      bindings of the day exposed those procs unprefixed, so the package could not compile against
+      this project at all. Resolved from the binding side when it was swapped to dcimgui: the
+      `Gui_` prefix was stripped from all 1008 procs, each keeping an explicit
+      `@(link_name="ImGui_X")` because the foreign block's `link_prefix="Im"` would otherwise have
+      resolved them to symbols that do not exist
 - [x] **Handle `Fixed_Capacity_Dynamic_Array`**, a type kind newer than the package. Its elements
       are stored inline with the length after them, so it reads through `len_offset` rather than a
       `Raw_` header
@@ -174,9 +177,12 @@ maintain, so they were made there rather than worked around.
       reflected as a collapsible node with three rows — a bad trade for the most common type in a
       3D editor. They now render as one `DragScalarN` row, matching the hand-written `DragFloat3`
 - [x] Light and camera inspectors now come from `ImRefl.draw_value`
-- [x] Objects, models, textures and scene settings. `Using_Flatten` lets the reflected fields and
-      the hand-written pickers share one tree node instead of the pickers hanging off the end
-- [x] **Four tags so reflection can describe the data rather than the editor working around it:**
+- [x] Objects, models, textures and scene settings. `flatten` lets the reflected fields and the
+      hand-written pickers share one tree node instead of the pickers hanging off the end
+- [x] `flatten` (was `Using_Flatten`) draws a struct's fields inline rather than behind its own
+      tree node. It is still set automatically for an anonymous `using _` field, but it is now a
+      tag any struct can carry and a flag any caller can pass
+- [x] **Tags so reflection can describe the data rather than the editor working around it:**
       `euler` draws a quaternion as XYZ degrees, applying a delta to the existing rotation rather
       than rebuilding from the displayed angles (Euler extraction is not injective, so rebuilding
       makes the numbers jump mid-drag near a pole); `colour` routes a 3 or 4 component float
@@ -189,12 +195,13 @@ maintain, so they were made there rather than worked around.
       because none of them is a plain assignment — changing a model resizes `textureIdxs` and the
       animation state, and `attachment.targetIdx`/`bindpointIdx` index `scene.objects` and the
       model's bindpoints with only a `>= 0` guard, so a free-form integer reads out of bounds
-- [ ] Settings still hand-written. `GraphicsData` mixes six settings fields with about forty
-      Vulkan handles, so it needs the settings struct that the user settings file under 13 would
-      produce anyway. Conditional disabling (gamma in HDR, paper white, gizmo radius) needs no new
-      feature — `Read_Only` can be passed at the call site
-- [ ] A `label=` tag, the one remaining cosmetic gap: field names give `paperWhiteNits` rather
-      than "Paper white (nits)"
+- [ ] Settings stays hand-written, and not because of a reflection limit: `GraphicsData` mixes six
+      settings fields with about forty Vulkan handles, so it wants the settings struct that the user
+      settings file under 13 produces anyway. Conditional disabling (gamma in HDR, paper white,
+      gizmo radius) needs no new feature — `Read_Only` can be passed at the call site
+- [x] A `label=` tag, so a field can read as "Near plane" rather than `near`. Like the flags it
+      describes one field, so it is cleared before descending instead of relabelling every child.
+      Values are comma separated, so a label cannot contain a comma
 - [x] Adopt the `imrefl:"..."` struct tags. **The two consumers disagreed on vocabulary:** `refdisk`
       accepted `ignore` and `padding`, `imreflect` accepted only `padding`, so an `ignore` tag
       silently hid a field from serialisation while still drawing it. `padding` is now dropped from
