@@ -15,42 +15,44 @@ Draw_Flag :: enum {
 
 	// For internal use.
 	Using_Flatten,
-	Padding,
+	Ignore,
 }
 Draw_Flags :: bit_set[Draw_Flag]
 
 DONT_PROPAGATE :: Draw_Flags{.Callable, .Using_Flatten}
 
-draw_value :: proc(name: string, value: any, flags: Draw_Flags = nil, ptr: rawptr = nil) {
+draw_value :: proc(name: string, value: any, flags: Draw_Flags = nil, ptr: rawptr = nil) -> (changed: bool) {
 	switch reflect.type_kind(value.id) {
 	case .Invalid: panic("Invalid Type!")
-	case .Named:            draw_value(name, any{value.data, reflect.typeid_base(value.id)}, flags, ptr)
-	case .Struct:           draw_struct_type(name, value, flags)
-	case .Bit_Field:        draw_bit_field_type(name, value, flags)
-	case .Union:            draw_union_type(name, value, flags)
-	case .Bit_Set:          draw_bit_set_type(name, value, flags)
-	case .Enum:             draw_enum_type(name, value, flags)
-	case .Any:              draw_any_type(name, value, flags)
-	case .Type_Id:          draw_type_id(name, value, flags)
-	case .Pointer:          draw_pointer_type(name, value, flags)
-	case .String:           draw_string_type(name, value, flags)
-	case .Complex:          draw_complex_type(name, value, flags)
-	case .Quaternion:       draw_quat_type(name, value, flags)
-	case .Boolean:          draw_bool_type(name, value, flags)
-	case .Integer, .Rune:   draw_integer_type(name, value, flags)
-	case .Float:            draw_float_type(name,value, flags)
-	case .Map:              draw_map_type(name, value, flags)
-	case .Matrix:           draw_matrix_type(name, value, flags)
-	case .Array:            draw_array_type(name, value, flags)
-	case .Slice:            draw_slice_type(name, value, flags)
-	case .Enumerated_Array: draw_enum_array_type(name, value, flags)
-	case .Dynamic_Array:    draw_dyn_array_type(name, value, flags)
-	case .Multi_Pointer:    draw_multi_pointer_type(name, value, flags)
-	case .Simd_Vector:      draw_simd_vec_type(name, value, flags)
-	case .Soa_Pointer:      draw_soa_pointer_type(name, value, flags)
-	case .Procedure:        draw_proc_type(name, value, flags, ptr)
+	case .Named:            return draw_value(name, any{value.data, reflect.typeid_base(value.id)}, flags, ptr)
+	case .Struct:           return draw_struct_type(name, value, flags)
+	case .Bit_Field:        return draw_bit_field_type(name, value, flags)
+	case .Union:            return draw_union_type(name, value, flags)
+	case .Bit_Set:          return draw_bit_set_type(name, value, flags)
+	case .Enum:             return draw_enum_type(name, value, flags)
+	case .Any:              return draw_any_type(name, value, flags)
+	case .Type_Id:          return draw_type_id(name, value, flags)
+	case .Pointer:          return draw_pointer_type(name, value, flags)
+	case .String:           return draw_string_type(name, value, flags)
+	case .Complex:          return draw_complex_type(name, value, flags)
+	case .Quaternion:       return draw_quat_type(name, value, flags)
+	case .Boolean:          return draw_bool_type(name, value, flags)
+	case .Integer, .Rune:   return draw_integer_type(name, value, flags)
+	case .Float:            return draw_float_type(name,value, flags)
+	case .Map:              return draw_map_type(name, value, flags)
+	case .Matrix:           return draw_matrix_type(name, value, flags)
+	case .Array:            return draw_array_type(name, value, flags)
+	case .Slice:            return draw_slice_type(name, value, flags)
+	case .Enumerated_Array: return draw_enum_array_type(name, value, flags)
+	case .Dynamic_Array:    return draw_dyn_array_type(name, value, flags)
+	case .Fixed_Capacity_Dynamic_Array: return draw_fixed_capacity_dyn_array_type(name, value, flags)
+	case .Multi_Pointer:    return draw_multi_pointer_type(name, value, flags)
+	case .Simd_Vector:      return draw_simd_vec_type(name, value, flags)
+	case .Soa_Pointer:      return draw_soa_pointer_type(name, value, flags)
+	case .Procedure:        return draw_proc_type(name, value, flags, ptr)
 	case .Parameters: // As is a proc param? I don't think we need to cover this.
 	}
+	return
 }
 
 @(private)
@@ -197,7 +199,7 @@ read_any_float_as :: proc(value: any, $T: typeid) -> T {
 tag_value_to_flag :: proc(str: string) -> (Draw_Flag, bool) {
 	switch str {
 	case "read-only": return .Read_Only, true
-	case "padding":   return .Padding, true
+	case "ignore":    return .Ignore, true
 	case "callable":  return .Callable, true
 	}
 	return nil, false
@@ -233,40 +235,42 @@ flags_from_field_tag :: proc(tag: reflect.Struct_Tag) -> (flags: Draw_Flags) {
 }
 
 @(private)
-draw_struct_type :: proc(name: string, value: any, flags: Draw_Flags) {
-	struct_content :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_struct_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
+	struct_content :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 		bytes := ([^]byte)(value.data)
 		propagate_flags := flags - DONT_PROPAGATE
 		for &field in reflect.struct_fields_zipped(value.id) {
 			field_flags := propagate_flags + flags_from_field_tag(field.tag)
-			if .Padding in field_flags {
+			if .Ignore in field_flags {
 				continue
 			}
 
 			if field.is_using && field.name == "_" {
 				field_flags += {.Using_Flatten}
 			}
-			draw_value(field.name, any{&bytes[field.offset], field.type.id}, field_flags, value.data)
+			changed |= draw_value(field.name, any{&bytes[field.offset], field.type.id}, field_flags, value.data)
 		}
+		return
 	}
 	assert_kind(reflect.type_kind(value.id), .Struct)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
 	if .Using_Flatten not_in flags {
-		if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-			defer imgui.Gui_TreePop()
-			struct_content(name, value, flags)
+		if imgui.TreeNode(fmt.ctprint(name)) {
+			defer imgui.TreePop()
+			changed = struct_content(name, value, flags)
 		}
 	} else {
-		struct_content(name, value, flags - {.Using_Flatten})
+		changed = struct_content(name, value, flags - {.Using_Flatten})
 	}
+	return
 }
 
 @(private)
-draw_bit_field_type :: proc(name: string, value: any, flags: Draw_Flags) {
-	bit_field_content :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_bit_field_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
+	bit_field_content :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 		// Unteseted on big-endian platforms.
 		swap_endian := false
 		when ODIN_ENDIAN == .Little {
@@ -294,7 +298,7 @@ draw_bit_field_type :: proc(name: string, value: any, flags: Draw_Flags) {
 				value_u64 |= ~mask // Sign extend if negative.
 			}
 
-			draw_value(field.name, any{&value_u64, strip_endianness(field.type.id)}, flags + flags_from_field_tag(field.tag))
+			changed |= draw_value(field.name, any{&value_u64, strip_endianness(field.type.id)}, flags + flags_from_field_tag(field.tag))
 
 			if reflect.is_signed(field.type) {
 				// We can't just check tmp < 0 as draw_value won't set the upper bits if size_of(field.type.id) < 8
@@ -313,31 +317,33 @@ draw_bit_field_type :: proc(name: string, value: any, flags: Draw_Flags) {
 
 			data_ptr^ |= u128(value_u64 & mask) << offset
 		}
+		return
 	}
 	assert_kind(reflect.type_kind(value.id), .Bit_Field)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
 	if .Using_Flatten not_in flags {
-		if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-			defer imgui.Gui_TreePop()
-			bit_field_content(name, value, flags)
+		if imgui.TreeNode(fmt.ctprint(name)) {
+			defer imgui.TreePop()
+			changed = bit_field_content(name, value, flags)
 		}
 	} else {
-		bit_field_content(name, value, flags - {.Using_Flatten})
+		changed = bit_field_content(name, value, flags - {.Using_Flatten})
 	}
+	return
 }
 
 @(private)
-draw_union_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_union_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Union)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		type_info := type_info_of(value.id)
 		union_info := type_info.variant.(reflect.Type_Info_Union)
@@ -345,26 +351,27 @@ draw_union_type :: proc(name: string, value: any, flags: Draw_Flags) {
 
 		variant_idx, _ := reflect.as_u64(any{&bytes[union_info.tag_offset], union_info.tag_type.id})
 		if variant_idx == 0 {
-			imgui.Gui_TextEx(fmt.ctprint("variant: nil"))
+			imgui.TextEx(fmt.ctprint("variant: nil"))
 			return
 		}
 
 		variant_info := union_info.variants[variant_idx - 1]
-		imgui.Gui_TextEx(fmt.ctprintf("variant: %v", variant_info.id))
-		draw_value("data", any{value.data, variant_info.id}, flags)
+		imgui.TextEx(fmt.ctprintf("variant: %v", variant_info.id))
+		changed = draw_value("data", any{value.data, variant_info.id}, flags)
 	}
+	return
 }
 
 @(private)
-draw_bit_set_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_bit_set_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	value := value
 	assert_kind(reflect.type_kind(value.id), .Bit_Set)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		type_info := type_info_of(value.id)
 		set_info := type_info.variant.(reflect.Type_Info_Bit_Set)
@@ -372,21 +379,23 @@ draw_bit_set_type :: proc(name: string, value: any, flags: Draw_Flags) {
 		value.id = runtime.typeid_underlying(value.id)
 		value_u128 := read_any_int_as(value, u128)
 
-		imgui.Gui_BeginDisabled(.Read_Only in flags)
-		defer imgui.Gui_EndDisabled()
+		imgui.BeginDisabled(.Read_Only in flags)
+		defer imgui.EndDisabled()
 
 		for &enum_value in reflect.enum_fields_zipped(set_info.elem.id) {
 			active := (1 << u64(enum_value.value)) & value_u128 != 0
-			if imgui.Gui_Checkbox(fmt.ctprint(enum_value.name), &active) {
+			if imgui.Checkbox(fmt.ctprint(enum_value.name), &active) {
 				value_u128 ~= (1 << u64(enum_value.value))
+				changed = true
 			}
 		}
 		write_int_to_any(value_u128, value)
 	}
+	return
 }
 
 @(private)
-draw_enum_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_enum_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Enum)
 
 	getter :: proc "c" (user_data: rawptr, idx: i32) -> cstring {
@@ -395,14 +404,14 @@ draw_enum_type :: proc(name: string, value: any, flags: Draw_Flags) {
 		return fmt.ctprint(fields[idx].name)
 	}
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	imgui.Gui_BeginDisabled(.Read_Only in flags)
-	defer imgui.Gui_EndDisabled()
+	imgui.BeginDisabled(.Read_Only in flags)
+	defer imgui.EndDisabled()
 
-	if imgui.Gui_BeginCombo(fmt.ctprint(name), fmt.ctprint(reflect.enum_string(value)), nil) {
-		defer imgui.Gui_EndCombo()
+	if imgui.BeginCombo(fmt.ctprint(name), fmt.ctprint(reflect.enum_string(value)), nil) {
+		defer imgui.EndCombo()
 
 		value_i64 := read_any_int_as(value, i64)
 		for &enum_value in reflect.enum_fields_zipped(value.id) {
@@ -410,79 +419,85 @@ draw_enum_type :: proc(name: string, value: any, flags: Draw_Flags) {
 				continue
 			}
 
-			if imgui.Gui_Selectable(fmt.ctprint(enum_value.name)) {
+			if imgui.Selectable(fmt.ctprint(enum_value.name)) {
 				write_int_to_any(enum_value.value, value)
+				changed = true
 				break
 			}
 		}
 	}
+	return
 }
 
 @(private)
-draw_any_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_any_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Any)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
 	if (^any)(value.data).id == nil {
-		imgui.Gui_TextEx(fmt.ctprintf("%s: nil", name))
+		imgui.TextEx(fmt.ctprintf("%s: nil", name))
 		return
 	}
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
+	if imgui.TreeNode(fmt.ctprint(name)) {
 		draw_type_id("typeid", (^any)(value.data).id, flags)
-		draw_value("data", (^any)(value.data)^, flags)
-		imgui.Gui_TreePop()
+		changed = draw_value("data", (^any)(value.data)^, flags)
+		imgui.TreePop()
 	}
+	return
 }
 
 @(private)
-draw_type_id :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_type_id :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Type_Id)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	imgui.Gui_TextEx(fmt.ctprintf("%s: %v", name, (^typeid)(value.data)^))
+	imgui.TextEx(fmt.ctprintf("%s: %v", name, (^typeid)(value.data)^))
+	return
 }
 
 @(private)
-draw_pointer_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_pointer_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Pointer)
 	
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 	
 	if (^rawptr)(value.data)^ == nil {
-		imgui.Gui_TextEx(fmt.ctprintf("%s: nil", name))
+		imgui.TextEx(fmt.ctprintf("%s: nil", name))
 	} else if value.id == rawptr {
-		imgui.Gui_TextEx(fmt.ctprintf("%s: %v", name, (^rawptr)(value.data)^))
+		imgui.TextEx(fmt.ctprintf("%s: %v", name, (^rawptr)(value.data)^))
 	} else {
 		pointee_type_id := type_info_of(value.id).variant.(reflect.Type_Info_Pointer).elem.id
 		data_ptr := (^rawptr)(value.data)^
-		draw_value(fmt.tprintf("%s: %v", name, data_ptr), any{data_ptr, pointee_type_id}, flags)
+		changed = draw_value(fmt.tprintf("%s: %v", name, data_ptr), any{data_ptr, pointee_type_id}, flags)
 	}
+	return
 }
 
 @(private)
-draw_string_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_string_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .String)
 	
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
 	switch value.id {
 	// How do we support utf16 strings properly?
-	case cstring:   imgui.Gui_TextEx(fmt.ctprintf("\"%s\" %s", (^cstring  )(value.data)^, name))
-	case cstring16: imgui.Gui_TextEx(fmt.ctprintf("\"%s\" %s", (^cstring16)(value.data)^, name))
-	case string:    imgui.Gui_TextEx(fmt.ctprintf("\"%s\" %s", (^string   )(value.data)^, name))
-	case string16:  imgui.Gui_TextEx(fmt.ctprintf("\"%s\" %s", (^string16 )(value.data)^, name))
+	case cstring:   imgui.TextEx(fmt.ctprintf("\"%s\" %s", (^cstring  )(value.data)^, name))
+	case cstring16: imgui.TextEx(fmt.ctprintf("\"%s\" %s", (^cstring16)(value.data)^, name))
+	case string:    imgui.TextEx(fmt.ctprintf("\"%s\" %s", (^string   )(value.data)^, name))
+	case string16:  imgui.TextEx(fmt.ctprintf("\"%s\" %s", (^string16 )(value.data)^, name))
 	}
+	return
 }
 
 @(private)
-draw_complex_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_complex_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Complex)
 	real, imag: rawptr
 	type: typeid
@@ -505,20 +520,21 @@ draw_complex_type :: proc(name: string, value: any, flags: Draw_Flags) {
 	case: panic("Invalid type id!")
 	}
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
 	// this is very arbitrary
-	width := (imgui.Gui_GetContentRegionAvail().x - 120 - imgui.Gui_GetStyle().CellPadding.x * 4) / 2
-	imgui.Gui_SetNextItemWidth(width)
-	draw_float_type("+", any{real, type}, flags)
-	imgui.Gui_SameLine()
-	imgui.Gui_SetNextItemWidth(width)
-	draw_float_type(fmt.tprintf("i %s", name), any{imag, type}, flags)
+	width := (imgui.GetContentRegionAvail().x - 120 - imgui.GetStyle().CellPadding.x * 4) / 2
+	imgui.SetNextItemWidth(width)
+	changed |= draw_float_type("+", any{real, type}, flags)
+	imgui.SameLine()
+	imgui.SetNextItemWidth(width)
+	changed |= draw_float_type(fmt.tprintf("i %s", name), any{imag, type}, flags)
+	return
 }
 
 @(private)
-draw_quat_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_quat_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Quaternion)
 	ptrs: [4]rawptr
 	type: typeid
@@ -547,34 +563,35 @@ draw_quat_type :: proc(name: string, value: any, flags: Draw_Flags) {
 	case: panic("Invalid type id!!")
 	}
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()	
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()	
 
-	imgui.Gui_BeginDisabled(.Read_Only in flags)
-	defer imgui.Gui_EndDisabled()
+	imgui.BeginDisabled(.Read_Only in flags)
+	defer imgui.EndDisabled()
 
 	// len(name) * 7 was chosen arbitrarily.
-	width := (imgui.Gui_GetContentRegionAvail().x - 110 - imgui.Gui_GetStyle().CellPadding.x * 7) / 4.0
+	width := (imgui.GetContentRegionAvail().x - 110 - imgui.GetStyle().CellPadding.x * 7) / 4.0
 	for idx in 0..<4 {
-		imgui.Gui_SetNextItemWidth(width)
-		draw_float_type("", any{ptrs[idx], type}, flags)
-		imgui.Gui_SameLine()
+		imgui.SetNextItemWidth(width)
+		changed |= draw_float_type("", any{ptrs[idx], type}, flags)
+		imgui.SameLine()
 	}
-	imgui.Gui_TextEx(fmt.ctprint(name))
+	imgui.TextEx(fmt.ctprint(name))
+	return
 }
 
 @(private)
-draw_bool_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_bool_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Boolean)
 	value_bool, _ := reflect.as_bool(value)
 	
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	imgui.Gui_BeginDisabled(.Read_Only in flags)
-	defer imgui.Gui_EndDisabled()
+	imgui.BeginDisabled(.Read_Only in flags)
+	defer imgui.EndDisabled()
 
-	if imgui.Gui_Checkbox(fmt.ctprint(name), &value_bool) {
+	if imgui.Checkbox(fmt.ctprint(name), &value_bool) {
 		switch value.id {
 		case b8:   (^b8  )(value.data)^ = auto_cast value_bool
 		case b16:  (^b16 )(value.data)^ = auto_cast value_bool
@@ -582,57 +599,63 @@ draw_bool_type :: proc(name: string, value: any, flags: Draw_Flags) {
 		case b64:  (^b64 )(value.data)^ = auto_cast value_bool
 		case bool: (^bool)(value.data)^ = value_bool
 		}
+		changed = true
 	}
+	return
 }
 
 @(private)
-draw_integer_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_integer_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	kind := reflect.type_kind(value.id)
 	fmt.assertf(kind == .Integer || kind == .Rune, "Value type kind must be %v or %v! Got %v", reflect.Type_Kind.Integer, reflect.Type_Kind.Rune, kind)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	imgui.Gui_BeginDisabled(.Read_Only in flags)
-	defer imgui.Gui_EndDisabled()
+	imgui.BeginDisabled(.Read_Only in flags)
+	defer imgui.EndDisabled()
 
 	is_unsigned := reflect.is_unsigned(type_info_of(value.id))
 	tmp := read_any_int_as(value, u64)
-	if imgui.Gui_InputScalar(fmt.ctprint(name), is_unsigned ? .U64 : .S64, &tmp) {
+	if imgui.InputScalar(fmt.ctprint(name), is_unsigned ? .U64 : .S64, &tmp) {
 		write_int_to_any(tmp, value)
+		changed = true
 	}
+	return
 }
 
 @(private)
-draw_float_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_float_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Float)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	imgui.Gui_BeginDisabled(.Read_Only in flags)
-	defer imgui.Gui_EndDisabled()
+	imgui.BeginDisabled(.Read_Only in flags)
+	defer imgui.EndDisabled()
 
 	tmp := read_any_float_as(value, f64)
-	if imgui.Gui_InputScalar(fmt.ctprint(name), .Double, &tmp) {
+	if imgui.InputScalar(fmt.ctprint(name), .Double, &tmp) {
 		write_float_to_any(tmp, value)
+		changed = true
 	}
+	return
 }
 
 @(private)
-draw_map_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_map_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Map)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		map_info := type_info_of(value.id).variant.(reflect.Type_Info_Map)
 
-		width := (imgui.Gui_GetContentRegionAvail().x - imgui.Gui_GetStyle().ItemSpacing.x * 3) / 4
-		imgui.Gui_SetNextItemWidth(width)
+		width := (imgui.GetContentRegionAvail().x - imgui.GetStyle().ItemSpacing.x * 3) / 4
+		imgui.SetNextItemWidth(width)
 		
 		it: int = 0
 		for idx := 0;; idx += 1 {
@@ -641,24 +664,25 @@ draw_map_type :: proc(name: string, value: any, flags: Draw_Flags) {
 				break
 			}
 
-			if imgui.Gui_TreeNode(fmt.ctprint(idx)) {
-				draw_value("key",   any{key.data, map_info.key.id}, flags)
-				draw_value("value", any{value.data, map_info.value.id}, flags)
-				imgui.Gui_TreePop()
+			if imgui.TreeNode(fmt.ctprint(idx)) {
+				changed |= draw_value("key",   any{key.data, map_info.key.id}, flags)
+				changed |= draw_value("value", any{value.data, map_info.value.id}, flags)
+				imgui.TreePop()
 			}
 		}
 	}
+	return
 }
 
 @(private)
-draw_matrix_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_matrix_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Matrix)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		type_info := type_info_of(value.id)
 		matrix_info := type_info.variant.(reflect.Type_Info_Matrix)
@@ -666,172 +690,264 @@ draw_matrix_type :: proc(name: string, value: any, flags: Draw_Flags) {
 		row_stride := matrix_info.layout == .Row_Major ? (matrix_info.elem_size * matrix_info.column_count) : matrix_info.elem_size
 		column_stride := matrix_info.layout == .Column_Major ? (matrix_info.elem_size * matrix_info.row_count) : matrix_info.elem_size
 
-		width := (imgui.Gui_GetContentRegionAvail().x - imgui.Gui_GetStyle().ItemSpacing.x * 3) / f32(matrix_info.column_count)
+		width := (imgui.GetContentRegionAvail().x - imgui.GetStyle().ItemSpacing.x * 3) / f32(matrix_info.column_count)
 		bytes := ([^]byte)(value.data)
 
 		for c in 0..<matrix_info.column_count {
 			for r in 0..<matrix_info.row_count {
-				imgui.Gui_SetNextItemWidth(width)
+				imgui.SetNextItemWidth(width)
 				if r > 0 {
-					imgui.Gui_SameLine()
+					imgui.SameLine()
 				}
 
 				ptr := &bytes[c * column_stride + r * row_stride]
-				imgui.Gui_PushIDPtr(ptr)
-				defer imgui.Gui_PopID()
+				imgui.PushIDPtr(ptr)
+				defer imgui.PopID()
 
-				draw_value("", any{ptr, matrix_info.elem.id}, flags)
+				changed |= draw_value("", any{ptr, matrix_info.elem.id}, flags)
 			}
 		}
 	}
+	return
+}
+
+// imgui can edit 2 to 4 numeric components on one row. Without this a Vec3 reflects as an array
+// of three floats and draws as a collapsible node with three rows, which is a bad trade for the
+// most common type in a 3D editor.
+//
+// Each arm selects its imgui data type with an implicit selector so this file never spells an
+// imgui type name, which is how the rest of the package refers to the binding.
+@(private)
+draw_inline_vector :: proc(
+	name: string,
+	data: rawptr,
+	elem: ^runtime.Type_Info,
+	count: int,
+	flags: Draw_Flags,
+) -> (
+	changed: bool,
+	handled: bool,
+) {
+	if count < 2 || count > 4 {
+		return false, false
+	}
+
+	imgui.BeginDisabled(.Read_Only in flags)
+	defer imgui.EndDisabled()
+
+	label := fmt.ctprint(name)
+	components := i32(count)
+
+	#partial switch info in elem.variant {
+	case runtime.Type_Info_Float:
+		// Dragging suits spatial values, which is what most small float vectors are.
+		switch elem.size {
+		case 4: return imgui.DragScalarN(label, .Float, data, components, 0.05), true
+		case 8: return imgui.DragScalarN(label, .Double, data, components, 0.05), true
+		}
+	case runtime.Type_Info_Integer:
+		// Integers step rather than slide so they stay exact.
+		switch elem.size {
+		case 1: return imgui.InputScalarN(label, info.signed ? .S8 : .U8, data, components), true
+		case 2: return imgui.InputScalarN(label, info.signed ? .S16 : .U16, data, components), true
+		case 4: return imgui.InputScalarN(label, info.signed ? .S32 : .U32, data, components), true
+		case 8: return imgui.InputScalarN(label, info.signed ? .S64 : .U64, data, components), true
+		}
+	}
+	return false, false
 }
 
 @(private)
-draw_array_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_array_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Array)
-	
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
+
+	inline_info := type_info_of(value.id).variant.(reflect.Type_Info_Array)
+	if edited, handled := draw_inline_vector(
+		name,
+		value.data,
+		inline_info.elem,
+		inline_info.count,
+		flags,
+	); handled {
+		return edited
+	}
+
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		array_info := type_info_of(value.id).variant.(reflect.Type_Info_Array)
 		for idx in 0..<array_info.count {
-			draw_value(fmt.tprint(idx), any{rawptr(uintptr(value.data) + uintptr(array_info.elem.size * idx)), array_info.elem.id}, flags)
+			changed |= draw_value(fmt.tprint(idx), any{rawptr(uintptr(value.data) + uintptr(array_info.elem.size * idx)), array_info.elem.id}, flags)
 		}
 	}
+	return
 }
 
 @(private)
-draw_slice_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_slice_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Slice)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		slice_info := type_info_of(value.id).variant.(reflect.Type_Info_Slice)
 		raw_slice := (^runtime.Raw_Slice)(value.data)
 		bytes := ([^]byte)(raw_slice.data)
 		
 		for idx in 0..<raw_slice.len {
-			draw_value(fmt.tprint(idx), any{&bytes[idx * slice_info.elem_size], slice_info.elem.id}, flags)
+			changed |= draw_value(fmt.tprint(idx), any{&bytes[idx * slice_info.elem_size], slice_info.elem.id}, flags)
 		}
 	}
+	return
 }
 
 @(private)
-draw_enum_array_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_enum_array_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Enumerated_Array)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		array_info := type_info_of(value.id).variant.(reflect.Type_Info_Enumerated_Array)
 		// TODO: Implement.
 	}
+	return
 }
 
 @(private)
-draw_dyn_array_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_dyn_array_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Dynamic_Array)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		array_info := type_info_of(value.id).variant.(reflect.Type_Info_Dynamic_Array)
 		raw_array := (^runtime.Raw_Dynamic_Array)(value.data)
 		bytes := ([^]byte)(raw_array.data)
 		
 		for idx in 0..<raw_array.len {
-			draw_value(fmt.tprint(idx), any{&bytes[array_info.elem_size * idx], array_info.elem.id}, flags)
+			changed |= draw_value(fmt.tprint(idx), any{&bytes[array_info.elem_size * idx], array_info.elem.id}, flags)
 		}
 	}
+	return
 }
 
 @(private)
-draw_multi_pointer_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_fixed_capacity_dyn_array_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
+	assert_kind(reflect.type_kind(value.id), .Fixed_Capacity_Dynamic_Array)
+
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
+
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
+
+		array_info := type_info_of(value.id).variant.(reflect.Type_Info_Fixed_Capacity_Dynamic_Array)
+		bytes := ([^]byte)(value.data)
+
+		// Unlike a dynamic array there is no header: the elements are stored inline and the length
+		// sits after them, which is why this reads through len_offset rather than a Raw_ struct.
+		length := (^int)(&bytes[array_info.len_offset])^
+
+		imgui.TextEx(fmt.ctprintf("len %v / cap %v", length, array_info.capacity))
+		for idx in 0 ..< length {
+			changed |= draw_value(fmt.tprint(idx), any{&bytes[array_info.elem_size * idx], array_info.elem.id}, flags)
+		}
+	}
+	return
+}
+
+@(private)
+draw_multi_pointer_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Multi_Pointer)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	imgui.Gui_BeginDisabled(.Read_Only in flags)
-	defer imgui.Gui_EndDisabled()
+	imgui.BeginDisabled(.Read_Only in flags)
+	defer imgui.EndDisabled()
 
-	draw_pointer_type(name, any{value.data, typeid_of(rawptr)}, nil)
+	changed = draw_pointer_type(name, any{value.data, typeid_of(rawptr)}, nil)
+	return
 }
 
 @(private)
-draw_simd_vec_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_simd_vec_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Simd_Vector)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		vector_info := type_info_of(value.id).variant.(reflect.Type_Info_Simd_Vector)
 		bytes := ([^]byte)(value.data)
 		for idx in 0..<vector_info.count {
-			draw_value(fmt.tprint(idx), any{&bytes[vector_info.elem_size * idx], vector_info.elem.id}, flags)
+			changed |= draw_value(fmt.tprint(idx), any{&bytes[vector_info.elem_size * idx], vector_info.elem.id}, flags)
 		}
 	}
+	return
 }
 
 // TODO: What's this even meant to represent?
 // How should we display this?
 @(private)
-draw_soa_pointer_type :: proc(name: string, value: any, flags: Draw_Flags) {
+draw_soa_pointer_type :: proc(name: string, value: any, flags: Draw_Flags) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Soa_Pointer)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
 		raw_soa := (^runtime.Raw_Soa_Pointer)(value.data)
 		soa_info := type_info_of(value.id).variant.(reflect.Type_Info_Soa_Pointer)
 	}
+	return
 }
 
 // What should this even do? I'll just write the proc address.
 // Maybe we can make the proc callable with struct tags.
 @(private)
-draw_proc_type :: proc(name: string, value: any, flags: Draw_Flags, ptr: rawptr = nil) {
+draw_proc_type :: proc(name: string, value: any, flags: Draw_Flags, ptr: rawptr = nil) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Procedure)
 
-	imgui.Gui_PushIDPtr(value.data)
-	defer imgui.Gui_PopID()
+	imgui.PushIDPtr(value.data)
+	defer imgui.PopID()
 
-	if imgui.Gui_TreeNode(fmt.ctprint(name)) {
-		defer imgui.Gui_TreePop()
+	if imgui.TreeNode(fmt.ctprint(name)) {
+		defer imgui.TreePop()
 
-		imgui.Gui_Text(fmt.ctprintf("%v proc address", (^rawptr)(value.data)^))
+		imgui.Text(fmt.ctprintf("%v proc address", (^rawptr)(value.data)^))
 
 		if .Callable in flags {
 			proc_info := type_info_of(value.id).variant.(reflect.Type_Info_Procedure)
 			if proc_info.params != nil {
 				param_info := proc_info.params.variant.(reflect.Type_Info_Parameters)
 				if len(param_info.types) == 1 && param_info.types[0].id == rawptr {
-					imgui.Gui_SameLine()
-					if imgui.Gui_Button("call") {
+					imgui.SameLine()
+					if imgui.Button("call") {
 						(^proc(rawptr))(value.data)^(ptr)
+						changed = true
 					}
 				}
 			}
 		}
 	}
+	return
 }
 
