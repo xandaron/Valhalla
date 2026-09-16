@@ -1,6 +1,7 @@
 package Valhalla
 
 import "../imgui"
+import ImRefl "../imreflect"
 import tinyfd "../tinyfiledialogs"
 import "core:fmt"
 import "core:os"
@@ -81,6 +82,12 @@ saveAs :: proc(scene: ^Scene) {
 		scene.path = newPath
 		saveScene(scene)
 	}
+}
+
+@(private = "file")
+sceneEdited :: proc(graphicsData: ^GraphicsData) {
+	graphicsData.reloadBuffers = true
+	markCommandsDirty(graphicsData, DIRTY_ALL)
 }
 
 drawImgui :: proc(graphicsData: ^GraphicsData) {
@@ -343,25 +350,13 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				markCommandsDirty(graphicsData, {.Scene})
 			}
 			imgui.BeginDisabled(!graphicsData.showLightGizmos)
-			if imgui.DragFloat(
-				"Gizmo radius",
-				&graphicsData.lightGizmoRadius,
-				0.01,
-				0.01,
-				5.0,
-			) {
+			if imgui.DragFloat("Gizmo radius", &graphicsData.lightGizmoRadius, 0.01, 0.01, 5.0) {
 				markCommandsDirty(graphicsData, {.Scene})
 			}
 			imgui.EndDisabled()
 
 			imgui.BeginDisabled(!hdrActive(graphicsData))
-			if imgui.DragFloat(
-				"Paper white (nits)",
-				&graphicsData.paperWhiteNits,
-				1.0,
-				50,
-				1000,
-			) {
+			if imgui.DragFloat("Paper white (nits)", &graphicsData.paperWhiteNits, 1.0, 50, 1000) {
 				graphicsData.reloadBuffers = true
 			}
 			imgui.EndDisabled()
@@ -387,6 +382,8 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 			for &object, objectIdx in scene.objects {
 				suffix := fmt.tprintf("##object%v", objectIdx)
 				if imgui.TreeNode(toCstring(object.name)) {
+					defer imgui.TreePop()
+
 					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &object.position, 0.1)
 
 					x, y, z := quatToEuler(object.rotation)
@@ -430,10 +427,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							animationName = "None"
 						}
 
-						if imgui.BeginCombo(
-							fmt.ctprintf("Animation Clip%v", suffix),
-							toCstring(animationName),
-						) {
+						if imgui.BeginCombo(fmt.ctprintf("Animation Clip%v", suffix), toCstring(animationName)) {
 							if animationData.idx >= 0 {
 								if imgui.Selectable("None") {
 									animationData.idx = -1
@@ -467,10 +461,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						animationData.timer = f64(timer)
 					}
 
-					if imgui.BeginCombo(
-						fmt.ctprintf("Animation Behavior%v", suffix),
-						fmt.ctprintf("%v", animationData.end.behavior),
-					) {
+					if imgui.BeginCombo(fmt.ctprintf("Animation Behavior%v", suffix), fmt.ctprintf("%v", animationData.end.behavior)) {
 						for behavior in AnimationBehavior {
 							if behavior == animationData.end.behavior {
 								continue
@@ -483,10 +474,8 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 						imgui.EndCombo()
 					}
 
-					if imgui.BeginCombo(
-						fmt.ctprintf("Model%v", suffix),
-						toCstring(scene.models[object.modelIdx].name),
-					) {
+					if imgui.BeginCombo(fmt.ctprintf("Model%v", suffix), toCstring(scene.models[object.modelIdx].name)) {
+						defer imgui.EndCombo()
 						for modelIdx in 0 ..< len(scene.models) {
 							if u32(modelIdx) == object.modelIdx {
 								continue
@@ -514,18 +503,14 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								markCommandsDirty(graphicsData, DIRTY_GEOMETRY)
 							}
 						}
-						imgui.EndCombo()
 					}
 
 					for mesh, meshIdx in scene.models[object.modelIdx].meshes {
 						meshSuffix := fmt.ctprintf("%v##mesh%v", suffix, meshIdx)
 						if imgui.TreeNode(toCstring(mesh.name)) {
-							if imgui.BeginCombo(
-								fmt.ctprintf("Albedo%v", meshSuffix),
-								toCstring(
+							if imgui.BeginCombo(fmt.ctprintf("Albedo%v", meshSuffix), toCstring(
 									scene.textures[object.textureIdxs[meshIdx][.Albedo]].name,
-								),
-							) {
+								)) {
 								for &texture, textureIdx in scene.textures {
 									if object.textureIdxs[meshIdx][.Albedo] ==
 									   u32(textureIdx) {
@@ -542,12 +527,9 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 								imgui.EndCombo()
 							}
 
-							if imgui.BeginCombo(
-								fmt.ctprintf("Normal Map%v", meshSuffix),
-								toCstring(
+							if imgui.BeginCombo(fmt.ctprintf("Normal Map%v", meshSuffix), toCstring(
 									scene.textures[object.textureIdxs[meshIdx][.NormalMap]].name,
-								),
-							) {
+								)) {
 								for &texture, textureIdx in scene.textures {
 									if object.textureIdxs[meshIdx][.NormalMap] ==
 									   u32(textureIdx) {
@@ -565,59 +547,22 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 							imgui.TreePop()
 						}
 					}
-					imgui.TreePop()
 				}
 			}
 		}
 
 		if imgui.CollapsingHeader("Cameras##header") {
-			for &camera, cameraIdx in scene.cameras {
-				suffix := fmt.tprintf("##camera%v", cameraIdx)
-				if imgui.TreeNode(toCstring(camera.name)) {
-					if imgui.BeginCombo(
-						fmt.ctprintf("Mode%s", suffix),
-						toCstring(fmt.tprintf("%v", camera.mode)),
-					) {
-						for mode in CameraMode {
-							if mode == camera.mode {
-								continue
-							}
-
-							if imgui.Selectable(toCstring(fmt.tprintf("%v", mode))) {
-								camera.mode = mode
-							}
-						}
-						imgui.EndCombo()
-					}
-
-					imgui.DragFloat3(fmt.ctprintf("Eye%s", suffix), &camera.eye, 0.1)
-					imgui.DragFloat3(fmt.ctprintf("Center%s", suffix), &camera.center, 0.1)
-					imgui.DragFloat3(fmt.ctprintf("Up%s", suffix), &camera.up, 0.1)
-
-					imgui.DragFloat(fmt.ctprintf("FOV%s", suffix), &camera.fov, 0.1)
-					imgui.DragFloat(fmt.ctprintf("Near Plane%s", suffix), &camera.near, 0.1)
-					imgui.DragFloat(fmt.ctprintf("Far Plane%s", suffix), &camera.far, 0.1)
-
-					imgui.TreePop()
+			for &camera in scene.cameras {
+				if ImRefl.draw_value(camera.name, camera) {
+					sceneEdited(graphicsData)
 				}
 			}
 		}
 
 		if imgui.CollapsingHeader("Lights##header") {
-			for &light, lightIdx in scene.lights {
-				suffix := fmt.tprintf("##light%v", lightIdx)
-				if imgui.TreeNode(toCstring(light.name)) {
-					imgui.DragFloat3(fmt.ctprintf("Position%v", suffix), &light.position, 0.1)
-					imgui.DragFloat3(fmt.ctprintf("Colour%v", suffix), &light.colour, 0.01, 0, 1)
-					imgui.DragFloat(
-						fmt.ctprintf("Lumens%v", suffix),
-						&light.lumens,
-						10.0,
-						0,
-						100000,
-					)
-
-					imgui.TreePop()
+			for &light in scene.lights {
+				if ImRefl.draw_value(light.name, light) {
+					sceneEdited(graphicsData)
 				}
 			}
 		}
@@ -672,19 +617,11 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		createComponentInfo := &uiData.createComponentInfo
 		imgui.Text("Name:")
 		imgui.SameLine()
-		imgui.InputText(
-			"##scenename",
-			cstring(&createComponentInfo.name[0]),
-			len(createComponentInfo.name),
-		)
+		imgui.InputText("##scenename", cstring(&createComponentInfo.name[0]), len(createComponentInfo.name))
 
 		imgui.Text("Save Path:")
 		imgui.SameLine()
-		imgui.InputText(
-			"##savepath",
-			cstring(&createComponentInfo.savePath[0]),
-			len(createComponentInfo.savePath),
-		)
+		imgui.InputText("##savepath", cstring(&createComponentInfo.savePath[0]), len(createComponentInfo.savePath))
 		imgui.SameLine()
 		if imgui.Button("Browse##save") {
 			absPath, _ := filepath.abs(SCENE_PATH(), context.temp_allocator)
@@ -989,4 +926,3 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 	imgui.End()
 }
-

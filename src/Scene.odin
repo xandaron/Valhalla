@@ -18,12 +18,12 @@ Scene :: struct {
 	cameras:      [dynamic]Camera,
 	activeCamera: u32,
 	vertexCount:  u32,
-	vertices:     [dynamic]Vertex,
-	indices:      [dynamic]u32,
+	vertices:     [dynamic]Vertex `imrefl:"ignore"`,
+	indices:      [dynamic]u32 `imrefl:"ignore"`,
 	boneCount:    int,
 
 	// Graphics Data
-	buffers:      SceneBuffers,
+	buffers:      SceneBuffers `imrefl:"ignore"`,
 }
 
 deleteScene :: proc(scene: ^Scene) {
@@ -204,4 +204,3 @@ addObject :: proc(scene: ^Scene, modelIdx: u32) {
 		},
 	)
 }
-
