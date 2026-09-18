@@ -8,11 +8,6 @@ enum ToneMapper : uint32_t {
 	NarkowiczACES = 1,
 }
 
-enum TransferFunction : uint32_t {
-	Gamma = 0,
-	PQ = 1,
-}
-
 struct PushConstants {
 	HeapIndices resources;
 	float contrast;

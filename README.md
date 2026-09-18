@@ -85,6 +85,10 @@ checkable work in [Tasks](#tasks).
 - [x] Multiview shadow mapping: one draw per light instead of six
 - [x] Device feature audit — seven features and one extension removed
 - [x] Host image copy for textures — no staging buffer, no barriers, no queue submission
+- [ ] Move `addImages` onto the staging ring. imgui textures now upload through it and scene
+      textures still use host image copy, so the engine has two upload paths where one would do
+- [ ] Rename `SamplerSlot.Nearest`. `createSamplers` writes linear filtering into it, so the name
+      says the opposite of what the sampler does
 - [x] Memory priority and pageable device-local memory
 - [x] Present fences (`VK_EXT_swapchain_maintenance1`) — present-wait semaphores are now per
       frame in flight rather than per swapchain image
@@ -230,8 +234,20 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
       per-frame host-visible buffer in the resource heap's `ImguiVertex` slot; only the index
       buffer is still bound as fixed function, which needs no descriptor. Textures take a slot
       each in the heap's texture region, and a texture's `TexID` *is* its heap index, which is
-      what the per-draw push constant carries. Uploads go through `vkCopyMemoryToImage` rather
-      than a staging buffer and a queue wait
+      what the per-draw push constant carries
+- [x] **Texture uploads on the staging ring.** The first version used `vkCopyMemoryToImage`
+      behind a `vkDeviceWaitIdle` on every create or update, because host copies have no GPU
+      timeline to order against. Uploads are now recorded into the staging command buffer, so
+      several textures in a frame share one submit, and `drawFrame` makes the graphics submit
+      wait on the staging timeline whenever it advanced that frame. Alpha8 atlases are expanded
+      to RGBA32 while writing the reservation; any other format is reported once and marked
+      destroyed, and draw commands whose texture is invalid are skipped, because heap index 0 is
+      the Vertex buffer and a shader cannot tell the difference
+- [x] **One geometry buffer per frame.** Vertices sit at offset 0, where the `ImguiVertex`
+      descriptor points, and indices follow them. Capacity doubles from a floor of 4096, so
+      steady state never reallocates, and the descriptor is rewritten only when it does
+- [x] **Push constant layout pinned.** `Imgui_PushConstants` has `#assert`s on every offset, and
+      each draw command pushes only the 4-byte `texture` field instead of the whole block
 - [x] **Transfer-function aware output.** `Imgui.slang` takes the target's transfer function and
       paper white as push constants. Under Gamma it writes the colour unchanged, so SDR is
       byte-identical to what the vendored backend produced; under PQ it recovers the light the
@@ -249,17 +265,33 @@ fine in isolation, but they each fight a decision made elsewhere in the engine.
       goes, not a second one
 - [x] **Route input by capture.** Owning the callbacks made it possible to ask imgui whether it
       wants an event before the engine acts on it, which `uiData.lockInput` was approximating by
-      hand. `imguiWantsMouse`/`imguiWantsKeyboard` gate the engine's handling, except for key
-      releases, which are always dispatched: the press may have arrived before the editor took
-      focus, and swallowing its release would leave `cameraMove` stuck
+      hand. The GLFW callbacks are thin shims that build an `InputEvent` and call `handleInput`
+      in `IO.odin`, which feeds imgui every event and then makes the one routing decision by
+      device: mouse events go to the engine unless `imguiWantsMouse`, keyboard events unless
+      `imguiWantsKeyboard`. The per-callback guards had drifted apart — cursor motion ignored
+      capture entirely, so mouse delta built up while using the editor and snapped the camera on
+      entering fly mode. The public `setGLFW*Callback` setters are gone, since replacing a
+      callback would bypass the handler
+- [x] **Poll camera movement.** `cameraMove` was an accumulator fed by key presses and releases,
+      which no filtered event stream can keep balanced: hold `W`, click into a text field,
+      release, and the release is routed to imgui and the camera drifts forever. `tickFrame` now
+      reads the movement keys with `glfw.GetKey` each frame, so movement follows what is
+      physically held. Only discrete actions (`P`, `H`, `M`, `R`) remain events
+- [ ] **No keyboard path to a clean exit.** Esc-to-close was removed on purpose, so the only
+      clean shutdown is closing the window. Killing the process skips `cleanupGraphics`, which
+      is where the pipeline cache is saved and leaks are reported
+- [ ] **Overlay blending differs between SDR and HDR.** Blending happens in the target's encoded
+      space, and that is gamma in SDR but PQ in HDR, so translucent editor panels composite
+      differently depending on the output. Consistent results need blending in linear light, which
+      is the separate UI buffer mentioned above
 - [ ] Retire `uiData.lockInput`. It exists because typing in a modal popup used to drive the
       camera, which `WantCaptureKeyboard` now covers. The two overlap rather than conflict, so
       this is cleanup, not a fix
 - [x] **Context lifetime.** Now visible rather than inferred: `initImgui` creates the context,
-      the platform half holds cursors and a clock, and the renderer half holds two geometry
-      buffers and the textures. The only thing in any of it that a swapchain resize could touch
-      is the Imgui pipeline's colour format, and that is ProcessedImage's format, which does not
-      change — the swapchain's does. Nothing to rebuild on resize
+      the platform half holds cursors and a clock, and the renderer half holds one geometry
+      buffer per frame in flight and the textures. The only thing in any of it that a swapchain
+      resize could touch is the Imgui pipeline's colour format, and that is ProcessedImage's
+      format, which does not change — the swapchain's does. Nothing to rebuild on resize
 - [x] Decide what stays vendored. imgui itself stays; both backends are gone. `imgui/glfw`,
       `imgui/vulkan` and `imgui/opengl3` are deleted — the last backed a renderer this engine
       does not have

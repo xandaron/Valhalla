@@ -27,6 +27,11 @@ enum TextureIndex {
 	COUNT,
 };
 
+enum TransferFunction : uint32_t {
+	Gamma = 0,
+	PQ = 1,
+}
+
 struct ImDrawVert {
 	float positionX;
 	float positionY;

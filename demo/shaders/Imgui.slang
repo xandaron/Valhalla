@@ -3,11 +3,6 @@ import "Colour.slang";
 import "Textures.slang";
 #include "Resources.slang"
 
-enum TransferFunction : uint32_t {
-	Gamma = 0,
-	PQ = 1,
-}
-
 struct PushConstants {
 	HeapIndices resources;
 	float2 scale;

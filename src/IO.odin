@@ -96,69 +96,159 @@ castRay :: proc(rayOrigin, rayDirection: Vec3, scene: ^Scene) -> (object: ^Objec
 	return
 }
 
+KeyEvent :: struct {
+	key, scancode, action, mods: i32,
+}
+
+CharEvent :: struct {
+	codepoint: rune,
+}
+
+MouseButtonEvent :: struct {
+	button, action, mods: i32,
+}
+
+CursorPosEvent :: struct {
+	x, y: f64,
+}
+
+ScrollEvent :: struct {
+	x, y: f64,
+}
+
+CursorEnterEvent :: struct {
+	entered: bool,
+}
+
+FocusEvent :: struct {
+	focused: bool,
+}
+
+InputEvent :: union {
+	KeyEvent,
+	CharEvent,
+	MouseButtonEvent,
+	CursorPosEvent,
+	ScrollEvent,
+	CursorEnterEvent,
+	FocusEvent,
+}
+
+InputDevice :: enum {
+	None,
+	Mouse,
+	Keyboard,
+}
+
+@(private = "file")
+inputDevice :: proc(event: InputEvent) -> InputDevice {
+	switch _ in event {
+	case KeyEvent, CharEvent:
+		return .Keyboard
+	case MouseButtonEvent, CursorPosEvent, ScrollEvent:
+		return .Mouse
+	case CursorEnterEvent, FocusEvent:
+	}
+	return .None
+}
+
+handleInput :: proc(event: InputEvent) {
+	imguiInputEvent(&globals.graphicsData, event)
+
+	consumed: bool
+	switch inputDevice(event) {
+	case .None:
+		return
+	case .Mouse:
+		consumed = globals.uiData.lockInput || imguiWantsMouse(&globals.graphicsData)
+	case .Keyboard:
+		consumed = globals.uiData.lockInput || imguiWantsKeyboard(&globals.graphicsData)
+	}
+
+	if e, ok := event.(CursorPosEvent); ok {
+		newPos: Vec2 = {f32(e.x), f32(e.y)}
+		if mouseMode && !consumed {
+			mouseDelta.xy += newPos - mousePos
+		}
+		mousePos = newPos
+		return
+	}
+
+	if consumed {
+		return
+	}
+
+	window := globals.graphicsData.window
+
+	#partial switch e in event {
+	case MouseButtonEvent:
+		if e.button == glfw.MOUSE_BUTTON_MIDDLE && e.action == glfw.PRESS {
+			mouseMode = !mouseMode
+			glfw.SetInputMode(window, glfw.CURSOR, mouseMode ? glfw.CURSOR_DISABLED : glfw.CURSOR_NORMAL)
+			x, y := glfw.GetCursorPos(window)
+			mousePos = {f32(x), f32(y)}
+			mouseDelta = {0, 0, 0}
+		}
+	case ScrollEvent:
+		mouseDelta.z = f32(e.y)
+	case KeyEvent:
+		if e.action != glfw.PRESS {
+			return
+		}
+		switch e.key {
+		case glfw.KEY_P:
+			globals.paused = !globals.paused
+		case glfw.KEY_H:
+			globals.uiData.showDemo = !globals.uiData.showDemo
+		case glfw.KEY_M:
+			globals.uiData.showMetrics = !globals.uiData.showMetrics
+		case glfw.KEY_R:
+			shaders: [2][]byte
+			shaders[0], _ = compileShader("./shaders/Scene.slang", "vert", .VERTEX)
+			shaders[1], _ = compileShader("./shaders/Scene.slang", "norm", .FRAGMENT)
+			updatePipelineShaders(&globals.graphicsData, .Scene, shaders[:])
+			delete(shaders[0])
+			delete(shaders[1])
+		}
+	}
+}
+
+keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, action, mods: i32) {
+	context = globals.runtimeContext
+	handleInput(KeyEvent{key, scancode, action, mods})
+}
+
+charCallback: GLFWCharCallback : proc "c" (window: WindowHandle, codepoint: rune) {
+	context = globals.runtimeContext
+	handleInput(CharEvent{codepoint})
+}
+
 mouseButtonCallback: GLFWMouseButtonCallback : proc "c" (
 	window: WindowHandle,
 	button, action, mods: i32,
 ) {
 	context = globals.runtimeContext
-
-	imguiMouseButtonEvent(&globals.graphicsData, button, action)
-
-	if globals.uiData.lockInput || imguiWantsMouse(&globals.graphicsData) {
-		return
-	}
-
-	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
-		if mouseMode {
-			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
-			mouseMode = false
-		} else {
-			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-			mouseMode = true
-		}
-		return
-	}
+	handleInput(MouseButtonEvent{button, action, mods})
 }
 
 cursorPosCallback: GLFWCursorPosCallback : proc "c" (window: WindowHandle, xpos, ypos: f64) {
 	context = globals.runtimeContext
-
-	imguiCursorPosEvent(&globals.graphicsData, xpos, ypos)
-
-	if globals.uiData.lockInput {
-		return
-	}
-
-	newPos: Vec2 = {f32(xpos), f32(ypos)}
-	mouseDelta.xy += newPos - mousePos
-	mousePos = newPos
+	handleInput(CursorPosEvent{xpos, ypos})
 }
 
 scrollCallback: GLFWScrollCallback : proc "c" (window: WindowHandle, xoffset, yoffset: f64) {
 	context = globals.runtimeContext
-
-	imguiScrollEvent(&globals.graphicsData, xoffset, yoffset)
-
-	if globals.uiData.lockInput || imguiWantsMouse(&globals.graphicsData) {
-		return
-	}
-
-	mouseDelta.z = f32(yoffset)
-}
-
-charCallback: GLFWCharCallback : proc "c" (window: WindowHandle, codepoint: rune) {
-	context = globals.runtimeContext
-	imguiCharEvent(&globals.graphicsData, codepoint)
-}
-
-windowFocusCallback: GLFWWindowFocusCallback : proc "c" (window: WindowHandle, focused: i32) {
-	context = globals.runtimeContext
-	imguiFocusEvent(&globals.graphicsData, focused != 0)
+	handleInput(ScrollEvent{xoffset, yoffset})
 }
 
 cursorEnterCallback: GLFWCursorEnterCallback : proc "c" (window: WindowHandle, entered: i32) {
 	context = globals.runtimeContext
-	imguiCursorEnterEvent(&globals.graphicsData, entered != 0)
+	handleInput(CursorEnterEvent{entered != 0})
+}
+
+windowFocusCallback: GLFWWindowFocusCallback : proc "c" (window: WindowHandle, focused: i32) {
+	context = globals.runtimeContext
+	handleInput(FocusEvent{focused != 0})
 }
 
 windowRefreshCallback: GLFWWindowRefreshCallback : proc "c" (window: WindowHandle) {
@@ -175,73 +265,4 @@ framebufferSizeCallback: GLFWFramebufferSizeCallback : proc "c" (
 		return
 	}
 	tickFrame()
-}
-
-keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, action, mods: i32) {
-	context = globals.runtimeContext
-
-	imguiKeyEvent(&globals.graphicsData, key, scancode, action)
-
-	if action != glfw.RELEASE &&
-	   (globals.uiData.lockInput || imguiWantsKeyboard(&globals.graphicsData)) {
-		return
-	}
-
-	switch key {
-	case glfw.KEY_P:
-		if action == glfw.PRESS do globals.paused = !globals.paused
-	case glfw.KEY_D:
-		if action == glfw.PRESS {
-			cameraMove.x += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.x -= 1
-		}
-	case glfw.KEY_A:
-		if action == glfw.PRESS {
-			cameraMove.x -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.x += 1
-		}
-	case glfw.KEY_SPACE:
-		if action == glfw.PRESS {
-			cameraMove.y += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.y -= 1
-		}
-	case glfw.KEY_LEFT_SHIFT:
-		if action == glfw.PRESS {
-			cameraMove.y -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.y += 1
-		}
-	case glfw.KEY_W:
-		if action == glfw.PRESS {
-			cameraMove.z += 1
-		} else if action == glfw.RELEASE {
-			cameraMove.z -= 1
-		}
-	case glfw.KEY_S:
-		if action == glfw.PRESS {
-			cameraMove.z -= 1
-		} else if action == glfw.RELEASE {
-			cameraMove.z += 1
-		}
-	case glfw.KEY_H:
-		if action == glfw.PRESS {
-			globals.uiData.showDemo = !globals.uiData.showDemo
-		}
-	case glfw.KEY_M:
-		if action == glfw.PRESS {
-			globals.uiData.showMetrics = !globals.uiData.showMetrics
-		}
-	case glfw.KEY_R:
-		if action == glfw.PRESS {
-			shaders: [2][]byte
-			shaders[0], _ = compileShader("./shaders/Scene.slang", "vert", .VERTEX)
-			shaders[1], _ = compileShader("./shaders/Scene.slang", "norm", .FRAGMENT)
-			updatePipelineShaders(&globals.graphicsData, .Scene, shaders[:])
-			delete(shaders[0])
-			delete(shaders[1])
-		}
-	}
 }

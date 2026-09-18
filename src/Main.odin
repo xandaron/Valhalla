@@ -7,6 +7,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
+import "vendor:glfw"
 
 APP_VERSION: u32 : (0 << 22) | (0 << 12) | (1)
 APP_NAME :: "Valhalla Demo"
@@ -26,7 +27,6 @@ mouseSensitivity: f32 = 1
 
 cameraRotationSpeed: f32 = 1
 cameraMoveSpeed: f32 = 1
-cameraMove: Vec3 = {0, 0, 0}
 
 globals: struct {
 	runtimeContext: runtime.Context,
@@ -189,6 +189,18 @@ tickFrame :: proc() -> bool {
 	forward := normalize(camera.center - camera.eye)
 	up := camera.up
 	right := cross(up, forward)
+
+	cameraMove: Vec3
+	if !globals.uiData.lockInput && !imguiWantsKeyboard(&globals.graphicsData) {
+		held :: proc(key: i32) -> f32 {
+			return glfw.GetKey(globals.graphicsData.window, key) == glfw.PRESS ? 1 : 0
+		}
+		cameraMove = {
+			held(glfw.KEY_D) - held(glfw.KEY_A),
+			held(glfw.KEY_SPACE) - held(glfw.KEY_LEFT_SHIFT),
+			held(glfw.KEY_W) - held(glfw.KEY_S),
+		}
+	}
 
 	movement :=
 		delta *

@@ -306,6 +306,15 @@ Imgui_PushConstants :: struct {
 	paperWhiteNits:   f32,
 }
 
+#assert(size_of(HeapIndices) == 60)
+#assert(offset_of(Imgui_PushConstants, resources) == 0)
+#assert(offset_of(Imgui_PushConstants, scale) == 64)
+#assert(offset_of(Imgui_PushConstants, translate) == 72)
+#assert(offset_of(Imgui_PushConstants, texture) == 80)
+#assert(offset_of(Imgui_PushConstants, transferFunction) == 84)
+#assert(offset_of(Imgui_PushConstants, paperWhiteNits) == 88)
+#assert(size_of(Imgui_PushConstants) == 96)
+
 TransferFunction :: enum u32 {
 	Gamma = 0,
 	PQ    = 1,
@@ -376,14 +385,6 @@ CmdBufferIndex :: enum {
 TextureIndex :: enum {
 	Albedo,
 	NormalMap,
-}
-
-GLFWCallbacks :: struct {
-	errorCallback:       GLFWErrorCallback,
-	keyCallback:         GLFWKeyCallback,
-	mouseButtonCallback: GLFWMouseButtonCallback,
-	cursorPosCallback:   GLFWCursorPosCallback,
-	scrollCallback:      GLFWScrollCallback,
 }
 
 SceneBuffers :: struct {
@@ -514,7 +515,6 @@ Image :: struct {
 	linearView:     vk.ImageView,
 	linearViewInfo: vk.ImageViewCreateInfo,
 	format:         vk.Format,
-	sampler:        u32,
 	heapSlot:       u32,
 	linearHeapSlot: u32,
 }
@@ -762,25 +762,6 @@ windowSize :: proc(using graphicsData: ^GraphicsData) -> (width: i32, height: i3
 
 setGLFWErrorCallback :: proc(errorCallback: GLFWErrorCallback) {
 	glfw.SetErrorCallback(errorCallback)
-}
-
-setGLFWKeyCallback :: proc(window: WindowHandle, keyCallback: GLFWKeyCallback) {
-	glfw.SetKeyCallback(window, keyCallback)
-}
-
-setGLFWMouseButtonCallback :: proc(
-	window: WindowHandle,
-	mouseButtonCallback: GLFWMouseButtonCallback,
-) {
-	glfw.SetMouseButtonCallback(window, mouseButtonCallback)
-}
-
-setGLFWCursorPosCallback :: proc(window: WindowHandle, cursorPosCallback: GLFWCursorPosCallback) {
-	glfw.SetCursorPosCallback(window, cursorPosCallback)
-}
-
-setGLFWScrollCallback :: proc(window: WindowHandle, scrollCallback: GLFWScrollCallback) {
-	glfw.SetScrollCallback(window, scrollCallback)
 }
 
 @(private)
@@ -2848,6 +2829,8 @@ copyBufferToImage :: proc(
 	bufferOffset: vk.DeviceSize,
 	image: vk.Image,
 	width, height: u32,
+	x: i32 = 0,
+	y: i32 = 0,
 ) {
 	region: vk.BufferImageCopy2 = {
 		sType = .BUFFER_IMAGE_COPY_2,
@@ -2861,7 +2844,7 @@ copyBufferToImage :: proc(
 			baseArrayLayer = 0,
 			layerCount = 1,
 		},
-		imageOffset = vk.Offset3D{x = 0, y = 0, z = 0},
+		imageOffset = vk.Offset3D{x = x, y = y, z = 0},
 		imageExtent = vk.Extent3D{width = width, height = height, depth = 1},
 	}
 	vk.CmdCopyBufferToImage2(
@@ -3089,8 +3072,7 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		textureSize := vk.DeviceSize(width * height * 4)
 
 		image: Image = {
-			format  = TEXTURE_COLOUR_FORMAT,
-			sampler = u32(SamplerSlot.Anisotropic),
+			format = TEXTURE_COLOUR_FORMAT,
 		}
 		if err := createImage(
 			graphicsData,
@@ -4327,8 +4309,6 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		log(.Fatal, "Failed to create depth image view!")
 	}
 
-	pipelines[.Scene].images[1].sampler = 0
-
 	cmdBuffer: vk.CommandBuffer
 	cmdBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
 	if err != nil {
@@ -4929,6 +4909,7 @@ createPostProcessPipeline :: proc(
 	}
 }
 
+@(private = "file")
 createImguiPipeline :: proc(using graphicsData: ^GraphicsData, shaders: [][]byte) {
 	createFlags: vk.PipelineCreateFlags2CreateInfo = {
 		sType = .PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
@@ -5709,6 +5690,7 @@ updateCommandBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			case .PostProcess:
 					recordPostProcessCommands(graphicsData, bufferIndex)
 			case .Imgui:
+				log(.Error, "Imgui is re-recorded every frame by drawFrame; marking it dirty does nothing.")
 			}
 		}
 	}
@@ -6645,8 +6627,10 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	drawImgui(graphicsData)
 	imgui.EndFrame()
 
+	stagedBefore := staging.submitted
 	vk.ResetCommandBuffer(commandBuffers[.Imgui][currentFrame], {})
 	recordImguiCommands(graphicsData, currentFrame, imageIndex)
+	stagingFlush(graphicsData)
 
 	submitInfo: vk.SubmitInfo2 = {
 		sType                    = .SUBMIT_INFO_2,
@@ -6728,13 +6712,22 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 			stageMask = {.BLIT},
 			deviceIndex = 0,
 		},
+		{
+			sType = .SEMAPHORE_SUBMIT_INFO,
+			pNext = nil,
+			semaphore = staging.timeline,
+			value = staging.submitted,
+			stageMask = {.FRAGMENT_SHADER},
+			deviceIndex = 0,
+		},
 	}
+	graphicsWaitCount: u32 = staging.submitted != stagedBefore ? 3 : 2
 
 	submitInfo = {
 		sType                    = .SUBMIT_INFO_2,
 		pNext                    = nil,
 		flags                    = {},
-		waitSemaphoreInfoCount   = len(graphicsWaits),
+		waitSemaphoreInfoCount   = graphicsWaitCount,
 		pWaitSemaphoreInfos      = &graphicsWaits[0],
 		commandBufferInfoCount   = len(graphicsCommandBuffers),
 		pCommandBufferInfos      = &graphicsCommandBuffers[0],
@@ -6962,8 +6955,32 @@ imguiWantsKeyboard :: proc(using graphicsData: ^GraphicsData) -> bool {
 }
 
 @(private)
+imguiInputEvent :: proc(using graphicsData: ^GraphicsData, event: InputEvent) {
+	if imguiContext == nil {
+		return
+	}
+
+	switch e in event {
+	case KeyEvent:
+		imguiKeyEvent(graphicsData, e.key, e.scancode, e.action)
+	case CharEvent:
+		imguiCharEvent(graphicsData, e.codepoint)
+	case MouseButtonEvent:
+		imguiMouseButtonEvent(graphicsData, e.button, e.action)
+	case CursorPosEvent:
+		imguiCursorPosEvent(graphicsData, e.x, e.y)
+	case ScrollEvent:
+		imguiScrollEvent(graphicsData, e.x, e.y)
+	case CursorEnterEvent:
+		imguiCursorEnterEvent(graphicsData, e.entered)
+	case FocusEvent:
+		imguiFocusEvent(graphicsData, e.focused)
+	}
+}
+
+@(private = "file")
 imguiKeyEvent :: proc(using graphicsData: ^GraphicsData, key, scancode, action: i32) {
-	if imguiContext == nil || (action != glfw.PRESS && action != glfw.RELEASE) {
+	if action != glfw.PRESS && action != glfw.RELEASE {
 		return
 	}
 
@@ -6975,17 +6992,14 @@ imguiKeyEvent :: proc(using graphicsData: ^GraphicsData, key, scancode, action: 
 	)
 }
 
-@(private)
+@(private = "file")
 imguiCharEvent :: proc(using graphicsData: ^GraphicsData, codepoint: rune) {
-	if imguiContext == nil {
-		return
-	}
 	imgui.AddInputCharacter(imgui.GetIO(), u32(codepoint))
 }
 
-@(private)
+@(private = "file")
 imguiMouseButtonEvent :: proc(using graphicsData: ^GraphicsData, button, action: i32) {
-	if imguiContext == nil || button < 0 || button >= i32(imgui.GuiMouseButton.COUNT) {
+	if button < 0 || button >= i32(imgui.GuiMouseButton.COUNT) {
 		return
 	}
 
@@ -6993,9 +7007,9 @@ imguiMouseButtonEvent :: proc(using graphicsData: ^GraphicsData, button, action:
 	imgui.AddMouseButtonEvent(imgui.GetIO(), button, action == glfw.PRESS)
 }
 
-@(private)
+@(private = "file")
 imguiCursorPosEvent :: proc(using graphicsData: ^GraphicsData, xpos, ypos: f64) {
-	if imguiContext == nil || glfw.GetInputMode(window, glfw.CURSOR) == glfw.CURSOR_DISABLED {
+	if glfw.GetInputMode(window, glfw.CURSOR) == glfw.CURSOR_DISABLED {
 		return
 	}
 
@@ -7003,12 +7017,8 @@ imguiCursorPosEvent :: proc(using graphicsData: ^GraphicsData, xpos, ypos: f64) 
 	imgui.AddMousePosEvent(imgui.GetIO(), f32(xpos), f32(ypos))
 }
 
-@(private)
+@(private = "file")
 imguiCursorEnterEvent :: proc(using graphicsData: ^GraphicsData, entered: bool) {
-	if imguiContext == nil {
-		return
-	}
-
 	io := imgui.GetIO()
 	if entered {
 		imguiPlatform.mouseInWindow = true
@@ -7024,19 +7034,13 @@ imguiCursorEnterEvent :: proc(using graphicsData: ^GraphicsData, entered: bool) 
 	}
 }
 
-@(private)
+@(private = "file")
 imguiScrollEvent :: proc(using graphicsData: ^GraphicsData, xoffset, yoffset: f64) {
-	if imguiContext == nil {
-		return
-	}
 	imgui.AddMouseWheelEvent(imgui.GetIO(), f32(xoffset), f32(yoffset))
 }
 
-@(private)
+@(private = "file")
 imguiFocusEvent :: proc(using graphicsData: ^GraphicsData, focused: bool) {
-	if imguiContext == nil {
-		return
-	}
 	imgui.AddFocusEvent(imgui.GetIO(), focused)
 }
 
@@ -7245,17 +7249,17 @@ imguiKeyFromGLFW :: proc(key: i32) -> imgui.GuiKey {
 
 @(private = "file")
 ImguiRenderer :: struct {
-	vertexBuffers: [MAX_FRAMES_IN_FLIGHT]Buffer,
-	indexBuffers:  [MAX_FRAMES_IN_FLIGHT]Buffer,
-	vertexCounts:  [MAX_FRAMES_IN_FLIGHT]int,
-	indexCounts:   [MAX_FRAMES_IN_FLIGHT]int,
+	geometry:              [MAX_FRAMES_IN_FLIGHT]Buffer,
+	vertexCapacity:        [MAX_FRAMES_IN_FLIGHT]int,
+	indexCapacity:         [MAX_FRAMES_IN_FLIGHT]int,
+	reportedTextureFormat: bool,
 }
 
 #assert(size_of(imgui.DrawVert) == 20)
 #assert(size_of(imgui.DrawIdx) == 2)
 
 @(private = "file")
-IMGUI_GEOMETRY_GRANULARITY :: 4096
+IMGUI_GEOMETRY_MIN_CAPACITY :: 4096
 
 @(private = "file")
 initImguiRenderer :: proc(using graphicsData: ^GraphicsData) {
@@ -7272,8 +7276,7 @@ cleanupImguiRenderer :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		deleteBuffer(graphicsData, &imguiRenderer.vertexBuffers[frame])
-		deleteBuffer(graphicsData, &imguiRenderer.indexBuffers[frame])
+		deleteBuffer(graphicsData, &imguiRenderer.geometry[frame])
 	}
 	imguiRenderer = {}
 
@@ -7307,17 +7310,23 @@ imguiUpdateTexture :: proc(using graphicsData: ^GraphicsData, texture: ^imgui.Te
 		return
 	}
 
-	if texture.Format != .RGBA32 {
-		logf(.Error, "imgui asked for texture format %v, which this backend does not create.", texture.Format)
+	if texture.Format != .RGBA32 && texture.Format != .Alpha8 {
+		if !imguiRenderer.reportedTextureFormat {
+			imguiRenderer.reportedTextureFormat = true
+			logf(
+				.Error,
+				"imgui asked for texture format %v, which this backend does not create.",
+				texture.Format,
+			)
+		}
+		imgui.TextureData_SetStatus(texture, .Destroyed)
 		return
 	}
 
-	vk.DeviceWaitIdle(device)
-
-	if texture.Status == .WantCreate {
+	create := texture.Status == .WantCreate
+	if create {
 		image := new(Image)
 		image.format = .R8G8B8A8_UNORM
-		image.sampler = u32(SamplerSlot.Nearest)
 
 		if err := createImage(
 			graphicsData,
@@ -7329,7 +7338,7 @@ imguiUpdateTexture :: proc(using graphicsData: ^GraphicsData, texture: ^imgui.Te
 			1,
 			{._1},
 			.OPTIMAL,
-			{.HOST_TRANSFER, .SAMPLED},
+			{.TRANSFER_DST, .SAMPLED},
 			{.DEVICE_LOCAL},
 			.EXCLUSIVE,
 			0,
@@ -7360,24 +7369,6 @@ imguiUpdateTexture :: proc(using graphicsData: ^GraphicsData, texture: ^imgui.Te
 			writeTextureDescriptor(graphicsData, frame, slot, &image.viewInfo)
 		}
 
-		transition: vk.HostImageLayoutTransitionInfo = {
-			sType = .HOST_IMAGE_LAYOUT_TRANSITION_INFO,
-			pNext = nil,
-			image = image.vkImage,
-			oldLayout = .UNDEFINED,
-			newLayout = .SHADER_READ_ONLY_OPTIMAL,
-			subresourceRange = {
-				aspectMask = {.COLOR},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-		}
-		if res := vk.TransitionImageLayout(device, 1, &transition); res != .SUCCESS {
-			logf(.Fatal, "Failed to transition imgui texture for host copy! vkResult: %v", res)
-		}
-
 		vkNameObject(device, .IMAGE, u64(image.vkImage), "Imgui: Texture")
 
 		texture.BackendUserData = image
@@ -7387,40 +7378,77 @@ imguiUpdateTexture :: proc(using graphicsData: ^GraphicsData, texture: ^imgui.Te
 
 	image := (^Image)(texture.BackendUserData)
 
-	create := texture.Status == .WantCreate
 	x := create ? i32(0) : i32(texture.UpdateRect.x)
 	y := create ? i32(0) : i32(texture.UpdateRect.y)
-	width := create ? texture.Width : i32(texture.UpdateRect.w)
-	height := create ? texture.Height : i32(texture.UpdateRect.h)
+	width := create ? int(texture.Width) : int(texture.UpdateRect.w)
+	height := create ? int(texture.Height) : int(texture.UpdateRect.h)
+	rowBytes := width * 4
+	size := vk.DeviceSize(rowBytes * height)
 
-	region: vk.MemoryToImageCopy = {
-		sType = .MEMORY_TO_IMAGE_COPY,
-		pNext = nil,
-		pHostPointer = imgui.TextureData_GetPixelsAt(texture, x, y),
-		memoryRowLength = u32(texture.Width),
-		memoryImageHeight = 0,
-		imageSubresource = {
-			aspectMask = {.COLOR},
-			mipLevel = 0,
-			baseArrayLayer = 0,
-			layerCount = 1,
-		},
-		imageOffset = {x, y, 0},
-		imageExtent = {u32(width), u32(height), 1},
+	srcBuffer := staging.buffer
+	srcOffset, mapped, reserved := stagingReserve(graphicsData, size)
+	if !reserved {
+		buffer, oversized, err := stagingOversized(graphicsData, size)
+		if err != .None {
+			logf(.Error, "Failed to stage imgui texture upload! Error: %v", err)
+			return
+		}
+		srcBuffer = buffer
+		srcOffset = 0
+		mapped = oversized
 	}
-	copyInfo: vk.CopyMemoryToImageInfo = {
-		sType          = .COPY_MEMORY_TO_IMAGE_INFO,
-		pNext          = nil,
-		flags          = {},
-		dstImage       = image.vkImage,
-		dstImageLayout = .SHADER_READ_ONLY_OPTIMAL,
-		regionCount    = 1,
-		pRegions       = &region,
+
+	pixels := ([^]u8)(mapped)
+	for row in 0 ..< height {
+		src := ([^]u8)(imgui.TextureData_GetPixelsAt(texture, x, y + i32(row)))
+		dst := pixels[row * rowBytes:]
+		if texture.Format == .RGBA32 {
+			mem.copy(dst, src, rowBytes)
+		} else {
+			for px in 0 ..< width {
+				dst[px * 4 + 0] = 255
+				dst[px * 4 + 1] = 255
+				dst[px * 4 + 2] = 255
+				dst[px * 4 + 3] = src[px]
+			}
+		}
 	}
-	if res := vk.CopyMemoryToImage(device, &copyInfo); res != .SUCCESS {
-		logf(.Error, "Failed to upload imgui texture! vkResult: %v", res)
+
+	cmdBuffer, cmdErr := stagingCommands(graphicsData)
+	if cmdErr != .None {
+		logf(.Error, "Failed to record imgui texture upload! Error: %v", cmdErr)
 		return
 	}
+
+	transitionImageLayout(
+		graphicsData,
+		cmdBuffer,
+		image.vkImage,
+		create ? .UNDEFINED : .SHADER_READ_ONLY_OPTIMAL,
+		.TRANSFER_DST_OPTIMAL,
+		{.COLOR},
+		1,
+	)
+	copyBufferToImage(
+		graphicsData,
+		cmdBuffer,
+		srcBuffer,
+		srcOffset,
+		image.vkImage,
+		u32(width),
+		u32(height),
+		x,
+		y,
+	)
+	transitionImageLayout(
+		graphicsData,
+		cmdBuffer,
+		image.vkImage,
+		.TRANSFER_DST_OPTIMAL,
+		.SHADER_READ_ONLY_OPTIMAL,
+		{.COLOR},
+		1,
+	)
 
 	imgui.TextureData_SetStatus(texture, .OK)
 }
@@ -7432,6 +7460,7 @@ imguiDestroyTexture :: proc(using graphicsData: ^GraphicsData, texture: ^imgui.T
 		return
 	}
 
+	assert(image.linearView == 0)
 	releaseTextureSlot(graphicsData, image.heapSlot)
 	deleteImage(graphicsData, image)
 	free(image)
@@ -7447,50 +7476,44 @@ imguiUploadGeometry :: proc(
 	drawData: ^imgui.DrawData,
 	frame: u32,
 ) {
-	if int(drawData.TotalVtxCount) > imguiRenderer.vertexCounts[frame] {
-		count := imguiGeometryCapacity(int(drawData.TotalVtxCount))
-		size := count * size_of(imgui.DrawVert)
+	vertexCapacity := max(imguiRenderer.vertexCapacity[frame], IMGUI_GEOMETRY_MIN_CAPACITY)
+	for vertexCapacity < int(drawData.TotalVtxCount) {
+		vertexCapacity *= 2
+	}
+	indexCapacity := max(imguiRenderer.indexCapacity[frame], IMGUI_GEOMETRY_MIN_CAPACITY)
+	for indexCapacity < int(drawData.TotalIdxCount) {
+		indexCapacity *= 2
+	}
 
-		deleteBuffer(graphicsData, &imguiRenderer.vertexBuffers[frame])
+	if vertexCapacity != imguiRenderer.vertexCapacity[frame] ||
+	   indexCapacity != imguiRenderer.indexCapacity[frame] {
+		vertexBytes := vertexCapacity * size_of(imgui.DrawVert)
+
+		deleteBuffer(graphicsData, &imguiRenderer.geometry[frame])
 		if err := createBuffer(
 			graphicsData,
-			size,
-			{.STORAGE_BUFFER},
+			vertexBytes + indexCapacity * size_of(imgui.DrawIdx),
+			{.STORAGE_BUFFER, .INDEX_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
-			&imguiRenderer.vertexBuffers[frame],
+			&imguiRenderer.geometry[frame],
 		); err != nil {
-			logf(.Fatal, "Failed to create imgui vertex buffer! Error: %v", err)
+			logf(.Fatal, "Failed to create imgui geometry buffer! Error: %v", err)
 		}
-		imguiRenderer.vertexCounts[frame] = count
+		imguiRenderer.vertexCapacity[frame] = vertexCapacity
+		imguiRenderer.indexCapacity[frame] = indexCapacity
 
 		writeBufferDescriptor(
 			graphicsData,
 			frame,
 			.ImguiVertex,
-			imguiRenderer.vertexBuffers[frame].buffer,
-			vk.DeviceSize(size),
+			imguiRenderer.geometry[frame].buffer,
+			vk.DeviceSize(vertexBytes),
 			.STORAGE_BUFFER,
 		)
 	}
 
-	if int(drawData.TotalIdxCount) > imguiRenderer.indexCounts[frame] {
-		count := imguiGeometryCapacity(int(drawData.TotalIdxCount))
-
-		deleteBuffer(graphicsData, &imguiRenderer.indexBuffers[frame])
-		if err := createBuffer(
-			graphicsData,
-			count * size_of(imgui.DrawIdx),
-			{.INDEX_BUFFER},
-			{.HOST_VISIBLE, .HOST_COHERENT},
-			&imguiRenderer.indexBuffers[frame],
-		); err != nil {
-			logf(.Fatal, "Failed to create imgui index buffer! Error: %v", err)
-		}
-		imguiRenderer.indexCounts[frame] = count
-	}
-
-	vertices := imguiRenderer.vertexBuffers[frame].mapped
-	indices := imguiRenderer.indexBuffers[frame].mapped
+	vertices := imguiRenderer.geometry[frame].mapped
+	indices := rawptr(uintptr(vertices) + uintptr(imguiIndexRegionOffset(graphicsData, frame)))
 	for drawList in drawData.CmdLists.Data[:drawData.CmdLists.Size] {
 		vertexBytes := int(drawList.VtxBuffer.Size) * size_of(imgui.DrawVert)
 		indexBytes := int(drawList.IdxBuffer.Size) * size_of(imgui.DrawIdx)
@@ -7505,22 +7528,24 @@ imguiUploadGeometry :: proc(
 
 @(private = "file")
 @(require_results)
-imguiGeometryCapacity :: proc(count: int) -> int {
-	return(
-		((count + IMGUI_GEOMETRY_GRANULARITY - 1) / IMGUI_GEOMETRY_GRANULARITY) *
-		IMGUI_GEOMETRY_GRANULARITY \
-	)
+imguiIndexRegionOffset :: proc(using graphicsData: ^GraphicsData, frame: u32) -> vk.DeviceSize {
+	return vk.DeviceSize(imguiRenderer.vertexCapacity[frame] * size_of(imgui.DrawVert))
 }
 
 @(private = "file")
-imguiPushConstants :: proc(cmdBuffer: vk.CommandBuffer, pushConstants: ^Imgui_PushConstants) {
+imguiPushConstants :: proc(
+	cmdBuffer: vk.CommandBuffer,
+	pushConstants: ^Imgui_PushConstants,
+	offset: uintptr = 0,
+	size: uintptr = size_of(Imgui_PushConstants),
+) {
 	vk.CmdPushDataEXT(
 		cmdBuffer,
 		&vk.PushDataInfoEXT {
 			sType = .PUSH_DATA_INFO_EXT,
 			pNext = nil,
-			offset = 0,
-			data = {address = pushConstants, size = size_of(Imgui_PushConstants)},
+			offset = u32(offset),
+			data = {address = rawptr(uintptr(pushConstants) + offset), size = int(size)},
 		},
 	)
 }
@@ -7537,8 +7562,8 @@ imguiSetupRenderState :: proc(
 	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Imgui].handle)
 	vk.CmdBindIndexBuffer2(
 		cmdBuffer,
-		imguiRenderer.indexBuffers[frame].buffer,
-		0,
+		imguiRenderer.geometry[frame].buffer,
+		imguiIndexRegionOffset(graphicsData, frame),
 		vk.DeviceSize(vk.WHOLE_SIZE),
 		.UINT16,
 	)
@@ -7611,6 +7636,10 @@ imguiRenderDrawData :: proc(
 				continue
 			}
 
+			if imgui.DrawCmd_GetTexID(&command) == imgui.TextureID_Invalid {
+				continue
+			}
+
 			clipMin := [2]f32 {
 				max((command.ClipRect.x - clipOffset.x) * clipScale.x, 0),
 				max((command.ClipRect.y - clipOffset.y) * clipScale.y, 0),
@@ -7634,7 +7663,12 @@ imguiRenderDrawData :: proc(
 			)
 
 			pushConstants.texture = u32(imgui.DrawCmd_GetTexID(&command))
-			imguiPushConstants(cmdBuffer, &pushConstants)
+			imguiPushConstants(
+				cmdBuffer,
+				&pushConstants,
+				offset_of(Imgui_PushConstants, texture),
+				size_of(pushConstants.texture),
+			)
 
 			vk.CmdDrawIndexed(
 				cmdBuffer,
