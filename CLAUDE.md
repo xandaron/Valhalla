@@ -154,7 +154,16 @@ Shaders declare no bindings. Each pass's push constants start with a `resources:
 block of plain integer indices; `HeapIndices` exposes each resource as a `property` that builds a
 `DescriptorHandle<T>` from the matching index, so shaders read
 `pushConstants.resources.Lights[i]`. Properties carry no storage, so the block is exactly one
-uint per resource (currently 14, 56 bytes).
+uint per resource (currently 15, 60 bytes).
+
+std430 sizes that block at its used bytes and aligns whatever follows it by *that member's* own
+rule, so a `u32` after it sits at 60 but a `float2` sits at 64. Odin's `Vec2` is `[2]f32` and needs
+only 4, which is the one place the two sides disagree — hence `ShaderVec2`, an 8-aligned pair used
+for Imgui's `scale` and `translate`. Align the *type*, not the struct: `#align` on a push constant
+struct does not move interior fields, and `#min_field_align(8)` pushes the trailing `u32`s out of
+place too. A mismatch here is invisible at runtime — the pushed range still covers what the shader
+reads, so validation stays silent and the shader just reads the neighbouring field — so `#assert`s
+below the push constant structs pin every offset at compile time.
 
 Call sites use a bare `Resources.Vertices[i]`. That comes from `DECLARE_RESOURCES(pushConstants)`
 in `Resources.slang`, which each pass **`#include`s** — it must be `#include`, not `import`,

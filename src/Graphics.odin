@@ -7,13 +7,11 @@ import "core:mem"
 import "core:os"
 import "core:strings"
 import "vendor:glfw"
+import glfwBindings "vendor:glfw/bindings"
 import img "vendor:stb/image"
 import vk "vendor:vulkan"
 
 import "../imgui"
-import imguiGLFW "../imgui/glfw"
-import imguiVulkan "../imgui/vulkan"
-
 
 // ===[ Configuration ]========================================================
 
@@ -221,6 +219,12 @@ GLFWWindowRefreshCallback :: glfw.WindowRefreshProc
 
 GLFWFramebufferSizeCallback :: glfw.FramebufferSizeProc
 
+GLFWCharCallback :: glfw.CharProc
+
+GLFWWindowFocusCallback :: glfw.WindowFocusProc
+
+GLFWCursorEnterCallback :: glfw.CursorEnterProc
+
 @(private = "file")
 HeapIndices :: struct {
 	vertexBuffer:       u32,
@@ -231,12 +235,17 @@ HeapIndices :: struct {
 	positionBuffer:     u32,
 	lightBuffer:        u32,
 	textureIndexBuffer: u32,
+	imguiVertexBuffer:  u32,
 	shadowMap:          u32,
 	sceneDepth:         u32,
 	renderedImage:      u32,
 	processedImage:     u32,
 	linearSampler:      u32,
 	anisotropicSampler: u32,
+}
+
+ShaderVec2 :: struct #align (8) {
+	x, y: f32,
 }
 
 Transform_PushConstants :: struct {
@@ -285,6 +294,16 @@ PostProcess_PushConstants :: struct {
 	contentExtentY: u32,
 	transferFunction: TransferFunction,
 	paperWhiteNits: f32,
+}
+
+@(private = "file")
+Imgui_PushConstants :: struct {
+	resources:        HeapIndices,
+	scale:            ShaderVec2,
+	translate:        ShaderVec2,
+	texture:          u32,
+	transferFunction: TransferFunction,
+	paperWhiteNits:   f32,
 }
 
 TransferFunction :: enum u32 {
@@ -411,6 +430,8 @@ GraphicsData :: struct {
 	// GLFW + IMGUI
 	window:              WindowHandle,
 	imguiContext:        ^imgui.GuiContext,
+	imguiPlatform:       ImguiPlatform,
+	imguiRenderer:       ImguiRenderer,
 
 	// Vulkan Data
 	instance:            vk.Instance,
@@ -508,6 +529,7 @@ InitGraphicsInfo :: struct {
 	sceneShaders:      [2][]byte,
 	gizmoShaders:      [2][]byte,
 	postProcessShader: []byte,
+	imguiShaders:      [2][]byte,
 }
 
 // ===[ Lifecycle ]============================================================
@@ -609,6 +631,7 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	createPostProcessPipelineImages(&graphicsData)
 	createPostProcessPipeline(&graphicsData, initInfo.postProcessShader)
 
+	createImguiPipeline(&graphicsData, initInfo.imguiShaders[:])
 	initImgui(&graphicsData)
 
 	nameCoreObjects(&graphicsData)
@@ -777,6 +800,9 @@ initWindow :: proc(using graphicsData: ^GraphicsData, windowTitle: cstring) -> W
 	glfw.SetMouseButtonCallback(window, mouseButtonCallback)
 	glfw.SetCursorPosCallback(window, cursorPosCallback)
 	glfw.SetScrollCallback(window, scrollCallback)
+	glfw.SetCharCallback(window, charCallback)
+	glfw.SetWindowFocusCallback(window, windowFocusCallback)
+	glfw.SetCursorEnterCallback(window, cursorEnterCallback)
 	glfw.SetWindowRefreshCallback(window, windowRefreshCallback)
 	glfw.SetFramebufferSizeCallback(window, framebufferSizeCallback)
 	installModalLoopTimer(window)
@@ -3344,6 +3370,7 @@ BufferSlot :: enum u32 {
 	Position     = 5,
 	Light        = 6,
 	TextureIndex = 7,
+	ImguiVertex  = 8,
 }
 
 @(private = "file")
@@ -3541,6 +3568,7 @@ createDescriptorHeaps :: proc(using graphicsData: ^GraphicsData) -> DescriptorHe
 		positionBuffer     = bufferSlotIndex(graphicsData, .Position),
 		lightBuffer        = bufferSlotIndex(graphicsData, .Light),
 		textureIndexBuffer = bufferSlotIndex(graphicsData, .TextureIndex),
+		imguiVertexBuffer  = bufferSlotIndex(graphicsData, .ImguiVertex),
 		shadowMap          = imageSlotIndex(graphicsData, .ShadowMap),
 		sceneDepth         = imageSlotIndex(graphicsData, .SceneDepth),
 		renderedImage      = imageSlotIndex(graphicsData, .RenderedImage),
@@ -3745,6 +3773,7 @@ PipelineIndex :: enum {
 	Scene,
 	Gizmo,
 	PostProcess,
+	Imgui,
 }
 
 @(private = "file")
@@ -4900,6 +4929,174 @@ createPostProcessPipeline :: proc(
 	}
 }
 
+createImguiPipeline :: proc(using graphicsData: ^GraphicsData, shaders: [][]byte) {
+	createFlags: vk.PipelineCreateFlags2CreateInfo = {
+		sType = .PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
+		pNext = nil,
+		flags = {.DESCRIPTOR_HEAP_EXT},
+	}
+
+	shaderStages: [2]vk.PipelineShaderStageCreateInfo = {
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+							sType = .SHADER_MODULE_CREATE_INFO,
+							pNext = nil,
+							flags = nil,
+							codeSize = len(shaders[0]),
+							pCode = transmute(^u32)raw_data(shaders[0]),
+						},
+			flags = nil,
+			stage = {.VERTEX},
+			module = 0,
+			pName = "main",
+			pSpecializationInfo = nil,
+		},
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			pNext = &vk.ShaderModuleCreateInfo {
+							sType = .SHADER_MODULE_CREATE_INFO,
+							pNext = nil,
+							flags = nil,
+							codeSize = len(shaders[1]),
+							pCode = transmute(^u32)raw_data(shaders[1]),
+						},
+			flags = nil,
+			stage = {.FRAGMENT},
+			module = 0,
+			pName = "main",
+			pSpecializationInfo = nil,
+		},
+	}
+
+	renderingInfo: vk.PipelineRenderingCreateInfo = {
+		sType = .PIPELINE_RENDERING_CREATE_INFO,
+		pNext = nil,
+		viewMask = 0,
+		colorAttachmentCount = 1,
+		pColorAttachmentFormats = &pipelines[.PostProcess].images[1].format,
+		depthAttachmentFormat = .UNDEFINED,
+		stencilAttachmentFormat = .UNDEFINED,
+	}
+	createFlags.pNext = &renderingInfo
+
+	pipelineInfo: vk.GraphicsPipelineCreateInfo = {
+		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+		pNext               = &createFlags,
+		flags               = nil,
+		stageCount          = u32(len(shaderStages)),
+		pStages             = &shaderStages[0],
+		pVertexInputState   = &{
+			sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			vertexBindingDescriptionCount = 0,
+			pVertexBindingDescriptions = nil,
+			vertexAttributeDescriptionCount = 0,
+			pVertexAttributeDescriptions = nil,
+		},
+		pInputAssemblyState = &{
+			sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			topology = .TRIANGLE_LIST,
+			primitiveRestartEnable = false,
+		},
+		pTessellationState  = nil,
+		pViewportState      = &{
+			sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			viewportCount = 1,
+			pViewports = nil,
+			scissorCount = 1,
+			pScissors = nil,
+		},
+		pRasterizationState = &{
+			sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			depthClampEnable = false,
+			rasterizerDiscardEnable = false,
+			polygonMode = .FILL,
+			cullMode = nil,
+			frontFace = .COUNTER_CLOCKWISE,
+			depthBiasEnable = false,
+			depthBiasConstantFactor = 0.0,
+			depthBiasClamp = 0.0,
+			depthBiasSlopeFactor = 0.0,
+			lineWidth = 1.0,
+		},
+		pMultisampleState   = &{
+			sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			rasterizationSamples = {._1},
+			sampleShadingEnable = false,
+			minSampleShading = 1.0,
+			pSampleMask = nil,
+			alphaToCoverageEnable = false,
+			alphaToOneEnable = false,
+		},
+		pDepthStencilState  = &{
+			sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			depthTestEnable = false,
+			depthWriteEnable = false,
+			depthCompareOp = .ALWAYS,
+			depthBoundsTestEnable = false,
+			stencilTestEnable = false,
+			front = {},
+			back = {},
+			minDepthBounds = 0,
+			maxDepthBounds = 1,
+		},
+		pColorBlendState    = &{
+			sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			logicOpEnable = false,
+			logicOp = .COPY,
+			attachmentCount = 1,
+			pAttachments = &vk.PipelineColorBlendAttachmentState {
+					blendEnable = true,
+					srcColorBlendFactor = .SRC_ALPHA,
+					dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+					colorBlendOp = .ADD,
+					srcAlphaBlendFactor = .ONE,
+					dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
+					alphaBlendOp = .ADD,
+					colorWriteMask = {.R, .G, .B, .A},
+			},
+			blendConstants = {0, 0, 0, 0},
+		},
+		pDynamicState       = &vk.PipelineDynamicStateCreateInfo {
+			sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			dynamicStateCount = len(DYNAMIC_VIEWPORT_STATES),
+			pDynamicStates = &DYNAMIC_VIEWPORT_STATES[0],
+		},
+		layout              = 0,
+		renderPass          = 0,
+		subpass             = 0,
+		basePipelineHandle  = 0,
+		basePipelineIndex   = 0,
+	}
+
+	if res := vk.CreateGraphicsPipelines(
+		device,
+		pipelineCache,
+		1,
+		&pipelineInfo,
+		nil,
+		&pipelines[.Imgui].handle,
+	); res != .SUCCESS {
+		logf(.Fatal, "Failed to create pipeline! %v", res)
+	}
+}
+
 @(private = "file")
 cleanupPipeline :: proc(using graphicsData: ^GraphicsData, pipeline: ^Pipeline) {
 	vk.DestroyPipeline(device, pipeline.handle, nil)
@@ -4929,6 +5126,8 @@ updatePipelineShaders :: proc(
 	case .PostProcess:
 		createPostProcessPipeline(graphicsData, shaders[0])
 		markCommandsDirty(graphicsData, {.PostProcess})
+	case .Imgui:
+		createImguiPipeline(graphicsData, shaders)
 	}
 }
 
@@ -6190,6 +6389,9 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 
 @(private = "file")
 recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, imageIndex: u32) {
+	imgui.Render()
+	imguiUpdateTextures(graphicsData)
+
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
@@ -6267,8 +6469,7 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 			pStencilAttachment = nil,
 		},
 	)
-	imgui.Render()
-	imguiVulkan.RenderDrawData(imgui.GetDrawData(), cmdBuffer)
+	imguiRenderDrawData(graphicsData, cmdBuffer, index)
 	vk.CmdEndRendering(cmdBuffer)
 
 	imageBarriers := [?]vk.ImageMemoryBarrier2 {
@@ -6439,8 +6640,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	}
 	vk.ResetFences(device, 1, &inFlightFrames[currentFrame])
 
-	imguiVulkan.NewFrame()
-	imguiGLFW.NewFrame()
+	imguiPlatformNewFrame(graphicsData)
 	imgui.NewFrame()
 	drawImgui(graphicsData)
 	imgui.EndFrame()
@@ -6621,71 +6821,834 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 	}
 
 	imguiContext = imgui.CreateContext(nil)
-	io := imgui.GetIO()
 	imgui.StyleColorsClassic(nil)
 
-	if !imguiGLFW.InitForVulkan(window, true) {
-		log(.Fatal, "Failed to initialize imgui for vulkan.")
-	}
+	initImguiPlatform(graphicsData)
 
-	implInitInfo: imguiVulkan.InitInfo = {
-		ApiVersion = vk.API_VERSION_1_4, // Fill with API version of Instance, e.g. VK_API_VERSION_1_3 or your value of VkApplicationInfo::apiVersion. May be lower than header version (VK_HEADER_VERSION_COMPLETE)
-		Instance = instance,
-		PhysicalDevice = physicalDevice,
-		Device = device,
-		QueueFamily = queueFamilies.graphicsFamily,
-		Queue = graphicsQueue,
-		DescriptorPool = 0,
-		DescriptorPoolSize = 10,
-		MinImageCount = 2,
-		ImageCount = 2,
-		PipelineCache = 0,
-
-		// Pipeline
-		PipelineInfoMain = {
-			RenderPass = 0,
-			Subpass = 0,
-			MSAASamples = {._1},
-			PipelineRenderingCreateInfo = {
-				sType = .PIPELINE_RENDERING_CREATE_INFO,
-				pNext = nil,
-				viewMask = 0,
-				colorAttachmentCount = 1,
-				pColorAttachmentFormats = &pipelines[.PostProcess].images[1].format,
-				depthAttachmentFormat = .UNDEFINED,
-				stencilAttachmentFormat = .UNDEFINED,
-			},
-			SwapChainImageUsage = nil,
-		},
-		PipelineInfoForViewports = {
-			RenderPass = 0,
-			Subpass = 0,
-			MSAASamples = {._1},
-			PipelineRenderingCreateInfo = {},
-			SwapChainImageUsage = nil,
-		},
-		UseDynamicRendering = true,
-
-		// (Optional) Allocation, Debugging
-		Allocator = {},
-		CheckVkResultFn = imguiCheckVkResult,
-		MinAllocationSize = 1024 * 1024,
-		CustomShaderVertCreateInfo = {},
-		CustomShaderFragCreateInfo = {},
-	}
-
-	if !imguiVulkan.Init(&implInitInfo) {
-		log(.Fatal, "Failed to init imgui vulkan.")
-	}
+	initImguiRenderer(graphicsData)
 }
 
 @(private = "file")
 cleanupImgui :: proc(using graphicsData: ^GraphicsData) {
-	imguiVulkan.Shutdown()
-	imguiGLFW.Shutdown()
+	cleanupImguiRenderer(graphicsData)
+	cleanupImguiPlatform(graphicsData)
 	imgui.DestroyContext(imguiContext)
 }
 
+@(private = "file")
+ImguiPlatform :: struct {
+	cursors:           [imgui.GuiMouseCursor.COUNT]glfw.CursorHandle,
+	activeCursor:      glfw.CursorHandle,
+	lastValidMousePos: imgui.Vec2,
+	mouseInWindow:     bool,
+	time:              f64,
+}
+
+@(private = "file")
+initImguiPlatform :: proc(using graphicsData: ^GraphicsData) {
+	io := imgui.GetIO()
+	io.BackendPlatformName = "Valhalla GLFW"
+	io.BackendFlags += {.HasMouseCursors, .HasSetMousePos}
+
+	platformIO := imgui.GetPlatformIO()
+	platformIO.Platform_SetClipboardTextFn = imguiSetClipboardText
+	platformIO.Platform_GetClipboardTextFn = imguiGetClipboardText
+
+	prevErrorCallback := glfw.SetErrorCallback(nil)
+	for idx in 0 ..< int(imgui.GuiMouseCursor.COUNT) {
+		if shape := imguiCursorShape(imgui.GuiMouseCursor(idx)); shape != 0 {
+			imguiPlatform.cursors[idx] = glfw.CreateStandardCursor(shape)
+		}
+	}
+	glfw.SetErrorCallback(prevErrorCallback)
+	glfw.GetError()
+
+	imgui.GetMainViewport().PlatformHandle = window
+}
+
+@(private = "file")
+cleanupImguiPlatform :: proc(using graphicsData: ^GraphicsData) {
+	for cursor in imguiPlatform.cursors {
+		if cursor != nil {
+			glfw.DestroyCursor(cursor)
+		}
+	}
+	imgui.GetMainViewport().PlatformHandle = nil
+	io := imgui.GetIO()
+	io.BackendPlatformName = nil
+	io.BackendFlags -= {.HasMouseCursors, .HasSetMousePos}
+	imguiPlatform = {}
+}
+
+@(private = "file")
+imguiPlatformNewFrame :: proc(using graphicsData: ^GraphicsData) {
+	io := imgui.GetIO()
+
+	width, height := glfw.GetWindowSize(window)
+	framebufferWidth, framebufferHeight := glfw.GetFramebufferSize(window)
+	io.DisplaySize = {f32(width), f32(height)}
+	io.DisplayFramebufferScale = {
+		width > 0 ? f32(framebufferWidth) / f32(width) : 1,
+		height > 0 ? f32(framebufferHeight) / f32(height) : 1,
+	}
+
+	now := glfw.GetTime()
+	if now <= imguiPlatform.time {
+		now = imguiPlatform.time + 0.00001
+	}
+	io.DeltaTime = imguiPlatform.time > 0 ? f32(now - imguiPlatform.time) : 1.0 / 60
+	imguiPlatform.time = now
+
+	imguiPlatformUpdateMouse(graphicsData)
+	imguiPlatformUpdateCursor(graphicsData)
+}
+
+@(private = "file")
+imguiPlatformUpdateMouse :: proc(using graphicsData: ^GraphicsData) {
+	io := imgui.GetIO()
+
+	if glfw.GetInputMode(window, glfw.CURSOR) == glfw.CURSOR_DISABLED {
+		imgui.AddMousePosEvent(io, -max(f32), -max(f32))
+		return
+	}
+
+	if glfw.GetWindowAttrib(window, glfw.FOCUSED) == 0 {
+		return
+	}
+
+	if io.WantSetMousePos {
+		glfw.SetCursorPos(window, f64(io.MousePos.x), f64(io.MousePos.y))
+	} else if !imguiPlatform.mouseInWindow {
+		x, y := glfw.GetCursorPos(window)
+		imguiPlatform.lastValidMousePos = {f32(x), f32(y)}
+		imgui.AddMousePosEvent(io, f32(x), f32(y))
+	}
+}
+
+@(private = "file")
+imguiPlatformUpdateCursor :: proc(using graphicsData: ^GraphicsData) {
+	io := imgui.GetIO()
+	if .NoMouseCursorChange in io.ConfigFlags ||
+	   glfw.GetInputMode(window, glfw.CURSOR) == glfw.CURSOR_DISABLED {
+		return
+	}
+
+	if cursor := imgui.GetMouseCursor(); cursor == .None || io.MouseDrawCursor {
+		if imguiPlatform.activeCursor != nil {
+			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
+			imguiPlatform.activeCursor = nil
+		}
+	} else {
+		handle := imguiPlatform.cursors[int(cursor)]
+		if handle == nil {
+			handle = imguiPlatform.cursors[int(imgui.GuiMouseCursor.Arrow)]
+		}
+		if imguiPlatform.activeCursor != handle {
+			glfw.SetCursor(window, handle)
+			imguiPlatform.activeCursor = handle
+		}
+		glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+	}
+}
+
+@(private)
+imguiWantsMouse :: proc(using graphicsData: ^GraphicsData) -> bool {
+	return imguiContext != nil && imgui.GetIO().WantCaptureMouse
+}
+
+@(private)
+imguiWantsKeyboard :: proc(using graphicsData: ^GraphicsData) -> bool {
+	return imguiContext != nil && imgui.GetIO().WantCaptureKeyboard
+}
+
+@(private)
+imguiKeyEvent :: proc(using graphicsData: ^GraphicsData, key, scancode, action: i32) {
+	if imguiContext == nil || (action != glfw.PRESS && action != glfw.RELEASE) {
+		return
+	}
+
+	imguiUpdateKeyModifiers(graphicsData)
+	imgui.AddKeyEvent(
+		imgui.GetIO(),
+		imguiKeyFromGLFW(imguiTranslateKey(key, scancode)),
+		action == glfw.PRESS,
+	)
+}
+
+@(private)
+imguiCharEvent :: proc(using graphicsData: ^GraphicsData, codepoint: rune) {
+	if imguiContext == nil {
+		return
+	}
+	imgui.AddInputCharacter(imgui.GetIO(), u32(codepoint))
+}
+
+@(private)
+imguiMouseButtonEvent :: proc(using graphicsData: ^GraphicsData, button, action: i32) {
+	if imguiContext == nil || button < 0 || button >= i32(imgui.GuiMouseButton.COUNT) {
+		return
+	}
+
+	imguiUpdateKeyModifiers(graphicsData)
+	imgui.AddMouseButtonEvent(imgui.GetIO(), button, action == glfw.PRESS)
+}
+
+@(private)
+imguiCursorPosEvent :: proc(using graphicsData: ^GraphicsData, xpos, ypos: f64) {
+	if imguiContext == nil || glfw.GetInputMode(window, glfw.CURSOR) == glfw.CURSOR_DISABLED {
+		return
+	}
+
+	imguiPlatform.lastValidMousePos = {f32(xpos), f32(ypos)}
+	imgui.AddMousePosEvent(imgui.GetIO(), f32(xpos), f32(ypos))
+}
+
+@(private)
+imguiCursorEnterEvent :: proc(using graphicsData: ^GraphicsData, entered: bool) {
+	if imguiContext == nil {
+		return
+	}
+
+	io := imgui.GetIO()
+	if entered {
+		imguiPlatform.mouseInWindow = true
+		imgui.AddMousePosEvent(
+			io,
+			imguiPlatform.lastValidMousePos.x,
+			imguiPlatform.lastValidMousePos.y,
+		)
+	} else {
+		imguiPlatform.lastValidMousePos = io.MousePos
+		imguiPlatform.mouseInWindow = false
+		imgui.AddMousePosEvent(io, -max(f32), -max(f32))
+	}
+}
+
+@(private)
+imguiScrollEvent :: proc(using graphicsData: ^GraphicsData, xoffset, yoffset: f64) {
+	if imguiContext == nil {
+		return
+	}
+	imgui.AddMouseWheelEvent(imgui.GetIO(), f32(xoffset), f32(yoffset))
+}
+
+@(private)
+imguiFocusEvent :: proc(using graphicsData: ^GraphicsData, focused: bool) {
+	if imguiContext == nil {
+		return
+	}
+	imgui.AddFocusEvent(imgui.GetIO(), focused)
+}
+
+@(private = "file")
+imguiSetClipboardText :: proc "c" (ctx: ^imgui.GuiContext, text: cstring) {
+	glfw.SetClipboardString(nil, text)
+}
+
+@(private = "file")
+imguiGetClipboardText :: proc "c" (ctx: ^imgui.GuiContext) -> cstring {
+	return glfwBindings.GetClipboardString(nil)
+}
+
+@(private = "file")
+imguiUpdateKeyModifiers :: proc(using graphicsData: ^GraphicsData) {
+	keyDown :: proc(window: WindowHandle, left, right: i32) -> bool {
+		return glfw.GetKey(window, left) == glfw.PRESS || glfw.GetKey(window, right) == glfw.PRESS
+	}
+
+	io := imgui.GetIO()
+	imgui.AddKeyEvent(
+		io,
+		.Mod_Ctrl,
+		keyDown(window, glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL),
+	)
+	imgui.AddKeyEvent(
+		io,
+		.Mod_Shift,
+		keyDown(window, glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT),
+	)
+	imgui.AddKeyEvent(io, .Mod_Alt, keyDown(window, glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT))
+	imgui.AddKeyEvent(
+		io,
+		.Mod_Super,
+		keyDown(window, glfw.KEY_LEFT_SUPER, glfw.KEY_RIGHT_SUPER),
+	)
+}
+
+@(private = "file")
+imguiTranslateKey :: proc(key, scancode: i32) -> i32 {
+	if key >= glfw.KEY_KP_0 && key <= glfw.KEY_KP_EQUAL {
+		return key
+	}
+
+	prevErrorCallback := glfw.SetErrorCallback(nil)
+	name := glfw.GetKeyName(key, scancode)
+	glfw.SetErrorCallback(prevErrorCallback)
+	glfw.GetError()
+
+	if len(name) != 1 {
+		return key
+	}
+
+	switch char := name[0]; char {
+	case '0' ..= '9', '`', '-', '=', '[', ']', '\\', ',', ';', '\'', '.', '/', 'A' ..= 'Z':
+		return i32(char)
+	case 'a' ..= 'z':
+		return i32(char) - 'a' + 'A'
+	}
+	return key
+}
+
+@(private = "file")
+imguiCursorShape :: proc(cursor: imgui.GuiMouseCursor) -> i32 {
+	switch cursor {
+	case .Arrow:
+		return glfw.ARROW_CURSOR
+	case .TextInput:
+		return glfw.IBEAM_CURSOR
+	case .ResizeAll:
+		return glfw.RESIZE_ALL_CURSOR
+	case .ResizeNS:
+		return glfw.RESIZE_NS_CURSOR
+	case .ResizeEW:
+		return glfw.RESIZE_EW_CURSOR
+	case .ResizeNESW:
+		return glfw.RESIZE_NESW_CURSOR
+	case .ResizeNWSE:
+		return glfw.RESIZE_NWSE_CURSOR
+	case .Hand:
+		return glfw.POINTING_HAND_CURSOR
+	case .NotAllowed:
+		return glfw.NOT_ALLOWED_CURSOR
+	case .Wait, .Progress, .None, .COUNT:
+	}
+	return 0
+}
+
+@(private = "file")
+imguiKeyFromGLFW :: proc(key: i32) -> imgui.GuiKey {
+	#assert(i32(imgui.GuiKey.Key_9) - i32(imgui.GuiKey.Key_0) == glfw.KEY_9 - glfw.KEY_0)
+	#assert(i32(imgui.GuiKey.Key_Z) - i32(imgui.GuiKey.Key_A) == glfw.KEY_Z - glfw.KEY_A)
+	#assert(i32(imgui.GuiKey.Key_F24) - i32(imgui.GuiKey.Key_F1) == glfw.KEY_F24 - glfw.KEY_F1)
+	#assert(
+		i32(imgui.GuiKey.Key_Keypad9) - i32(imgui.GuiKey.Key_Keypad0) == glfw.KEY_KP_9 - glfw.KEY_KP_0,
+	)
+
+	switch key {
+	case glfw.KEY_0 ..= glfw.KEY_9:
+		return imgui.GuiKey(i32(imgui.GuiKey.Key_0) + key - glfw.KEY_0)
+	case glfw.KEY_A ..= glfw.KEY_Z:
+		return imgui.GuiKey(i32(imgui.GuiKey.Key_A) + key - glfw.KEY_A)
+	case glfw.KEY_F1 ..= glfw.KEY_F24:
+		return imgui.GuiKey(i32(imgui.GuiKey.Key_F1) + key - glfw.KEY_F1)
+	case glfw.KEY_KP_0 ..= glfw.KEY_KP_9:
+		return imgui.GuiKey(i32(imgui.GuiKey.Key_Keypad0) + key - glfw.KEY_KP_0)
+	case glfw.KEY_TAB:
+		return .Key_Tab
+	case glfw.KEY_LEFT:
+		return .Key_LeftArrow
+	case glfw.KEY_RIGHT:
+		return .Key_RightArrow
+	case glfw.KEY_UP:
+		return .Key_UpArrow
+	case glfw.KEY_DOWN:
+		return .Key_DownArrow
+	case glfw.KEY_PAGE_UP:
+		return .Key_PageUp
+	case glfw.KEY_PAGE_DOWN:
+		return .Key_PageDown
+	case glfw.KEY_HOME:
+		return .Key_Home
+	case glfw.KEY_END:
+		return .Key_End
+	case glfw.KEY_INSERT:
+		return .Key_Insert
+	case glfw.KEY_DELETE:
+		return .Key_Delete
+	case glfw.KEY_BACKSPACE:
+		return .Key_Backspace
+	case glfw.KEY_SPACE:
+		return .Key_Space
+	case glfw.KEY_ENTER:
+		return .Key_Enter
+	case glfw.KEY_ESCAPE:
+		return .Key_Escape
+	case glfw.KEY_APOSTROPHE:
+		return .Key_Apostrophe
+	case glfw.KEY_COMMA:
+		return .Key_Comma
+	case glfw.KEY_MINUS:
+		return .Key_Minus
+	case glfw.KEY_PERIOD:
+		return .Key_Period
+	case glfw.KEY_SLASH:
+		return .Key_Slash
+	case glfw.KEY_SEMICOLON:
+		return .Key_Semicolon
+	case glfw.KEY_EQUAL:
+		return .Key_Equal
+	case glfw.KEY_LEFT_BRACKET:
+		return .Key_LeftBracket
+	case glfw.KEY_BACKSLASH:
+		return .Key_Backslash
+	case glfw.KEY_RIGHT_BRACKET:
+		return .Key_RightBracket
+	case glfw.KEY_GRAVE_ACCENT:
+		return .Key_GraveAccent
+	case glfw.KEY_WORLD_1, glfw.KEY_WORLD_2:
+		return .Key_Oem102
+	case glfw.KEY_CAPS_LOCK:
+		return .Key_CapsLock
+	case glfw.KEY_SCROLL_LOCK:
+		return .Key_ScrollLock
+	case glfw.KEY_NUM_LOCK:
+		return .Key_NumLock
+	case glfw.KEY_PRINT_SCREEN:
+		return .Key_PrintScreen
+	case glfw.KEY_PAUSE:
+		return .Key_Pause
+	case glfw.KEY_KP_DECIMAL:
+		return .Key_KeypadDecimal
+	case glfw.KEY_KP_DIVIDE:
+		return .Key_KeypadDivide
+	case glfw.KEY_KP_MULTIPLY:
+		return .Key_KeypadMultiply
+	case glfw.KEY_KP_SUBTRACT:
+		return .Key_KeypadSubtract
+	case glfw.KEY_KP_ADD:
+		return .Key_KeypadAdd
+	case glfw.KEY_KP_ENTER:
+		return .Key_KeypadEnter
+	case glfw.KEY_KP_EQUAL:
+		return .Key_KeypadEqual
+	case glfw.KEY_LEFT_SHIFT:
+		return .Key_LeftShift
+	case glfw.KEY_LEFT_CONTROL:
+		return .Key_LeftCtrl
+	case glfw.KEY_LEFT_ALT:
+		return .Key_LeftAlt
+	case glfw.KEY_LEFT_SUPER:
+		return .Key_LeftSuper
+	case glfw.KEY_RIGHT_SHIFT:
+		return .Key_RightShift
+	case glfw.KEY_RIGHT_CONTROL:
+		return .Key_RightCtrl
+	case glfw.KEY_RIGHT_ALT:
+		return .Key_RightAlt
+	case glfw.KEY_RIGHT_SUPER:
+		return .Key_RightSuper
+	case glfw.KEY_MENU:
+		return .Key_Menu
+	}
+	return .Key_None
+}
+
+@(private = "file")
+ImguiRenderer :: struct {
+	vertexBuffers: [MAX_FRAMES_IN_FLIGHT]Buffer,
+	indexBuffers:  [MAX_FRAMES_IN_FLIGHT]Buffer,
+	vertexCounts:  [MAX_FRAMES_IN_FLIGHT]int,
+	indexCounts:   [MAX_FRAMES_IN_FLIGHT]int,
+}
+
+#assert(size_of(imgui.DrawVert) == 20)
+#assert(size_of(imgui.DrawIdx) == 2)
+
+@(private = "file")
+IMGUI_GEOMETRY_GRANULARITY :: 4096
+
+@(private = "file")
+initImguiRenderer :: proc(using graphicsData: ^GraphicsData) {
+	io := imgui.GetIO()
+	io.BackendRendererName = "Valhalla Vulkan"
+	io.BackendFlags += {.RendererHasVtxOffset, .RendererHasTextures}
+}
+
+@(private = "file")
+cleanupImguiRenderer :: proc(using graphicsData: ^GraphicsData) {
+	textures := &imgui.GetPlatformIO().Textures
+	for texture in textures.Data[:textures.Size] {
+		imguiDestroyTexture(graphicsData, texture)
+	}
+
+	for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		deleteBuffer(graphicsData, &imguiRenderer.vertexBuffers[frame])
+		deleteBuffer(graphicsData, &imguiRenderer.indexBuffers[frame])
+	}
+	imguiRenderer = {}
+
+	io := imgui.GetIO()
+	io.BackendRendererName = nil
+	io.BackendFlags -= {.RendererHasVtxOffset, .RendererHasTextures}
+}
+
+@(private = "file")
+imguiUpdateTextures :: proc(using graphicsData: ^GraphicsData) {
+	drawData := imgui.GetDrawData()
+	if drawData.Textures == nil {
+		return
+	}
+
+	for texture in drawData.Textures.Data[:drawData.Textures.Size] {
+		if texture.Status != .OK {
+			imguiUpdateTexture(graphicsData, texture)
+		}
+	}
+}
+
+@(private = "file")
+imguiUpdateTexture :: proc(using graphicsData: ^GraphicsData, texture: ^imgui.TextureData) {
+	if texture.Status == .WantDestroy && texture.UnusedFrames >= i32(MAX_FRAMES_IN_FLIGHT) {
+		imguiDestroyTexture(graphicsData, texture)
+		return
+	}
+
+	if texture.Status != .WantCreate && texture.Status != .WantUpdates {
+		return
+	}
+
+	if texture.Format != .RGBA32 {
+		logf(.Error, "imgui asked for texture format %v, which this backend does not create.", texture.Format)
+		return
+	}
+
+	vk.DeviceWaitIdle(device)
+
+	if texture.Status == .WantCreate {
+		image := new(Image)
+		image.format = .R8G8B8A8_UNORM
+		image.sampler = u32(SamplerSlot.Nearest)
+
+		if err := createImage(
+			graphicsData,
+			image,
+			{},
+			.D2,
+			u32(texture.Width),
+			u32(texture.Height),
+			1,
+			{._1},
+			.OPTIMAL,
+			{.HOST_TRANSFER, .SAMPLED},
+			{.DEVICE_LOCAL},
+			.EXCLUSIVE,
+			0,
+			nil,
+		); err != nil {
+			logf(.Fatal, "Failed to create imgui texture! Error: %v", err)
+		}
+
+		viewErr: ImageError
+		image.view, image.viewInfo, viewErr = createImageView(
+			graphicsData,
+			image.vkImage,
+			.D2,
+			image.format,
+			{.COLOR},
+			1,
+		)
+		if viewErr != .None {
+			logf(.Fatal, "Failed to create imgui texture view! Error: %v", viewErr)
+		}
+
+		slot, ok := acquireTextureSlot(graphicsData)
+		if !ok {
+			log(.Fatal, "Descriptor heap is out of texture slots for imgui.")
+		}
+		image.heapSlot = slot
+		for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+			writeTextureDescriptor(graphicsData, frame, slot, &image.viewInfo)
+		}
+
+		transition: vk.HostImageLayoutTransitionInfo = {
+			sType = .HOST_IMAGE_LAYOUT_TRANSITION_INFO,
+			pNext = nil,
+			image = image.vkImage,
+			oldLayout = .UNDEFINED,
+			newLayout = .SHADER_READ_ONLY_OPTIMAL,
+			subresourceRange = {
+				aspectMask = {.COLOR},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		}
+		if res := vk.TransitionImageLayout(device, 1, &transition); res != .SUCCESS {
+			logf(.Fatal, "Failed to transition imgui texture for host copy! vkResult: %v", res)
+		}
+
+		vkNameObject(device, .IMAGE, u64(image.vkImage), "Imgui: Texture")
+
+		texture.BackendUserData = image
+
+		imgui.TextureData_SetTexID(texture, imgui.TextureID(textureSlotIndex(graphicsData, slot)))
+	}
+
+	image := (^Image)(texture.BackendUserData)
+
+	create := texture.Status == .WantCreate
+	x := create ? i32(0) : i32(texture.UpdateRect.x)
+	y := create ? i32(0) : i32(texture.UpdateRect.y)
+	width := create ? texture.Width : i32(texture.UpdateRect.w)
+	height := create ? texture.Height : i32(texture.UpdateRect.h)
+
+	region: vk.MemoryToImageCopy = {
+		sType = .MEMORY_TO_IMAGE_COPY,
+		pNext = nil,
+		pHostPointer = imgui.TextureData_GetPixelsAt(texture, x, y),
+		memoryRowLength = u32(texture.Width),
+		memoryImageHeight = 0,
+		imageSubresource = {
+			aspectMask = {.COLOR},
+			mipLevel = 0,
+			baseArrayLayer = 0,
+			layerCount = 1,
+		},
+		imageOffset = {x, y, 0},
+		imageExtent = {u32(width), u32(height), 1},
+	}
+	copyInfo: vk.CopyMemoryToImageInfo = {
+		sType          = .COPY_MEMORY_TO_IMAGE_INFO,
+		pNext          = nil,
+		flags          = {},
+		dstImage       = image.vkImage,
+		dstImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+		regionCount    = 1,
+		pRegions       = &region,
+	}
+	if res := vk.CopyMemoryToImage(device, &copyInfo); res != .SUCCESS {
+		logf(.Error, "Failed to upload imgui texture! vkResult: %v", res)
+		return
+	}
+
+	imgui.TextureData_SetStatus(texture, .OK)
+}
+
+@(private = "file")
+imguiDestroyTexture :: proc(using graphicsData: ^GraphicsData, texture: ^imgui.TextureData) {
+	image := (^Image)(texture.BackendUserData)
+	if image == nil {
+		return
+	}
+
+	releaseTextureSlot(graphicsData, image.heapSlot)
+	deleteImage(graphicsData, image)
+	free(image)
+
+	texture.BackendUserData = nil
+	imgui.TextureData_SetTexID(texture, imgui.TextureID_Invalid)
+	imgui.TextureData_SetStatus(texture, .Destroyed)
+}
+
+@(private = "file")
+imguiUploadGeometry :: proc(
+	using graphicsData: ^GraphicsData,
+	drawData: ^imgui.DrawData,
+	frame: u32,
+) {
+	if int(drawData.TotalVtxCount) > imguiRenderer.vertexCounts[frame] {
+		count := imguiGeometryCapacity(int(drawData.TotalVtxCount))
+		size := count * size_of(imgui.DrawVert)
+
+		deleteBuffer(graphicsData, &imguiRenderer.vertexBuffers[frame])
+		if err := createBuffer(
+			graphicsData,
+			size,
+			{.STORAGE_BUFFER},
+			{.HOST_VISIBLE, .HOST_COHERENT},
+			&imguiRenderer.vertexBuffers[frame],
+		); err != nil {
+			logf(.Fatal, "Failed to create imgui vertex buffer! Error: %v", err)
+		}
+		imguiRenderer.vertexCounts[frame] = count
+
+		writeBufferDescriptor(
+			graphicsData,
+			frame,
+			.ImguiVertex,
+			imguiRenderer.vertexBuffers[frame].buffer,
+			vk.DeviceSize(size),
+			.STORAGE_BUFFER,
+		)
+	}
+
+	if int(drawData.TotalIdxCount) > imguiRenderer.indexCounts[frame] {
+		count := imguiGeometryCapacity(int(drawData.TotalIdxCount))
+
+		deleteBuffer(graphicsData, &imguiRenderer.indexBuffers[frame])
+		if err := createBuffer(
+			graphicsData,
+			count * size_of(imgui.DrawIdx),
+			{.INDEX_BUFFER},
+			{.HOST_VISIBLE, .HOST_COHERENT},
+			&imguiRenderer.indexBuffers[frame],
+		); err != nil {
+			logf(.Fatal, "Failed to create imgui index buffer! Error: %v", err)
+		}
+		imguiRenderer.indexCounts[frame] = count
+	}
+
+	vertices := imguiRenderer.vertexBuffers[frame].mapped
+	indices := imguiRenderer.indexBuffers[frame].mapped
+	for drawList in drawData.CmdLists.Data[:drawData.CmdLists.Size] {
+		vertexBytes := int(drawList.VtxBuffer.Size) * size_of(imgui.DrawVert)
+		indexBytes := int(drawList.IdxBuffer.Size) * size_of(imgui.DrawIdx)
+
+		mem.copy(vertices, drawList.VtxBuffer.Data, vertexBytes)
+		mem.copy(indices, drawList.IdxBuffer.Data, indexBytes)
+
+		vertices = rawptr(uintptr(vertices) + uintptr(vertexBytes))
+		indices = rawptr(uintptr(indices) + uintptr(indexBytes))
+	}
+}
+
+@(private = "file")
+@(require_results)
+imguiGeometryCapacity :: proc(count: int) -> int {
+	return(
+		((count + IMGUI_GEOMETRY_GRANULARITY - 1) / IMGUI_GEOMETRY_GRANULARITY) *
+		IMGUI_GEOMETRY_GRANULARITY \
+	)
+}
+
+@(private = "file")
+imguiPushConstants :: proc(cmdBuffer: vk.CommandBuffer, pushConstants: ^Imgui_PushConstants) {
+	vk.CmdPushDataEXT(
+		cmdBuffer,
+		&vk.PushDataInfoEXT {
+			sType = .PUSH_DATA_INFO_EXT,
+			pNext = nil,
+			offset = 0,
+			data = {address = pushConstants, size = size_of(Imgui_PushConstants)},
+		},
+	)
+}
+
+@(private = "file")
+imguiSetupRenderState :: proc(
+	using graphicsData: ^GraphicsData,
+	cmdBuffer: vk.CommandBuffer,
+	frame: u32,
+	pushConstants: ^Imgui_PushConstants,
+	framebufferSize: [2]i32,
+) {
+	bindDescriptorHeaps(graphicsData, cmdBuffer, frame)
+	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Imgui].handle)
+	vk.CmdBindIndexBuffer2(
+		cmdBuffer,
+		imguiRenderer.indexBuffers[frame].buffer,
+		0,
+		vk.DeviceSize(vk.WHOLE_SIZE),
+		.UINT16,
+	)
+	vk.CmdSetViewport(
+		cmdBuffer,
+		0,
+		1,
+		&vk.Viewport {
+			x = 0,
+			y = 0,
+			width = f32(framebufferSize.x),
+			height = f32(framebufferSize.y),
+			minDepth = 0,
+			maxDepth = 1,
+		},
+	)
+	imguiPushConstants(cmdBuffer, pushConstants)
+}
+
+@(private = "file")
+imguiRenderDrawData :: proc(
+	using graphicsData: ^GraphicsData,
+	cmdBuffer: vk.CommandBuffer,
+	frame: u32,
+) {
+	drawData := imgui.GetDrawData()
+
+	framebufferSize := [2]i32 {
+		i32(drawData.DisplaySize.x * drawData.FramebufferScale.x),
+		i32(drawData.DisplaySize.y * drawData.FramebufferScale.y),
+	}
+	if framebufferSize.x <= 0 || framebufferSize.y <= 0 || drawData.TotalVtxCount == 0 {
+		return
+	}
+
+	imguiUploadGeometry(graphicsData, drawData, frame)
+
+	scale := Vec2{2 / drawData.DisplaySize.x, 2 / drawData.DisplaySize.y}
+	pushConstants: Imgui_PushConstants = {
+		resources        = heapIndices,
+		scale            = {scale.x, scale.y},
+		translate        = {
+			-1 - drawData.DisplayPos.x * scale.x,
+			-1 - drawData.DisplayPos.y * scale.y,
+		},
+		texture          = 0,
+		transferFunction = .PQ if swapchain.hdr else .Gamma,
+		paperWhiteNits   = paperWhiteNits,
+	}
+
+	imguiSetupRenderState(graphicsData, cmdBuffer, frame, &pushConstants, framebufferSize)
+
+	clipOffset := drawData.DisplayPos
+	clipScale := drawData.FramebufferScale
+	vertexOffset, indexOffset: i32
+	for drawList in drawData.CmdLists.Data[:drawData.CmdLists.Size] {
+		for &command in drawList.CmdBuffer.Data[:drawList.CmdBuffer.Size] {
+			if command.UserCallback != nil {
+				if transmute(uintptr)command.UserCallback == imgui.DrawCallback_ResetRenderState {
+					imguiSetupRenderState(
+						graphicsData,
+						cmdBuffer,
+						frame,
+						&pushConstants,
+						framebufferSize,
+					)
+				} else {
+					command.UserCallback(drawList, &command)
+				}
+				continue
+			}
+
+			clipMin := [2]f32 {
+				max((command.ClipRect.x - clipOffset.x) * clipScale.x, 0),
+				max((command.ClipRect.y - clipOffset.y) * clipScale.y, 0),
+			}
+			clipMax := [2]f32 {
+				min((command.ClipRect.z - clipOffset.x) * clipScale.x, f32(framebufferSize.x)),
+				min((command.ClipRect.w - clipOffset.y) * clipScale.y, f32(framebufferSize.y)),
+			}
+			if clipMax.x <= clipMin.x || clipMax.y <= clipMin.y {
+				continue
+			}
+
+			vk.CmdSetScissor(
+				cmdBuffer,
+				0,
+				1,
+				&vk.Rect2D {
+					offset = {i32(clipMin.x), i32(clipMin.y)},
+					extent = {u32(clipMax.x - clipMin.x), u32(clipMax.y - clipMin.y)},
+				},
+			)
+
+			pushConstants.texture = u32(imgui.DrawCmd_GetTexID(&command))
+			imguiPushConstants(cmdBuffer, &pushConstants)
+
+			vk.CmdDrawIndexed(
+				cmdBuffer,
+				command.ElemCount,
+				1,
+				command.IdxOffset + u32(indexOffset),
+				i32(command.VtxOffset) + vertexOffset,
+				0,
+			)
+		}
+		indexOffset += drawList.IdxBuffer.Size
+		vertexOffset += drawList.VtxBuffer.Size
+	}
+}
 
 // ===[ Debug Labelling ]======================================================
 

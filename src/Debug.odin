@@ -91,18 +91,6 @@ vkDecodeMessageTypeFlag :: proc(messageType: vk.DebugUtilsMessageTypeFlagsEXT) -
 	return "Unknown"
 }
 
-imguiCheckVkResult :: proc "c" (err: vk.Result) {
-	context = globals.runtimeContext
-	if int(err) == 0 {
-		return
-	}
-	if int(err) < 0 {
-		logf(.Error, "[Imgui-Vulkan] Fatal: VkResult = %v", err)
-		panic("Imgui error")
-	}
-	logf(.Error, "[Imgui-Vulkan] Error: VkResult = %v", err)
-}
-
 vkNameObject :: proc(
 	device: vk.Device,
 	objectType: vk.ObjectType,

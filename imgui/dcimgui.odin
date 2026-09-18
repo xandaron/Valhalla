@@ -3066,22 +3066,22 @@ foreign lib {
 	GuiStyle_ScaleAllSizes                              :: proc(self: ^GuiStyle, scale_factor: f32) --- // Scale all spacing/padding/thickness values. Do not scale fonts.
 
 	// Input Functions
-	GuiIO_AddKeyEvent                       :: proc(self: ^GuiIO, key: GuiKey, down: bool) --- // Queue a new key down/up event. Key should be "translated" (as in, generally ImGuiKey_A matches the key end-user would use to emit an 'A' character)
-	GuiIO_AddKeyAnalogEvent                 :: proc(self: ^GuiIO, key: GuiKey, down: bool, v: f32) --- // Queue a new key down/up event for analog values (e.g. ImGuiKey_Gamepad_ values). Dead-zones should be handled by the backend.
-	GuiIO_AddMousePosEvent                  :: proc(self: ^GuiIO, x: f32, y: f32) ---         // Queue a mouse position update. Use -FLT_MAX,-FLT_MAX to signify no mouse (e.g. app not focused and not hovered)
-	GuiIO_AddMouseButtonEvent               :: proc(self: ^GuiIO, button: i32, down: bool) --- // Queue a mouse button change
-	GuiIO_AddMouseWheelEvent                :: proc(self: ^GuiIO, wheel_x: f32, wheel_y: f32) --- // Queue a mouse wheel update. wheel_y<0: scroll down, wheel_y>0: scroll up, wheel_x<0: scroll right, wheel_x>0: scroll left.
-	GuiIO_AddMouseSourceEvent               :: proc(self: ^GuiIO, source: GuiMouseSource) --- // Queue a mouse source change (Mouse/TouchScreen/Pen)
-	GuiIO_AddMouseViewportEvent             :: proc(self: ^GuiIO, id: GuiID) ---              // Queue a mouse hovered viewport. Requires backend to set ImGuiBackendFlags_HasMouseHoveredViewport to call this (for multi-viewport support).
-	GuiIO_AddFocusEvent                     :: proc(self: ^GuiIO, focused: bool) ---          // Queue a gain/loss of focus for the application (generally based on OS/platform focus of your window)
-	GuiIO_AddInputCharacter                 :: proc(self: ^GuiIO, _c: u32) ---                // Queue a new character input
-	GuiIO_AddInputCharacterUTF16            :: proc(self: ^GuiIO, _c: Wchar16) ---            // Queue a new character input from a UTF-16 character, it can be a surrogate
-	GuiIO_AddInputCharactersUTF8            :: proc(self: ^GuiIO, str: cstring) ---           // Queue a new characters input from a UTF-8 string
-	GuiIO_SetKeyEventNativeData           :: proc(self: ^GuiIO, key: GuiKey, native_keycode: i32, native_scancode: i32, native_legacy_index: i32 = -1) --- // [Optional] Specify index for legacy <1.87 IsKeyXXX() functions with native indices + specify native keycode, scancode.
-	GuiIO_SetAppAcceptingEvents             :: proc(self: ^GuiIO, accepting_events: bool) --- // Set master flag for accepting key/mouse/text events (default to true). Useful if you have native dialog boxes that are interrupting your application loop/refresh, and you want to disable events being queued while your app is frozen.
-	GuiIO_ClearEventsQueue                  :: proc(self: ^GuiIO) ---                         // Clear all incoming events.
-	GuiIO_ClearInputKeys                    :: proc(self: ^GuiIO) ---                         // Clear current keyboard/gamepad state + current frame text input buffer. Equivalent to releasing all keys/buttons.
-	GuiIO_ClearInputMouse                   :: proc(self: ^GuiIO) ---                         // Clear current mouse state.
+	@(link_name="ImGuiIO_AddKeyEvent") AddKeyEvent                       :: proc(self: ^GuiIO, key: GuiKey, down: bool) --- // Queue a new key down/up event. Key should be "translated" (as in, generally ImGuiKey_A matches the key end-user would use to emit an 'A' character)
+	@(link_name="ImGuiIO_AddKeyAnalogEvent") AddKeyAnalogEvent           :: proc(self: ^GuiIO, key: GuiKey, down: bool, v: f32) --- // Queue a new key down/up event for analog values (e.g. ImGuiKey_Gamepad_ values). Dead-zones should be handled by the backend.
+	@(link_name="ImGuiIO_AddMousePosEvent") AddMousePosEvent             :: proc(self: ^GuiIO, x: f32, y: f32) ---         // Queue a mouse position update. Use -FLT_MAX,-FLT_MAX to signify no mouse (e.g. app not focused and not hovered)
+	@(link_name="ImGuiIO_AddMouseButtonEvent") AddMouseButtonEvent       :: proc(self: ^GuiIO, button: i32, down: bool) --- // Queue a mouse button change
+	@(link_name="ImGuiIO_AddMouseWheelEvent") AddMouseWheelEvent         :: proc(self: ^GuiIO, wheel_x: f32, wheel_y: f32) --- // Queue a mouse wheel update. wheel_y<0: scroll down, wheel_y>0: scroll up, wheel_x<0: scroll right, wheel_x>0: scroll left.
+	@(link_name="ImGuiIO_AddMouseSourceEvent") AddMouseSourceEvent       :: proc(self: ^GuiIO, source: GuiMouseSource) --- // Queue a mouse source change (Mouse/TouchScreen/Pen)
+	@(link_name="ImGuiIO_AddMouseViewportEvent") AddMouseViewportEvent   :: proc(self: ^GuiIO, id: GuiID) ---              // Queue a mouse hovered viewport. Requires backend to set ImGuiBackendFlags_HasMouseHoveredViewport to call this (for multi-viewport support).
+	@(link_name="ImGuiIO_AddFocusEvent") AddFocusEvent                   :: proc(self: ^GuiIO, focused: bool) ---          // Queue a gain/loss of focus for the application (generally based on OS/platform focus of your window)
+	@(link_name="ImGuiIO_AddInputCharacter") AddInputCharacter           :: proc(self: ^GuiIO, _c: u32) ---                // Queue a new character input
+	@(link_name="ImGuiIO_AddInputCharacterUTF16") AddInputCharacterUTF16 :: proc(self: ^GuiIO, _c: Wchar16) ---            // Queue a new character input from a UTF-16 character, it can be a surrogate
+	@(link_name="ImGuiIO_AddInputCharactersUTF8") AddInputCharactersUTF8 :: proc(self: ^GuiIO, str: cstring) ---           // Queue a new characters input from a UTF-8 string
+	@(link_name="ImGuiIO_SetKeyEventNativeData") SetKeyEventNativeData   :: proc(self: ^GuiIO, key: GuiKey, native_keycode: i32, native_scancode: i32, native_legacy_index: i32 = -1) --- // [Optional] Specify index for legacy <1.87 IsKeyXXX() functions with native indices + specify native keycode, scancode.
+	@(link_name="ImGuiIO_SetAppAcceptingEvents") SetAppAcceptingEvents   :: proc(self: ^GuiIO, accepting_events: bool) --- // Set master flag for accepting key/mouse/text events (default to true). Useful if you have native dialog boxes that are interrupting your application loop/refresh, and you want to disable events being queued while your app is frozen.
+	@(link_name="ImGuiIO_ClearEventsQueue") ClearEventsQueue             :: proc(self: ^GuiIO) ---                         // Clear all incoming events.
+	@(link_name="ImGuiIO_ClearInputKeys") ClearInputKeys                 :: proc(self: ^GuiIO) ---                         // Clear current keyboard/gamepad state + current frame text input buffer. Equivalent to releasing all keys/buttons.
+	@(link_name="ImGuiIO_ClearInputMouse") ClearInputMouse               :: proc(self: ^GuiIO) ---                         // Clear current mouse state.
 	GuiInputTextCallbackData_DeleteChars    :: proc(self: ^GuiInputTextCallbackData, pos: i32, bytes_count: i32) ---
 	GuiInputTextCallbackData_InsertChars    :: proc(self: ^GuiInputTextCallbackData, pos: i32, text: cstring, text_end: cstring = nil) ---
 	GuiInputTextCallbackData_SelectAll      :: proc(self: ^GuiInputTextCallbackData) ---

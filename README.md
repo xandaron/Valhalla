@@ -57,7 +57,7 @@ checkable work in [Tasks](#tasks).
 | 1 | **Modern Vulkan foundations** — bindless descriptors, hand-rolled allocator, vertex pulling, multiview shadows, host image copy | Complete |
 | 2 | **Colour correctness** — colour space handling and light falloff | Partly done |
 | 3 | **Reflection-driven editor** — inspectors are driven by `imreflect`; only engine behaviour stays hand-written | Complete |
-| 4 | **Own imgui backends** — replace the vendored Vulkan and GLFW integrations to get control over colour, resources and callbacks | Not started |
+| 4 | **Own imgui backends** — replace the vendored Vulkan and GLFW integrations to get control over colour, resources and callbacks | Complete |
 | 5 | **Normal mapping** — tangent frame and linear sampling are fixed; no debug view or demo asset that exercises a real normal map | Partly done |
 | 6 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
 | 7 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
@@ -116,12 +116,12 @@ checkable work in [Tasks](#tasks).
       misparsed into garbage. Migrated with a temporary dual-struct pass (`SceneDataV1`) rather
       than by editing the binaries; `brightness` was converted at `x355`, which is the factor
       that reproduces the old intensity at 3 units and lands the demo lights near a 100 W bulb
-- [ ] **The imgui overlay is not transfer-function aware.** It renders into ProcessedImage
-      *after* PostProcess has already encoded, and writes its raw [0,1] values with no
-      conversion. In SDR that happens to be consistent. In HDR it is not: scene paper white
-      encodes to about 0.58 in PQ, while imgui white writes 1.0, which PQ defines as 10000 nits.
-      The editor will be searingly bright against the scene. Blocked on roadmap 3 — the vendored
-      backend has no notion of a target colour space, and owning it is the clean fix
+- [x] **The imgui overlay is not transfer-function aware.** It renders into ProcessedImage
+      *after* PostProcess has already encoded, and wrote its raw [0,1] values with no
+      conversion. In SDR that happens to be consistent. In HDR it was not: scene paper white
+      encodes to about 0.58 in PQ, while imgui white wrote 1.0, which PQ defines as 10000 nits.
+      Fixed by owning the backend (roadmap 4) — `Imgui.slang` encodes to match the target, so a
+      Classic header now reads the same hue in HDR as in SDR instead of crushing to pure blue
 - [x] Verify HDR against an actual HDR display and tune paper white (default 200 nits, now a
       runtime slider in Settings rather than a constant)
 - [x] Removed the `drawLights` overlay entirely — it was unreachable, and its
@@ -224,21 +224,45 @@ maintain, so they were made there rather than worked around.
 Replace `imgui_impl_vulkan` and `imgui_impl_glfw` with integrations we own. The vendored ones are
 fine in isolation, but they each fight a decision made elsewhere in the engine.
 
-- [ ] **Vulkan backend.** It creates its own `VkDescriptorPool`, `VkPipelineLayout`, descriptor
-      sets and sampler — every object type the renderer deliberately removed when it moved to
-      `VK_EXT_descriptor_heap`. Ours should draw the UI through the resource heap like everything
-      else, so the claim that there are no descriptor sets anywhere becomes true again.
-- [ ] **Transfer-function aware output.** The reason this became urgent: the backend writes raw
-      [0,1] values into whatever target it is given, with no idea the buffer is PQ-encoded. Owning
-      it means the UI can be composited before the display transform, or encoded to match. Fixes
-      the blown-out editor in HDR (see roadmap 2).
-- [ ] **GLFW backend.** It installs its own GLFW callbacks and, on Windows, subclasses the window
-      proc — the same window proc `installModalLoopTimer` subclasses for render-during-resize.
-      Two independent subclassers of one window is a latent ordering problem.
-- [ ] **Context lifetime.** `initImgui` calls `imgui.CreateContext`, which made the obvious
-      "recreate imgui on resize" approach destroy and rebuild the whole context every frame of a
-      drag. Owning setup makes it clear what actually depends on the swapchain, which is nothing.
-- [ ] Decide what stays vendored. The aim is to replace the two backends, not imgui itself.
+- [x] **Vulkan backend.** Replaced by a `PipelineIndex.Imgui` pass and `Imgui.slang`, drawn like
+      every other pass: no descriptor pool, no set layouts, no `VkPipelineLayout`, no `VkSampler`,
+      so the claim that there are none anywhere is true again. Vertices are pulled from a
+      per-frame host-visible buffer in the resource heap's `ImguiVertex` slot; only the index
+      buffer is still bound as fixed function, which needs no descriptor. Textures take a slot
+      each in the heap's texture region, and a texture's `TexID` *is* its heap index, which is
+      what the per-draw push constant carries. Uploads go through `vkCopyMemoryToImage` rather
+      than a staging buffer and a queue wait
+- [x] **Transfer-function aware output.** `Imgui.slang` takes the target's transfer function and
+      paper white as push constants. Under Gamma it writes the colour unchanged, so SDR is
+      byte-identical to what the vendored backend produced; under PQ it recovers the light the
+      colour stands for with a fixed 2.2 (the response the colours were authored against, not the
+      Gamma slider, which never graded the editor) and re-encodes it at paper white. Blending
+      still happens in the encoded buffer, which is what compositing after the display transform
+      costs; the alternative is a separate UI buffer resolved in linear light
+- [x] **GLFW backend.** Replaced by our own in the `Dear ImGui` section of `Graphics.odin`. The
+      callbacks `initWindow` installs are now the only ones on the window and feed imgui
+      themselves, so nothing chains through a saved previous callback and nothing subclasses the
+      window proc `installModalLoopTimer` already owns. Dropped along with the vendored backend:
+      multi-viewport, which needs a second window the engine never creates; gamepad, which was
+      dead code with `NavEnableGamepad` unset; and the Win32 mouse-source hook, so a pen or
+      touch now reports as a mouse — if that ever matters, the existing subclass is where it
+      goes, not a second one
+- [x] **Route input by capture.** Owning the callbacks made it possible to ask imgui whether it
+      wants an event before the engine acts on it, which `uiData.lockInput` was approximating by
+      hand. `imguiWantsMouse`/`imguiWantsKeyboard` gate the engine's handling, except for key
+      releases, which are always dispatched: the press may have arrived before the editor took
+      focus, and swallowing its release would leave `cameraMove` stuck
+- [ ] Retire `uiData.lockInput`. It exists because typing in a modal popup used to drive the
+      camera, which `WantCaptureKeyboard` now covers. The two overlap rather than conflict, so
+      this is cleanup, not a fix
+- [x] **Context lifetime.** Now visible rather than inferred: `initImgui` creates the context,
+      the platform half holds cursors and a clock, and the renderer half holds two geometry
+      buffers and the textures. The only thing in any of it that a swapchain resize could touch
+      is the Imgui pipeline's colour format, and that is ProcessedImage's format, which does not
+      change — the swapchain's does. Nothing to rebuild on resize
+- [x] Decide what stays vendored. imgui itself stays; both backends are gone. `imgui/glfw`,
+      `imgui/vulkan` and `imgui/opengl3` are deleted — the last backed a renderer this engine
+      does not have
 
 ### 5. Normal mapping
 

@@ -27,6 +27,14 @@ enum TextureIndex {
 	COUNT,
 };
 
+struct ImDrawVert {
+	float positionX;
+	float positionY;
+	float u;
+	float v;
+	uint colour;
+};
+
 struct HeapIndices {
 	uint vertexBuffer;
 	uint uniformBuffer;
@@ -36,6 +44,7 @@ struct HeapIndices {
 	uint positionBuffer;
 	uint lightBuffer;
 	uint textureIndexBuffer;
+	uint imguiVertexBuffer;
 	uint shadowMap;
 	uint sceneDepth;
 	uint renderedImage;
@@ -109,6 +118,13 @@ struct HeapIndices {
 	property StructuredBuffer<uint> TextureIndices {
 		get {
 			DescriptorHandle<StructuredBuffer<uint>> d = { textureIndexBuffer };
+			return d;
+		}
+	}
+
+	property StructuredBuffer<ImDrawVert> ImguiVertices {
+		get {
+			DescriptorHandle<StructuredBuffer<ImDrawVert>> d = { imguiVertexBuffer };
 			return d;
 		}
 	}

@@ -100,11 +100,13 @@ mouseButtonCallback: GLFWMouseButtonCallback : proc "c" (
 	window: WindowHandle,
 	button, action, mods: i32,
 ) {
-	if globals.uiData.lockInput {
+	context = globals.runtimeContext
+
+	imguiMouseButtonEvent(&globals.graphicsData, button, action)
+
+	if globals.uiData.lockInput || imguiWantsMouse(&globals.graphicsData) {
 		return
 	}
-
-	context = globals.runtimeContext
 
 	if button == glfw.MOUSE_BUTTON_MIDDLE && action == glfw.PRESS {
 		if mouseMode {
@@ -119,6 +121,10 @@ mouseButtonCallback: GLFWMouseButtonCallback : proc "c" (
 }
 
 cursorPosCallback: GLFWCursorPosCallback : proc "c" (window: WindowHandle, xpos, ypos: f64) {
+	context = globals.runtimeContext
+
+	imguiCursorPosEvent(&globals.graphicsData, xpos, ypos)
+
 	if globals.uiData.lockInput {
 		return
 	}
@@ -129,11 +135,30 @@ cursorPosCallback: GLFWCursorPosCallback : proc "c" (window: WindowHandle, xpos,
 }
 
 scrollCallback: GLFWScrollCallback : proc "c" (window: WindowHandle, xoffset, yoffset: f64) {
-	if globals.uiData.lockInput {
+	context = globals.runtimeContext
+
+	imguiScrollEvent(&globals.graphicsData, xoffset, yoffset)
+
+	if globals.uiData.lockInput || imguiWantsMouse(&globals.graphicsData) {
 		return
 	}
 
 	mouseDelta.z = f32(yoffset)
+}
+
+charCallback: GLFWCharCallback : proc "c" (window: WindowHandle, codepoint: rune) {
+	context = globals.runtimeContext
+	imguiCharEvent(&globals.graphicsData, codepoint)
+}
+
+windowFocusCallback: GLFWWindowFocusCallback : proc "c" (window: WindowHandle, focused: i32) {
+	context = globals.runtimeContext
+	imguiFocusEvent(&globals.graphicsData, focused != 0)
+}
+
+cursorEnterCallback: GLFWCursorEnterCallback : proc "c" (window: WindowHandle, entered: i32) {
+	context = globals.runtimeContext
+	imguiCursorEnterEvent(&globals.graphicsData, entered != 0)
 }
 
 windowRefreshCallback: GLFWWindowRefreshCallback : proc "c" (window: WindowHandle) {
@@ -153,15 +178,16 @@ framebufferSizeCallback: GLFWFramebufferSizeCallback : proc "c" (
 }
 
 keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, action, mods: i32) {
-	if globals.uiData.lockInput {
+	context = globals.runtimeContext
+
+	imguiKeyEvent(&globals.graphicsData, key, scancode, action)
+
+	if action != glfw.RELEASE &&
+	   (globals.uiData.lockInput || imguiWantsKeyboard(&globals.graphicsData)) {
 		return
 	}
 
-	context = globals.runtimeContext
-
 	switch key {
-	case glfw.KEY_ESCAPE:
-		glfw.SetWindowShouldClose(window, glfw.TRUE)
 	case glfw.KEY_P:
 		if action == glfw.PRESS do globals.paused = !globals.paused
 	case glfw.KEY_D:

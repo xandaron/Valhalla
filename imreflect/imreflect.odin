@@ -330,8 +330,7 @@ draw_bit_field_type :: proc(name: string, value: any, info: Draw_Info) -> (chang
 			offset := field.offset % 8
 			data_ptr := (^u128)(&buf[idx])
 			value_u128 := (data_ptr^) & (u128(mask) << offset)
-			data_ptr^ ~= value_u128 // Zero bits withing fields bit range
-			// It should be safe to downcast as the field size cant be larger that 64 bits
+			data_ptr^ ~= value_u128
 			value_u64 := u64(value_u128 >> offset)
 
 			if swap_endian {

@@ -8,6 +8,7 @@
 		property RWStructuredBuffer<float4x4> TransformsRW { get { return PC.resources.TransformsRW; } } \
 		property StructuredBuffer<float4> Positions { get { return PC.resources.Positions; } }     		property RWStructuredBuffer<float4> PositionsRW { get { return PC.resources.PositionsRW; } } 		property StructuredBuffer<Light> Lights { get { return PC.resources.Lights; } }            \
 		property StructuredBuffer<uint> TextureIndices { get { return PC.resources.TextureIndices; } } \
+		property StructuredBuffer<ImDrawVert> ImguiVertices { get { return PC.resources.ImguiVertices; } } \
 		property TextureCubeArray ShadowMap { get { return PC.resources.ShadowMap; } }             \
 		property Texture2D SceneDepth { get { return PC.resources.SceneDepth; } }                  \
 		property RWTexture2D<float4> RenderedImage { get { return PC.resources.RenderedImage; } }  \

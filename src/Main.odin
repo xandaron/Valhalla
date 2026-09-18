@@ -117,6 +117,8 @@ main :: proc() {
 	gizmoVert, _ := compileShader(projectPath(SHADERS_PATH(), "Gizmo.slang"), "vert", .VERTEX)
 	gizmoFrag, _ := compileShader(projectPath(SHADERS_PATH(), "Gizmo.slang"), "frag", .FRAGMENT)
 	postProcessComp, _ := compileShader(projectPath(SHADERS_PATH(), "PostProcess.slang"), "comp", .COMPUTE)
+	imguiVert, _ := compileShader(projectPath(SHADERS_PATH(), "Imgui.slang"), "vert", .VERTEX)
+	imguiFrag, _ := compileShader(projectPath(SHADERS_PATH(), "Imgui.slang"), "frag", .FRAGMENT)
 	defer delete(transformComp)
 	defer delete(lightVert)
 	defer delete(lightFrag)
@@ -125,6 +127,9 @@ main :: proc() {
 	defer delete(gizmoVert)
 	defer delete(gizmoFrag)
 	defer delete(postProcessComp)
+	defer delete(imguiVert)
+	defer delete(imguiFrag)
+
 	globals.graphicsData, err = initGraphics(
 	InitGraphicsInfo {
 		appVersion        = APP_VERSION,
@@ -134,6 +139,7 @@ main :: proc() {
 		sceneShaders      = {sceneVert, sceneFrag},
 		gizmoShaders      = {gizmoVert, gizmoFrag},
 		postProcessShader = postProcessComp,
+		imguiShaders      = {imguiVert, imguiFrag},
 	},
 	)
 	defer cleanupGraphics(&globals.graphicsData)
@@ -205,8 +211,7 @@ tickFrame :: proc() -> bool {
 
 		distance := length(camera.center - camera.eye) * (1 - mouseDelta.z * 0.1)
 
-		// Clamp the pitch to prevent flipping
-		MAX_Y :: 0.9396926208 // approx sin(70 degrees)
+		MAX_Y :: 0.9396926208
 		signY := sign(forward.y)
 		absY := signY * forward.y
 		if absY > MAX_Y {
