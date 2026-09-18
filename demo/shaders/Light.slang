@@ -28,32 +28,32 @@ float4x4 projection(Light light) {
 
 float4x4 view(Light light, uint face) {
 	switch (face) {
-	case 0: // +X
+	case 0:
 		return float4x4(float4(0, 0, -1, light.position.z),
 										float4(0, -1, 0, light.position.y),
 										float4(-1, 0, 0, light.position.x), float4(0, 0, 0, 1));
-	case 1: // -X
+	case 1:
 		return float4x4(float4(0, 0, 1, -light.position.z),
 										float4(0, -1, 0, light.position.y),
 										float4(1, 0, 0, -light.position.x), float4(0, 0, 0, 1));
-	case 2: // +Y
+	case 2:
 		return float4x4(float4(1, 0, 0, -light.position.x),
 										float4(0, 0, 1, -light.position.z),
 										float4(0, -1, 0, light.position.y), float4(0, 0, 0, 1));
-	case 3: // -Y
+	case 3:
 		return float4x4(float4(1, 0, 0, -light.position.x),
 										float4(0, 0, -1, light.position.z),
 										float4(0, 1, 0, -light.position.y), float4(0, 0, 0, 1));
-	case 4: // +Z
+	case 4:
 		return float4x4(float4(1, 0, 0, -light.position.x),
 										float4(0, -1, 0, light.position.y),
 										float4(0, 0, -1, light.position.z), float4(0, 0, 0, 1));
-	case 5: // -Z
+	case 5:
 		return float4x4(float4(-1, 0, 0, light.position.x),
 										float4(0, -1, 0, light.position.y),
 										float4(0, 0, 1, -light.position.z), float4(0, 0, 0, 1));
 	}
-	return float4x4(1.0); // Fallback, should never happen
+	return float4x4(1.0);
 }
 
 struct VertOut {

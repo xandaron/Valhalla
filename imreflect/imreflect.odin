@@ -10,7 +10,6 @@ import "core:math/linalg"
 
 import imgui "../imgui"
 
-
 Draw_Flag :: enum {
 	Read_Only,
 	Callable,
@@ -64,7 +63,7 @@ draw_value :: proc(name: string, value: any, info: Draw_Info = {}, ptr: rawptr =
 	case .Simd_Vector:      return draw_simd_vec_type(name, value, info)
 	case .Soa_Pointer:      return draw_soa_pointer_type(name, value, info)
 	case .Procedure:        return draw_proc_type(name, value, info, ptr)
-	case .Parameters: // As is a proc param? I don't think we need to cover this.
+	case .Parameters:
 	}
 	return
 }
@@ -89,14 +88,13 @@ strip_endianness :: proc(type: typeid) -> typeid {
 	case f32le,  f32be:  return f32
 	case f64le,  f64be:  return f64
 	}
-	return type // If not an endian type just return the original.
+	return type
 }
 
 @(private)
 endian_swap :: proc(ptr: rawptr, #any_int len: uint) {
 	buf := ([^]byte)(ptr)
 	for idx in 0..<(len/2) {
-		// Swap byte order
 		buf[idx]       ~= buf[len-1-idx]
 		buf[len-idx-1] ~= buf[idx]
 		buf[idx]       ~= buf[len-1-idx]
@@ -213,15 +211,11 @@ read_any_float_as :: proc(value: any, $T: typeid) -> T {
 tag_value_to_flag :: proc(str: string) -> (Draw_Flag, bool) {
 	switch str {
 	case "read-only": return .Read_Only, true
-	// refdisk reads the same `imrefl` tag, so the two must agree on this vocabulary or a field
-	// silently hides from one and not the other.
 	case "ignore":    return .Ignore, true
 	case "callable":  return .Callable, true
 	case "euler":     return .Euler, true
 	case "colour", "color": return .Colour, true
 	case "normalized", "normalised": return .Normalized, true
-	// Draws a struct's fields inline instead of behind its own tree node. Set automatically for an
-	// anonymous `using _` field, and writable by hand on any struct.
 	case "flatten":   return .Flatten, true
 	}
 	return nil, false
@@ -256,7 +250,6 @@ info_from_field_tag :: proc(tag: reflect.Struct_Tag, base: Draw_Info) -> (info: 
 			key := strings.trim_space(str[:eq])
 			text := strings.trim_space(str[eq + 1:])
 
-			// Values are split on commas, so a label cannot contain one.
 			if key == "label" {
 				info.label = text
 				continue
@@ -294,7 +287,6 @@ draw_struct_type :: proc(name: string, value: any, info: Draw_Info) -> (changed:
 				continue
 			}
 
-			// An anonymous `using` field has no name worth showing, so it always flattens.
 			if field.is_using && field.name == "_" {
 				field_info.flags += {.Flatten}
 			}
@@ -322,7 +314,6 @@ draw_struct_type :: proc(name: string, value: any, info: Draw_Info) -> (changed:
 @(private)
 draw_bit_field_type :: proc(name: string, value: any, info: Draw_Info) -> (changed: bool) {
 	bit_field_content :: proc(name: string, value: any, info: Draw_Info) -> (changed: bool) {
-		// Unteseted on big-endian platforms.
 		swap_endian := false
 		when ODIN_ENDIAN == .Little {
 			swap_endian = reflect.is_endian_big(reflect.type_info_core(type_info_of(value.id)))
@@ -348,7 +339,7 @@ draw_bit_field_type :: proc(name: string, value: any, info: Draw_Info) -> (chang
 			}
 
 			if reflect.is_signed(field.type) && (1 << (field.size - 1)) & value_u64 != 0 {
-				value_u64 |= ~mask // Sign extend if negative.
+				value_u64 |= ~mask
 			}
 
 			field_info := info_from_field_tag(field.tag, bit_field_base)
@@ -356,7 +347,6 @@ draw_bit_field_type :: proc(name: string, value: any, info: Draw_Info) -> (chang
 			changed |= draw_value(label, any{&value_u64, strip_endianness(field.type.id)}, field_info)
 
 			if reflect.is_signed(field.type) {
-				// We can't just check tmp < 0 as draw_value won't set the upper bits if size_of(field.type.id) < 8
 				if (1 << u64(field.type.size * 8 - 1)) & value_u64 != 0 {
 					value_u64 = max(value_u64, ~(mask >> 1))
 				} else {
@@ -542,7 +532,6 @@ draw_string_type :: proc(name: string, value: any, info: Draw_Info) -> (changed:
 	defer imgui.PopID()
 
 	switch value.id {
-	// How do we support utf16 strings properly?
 	case cstring:   imgui.TextEx(fmt.ctprintf("\"%s\" %s", (^cstring  )(value.data)^, name))
 	case cstring16: imgui.TextEx(fmt.ctprintf("\"%s\" %s", (^cstring16)(value.data)^, name))
 	case string:    imgui.TextEx(fmt.ctprintf("\"%s\" %s", (^string   )(value.data)^, name))
@@ -640,13 +629,6 @@ draw_quat_type :: proc(name: string, value: any, info: Draw_Info) -> (changed: b
 	return
 }
 
-// Four raw components are editable but not authorable, so a tagged rotation is shown as XYZ Euler
-// degrees instead.
-//
-// The edit is applied as a delta onto the existing quaternion rather than rebuilding it from the
-// displayed angles. Euler extraction is not injective — the same orientation has several valid
-// triples, and near a pole the extracted angles jump — so rebuilding would make the numbers snap
-// around while dragging even though the orientation never moved.
 @(private)
 draw_quat_as_euler :: proc(
 	name: string,
@@ -733,8 +715,6 @@ draw_float_type :: proc(name: string, value: any, info: Draw_Info) -> (changed: 
 	imgui.BeginDisabled(.Read_Only in info.flags)
 	defer imgui.EndDisabled()
 
-	// A bound or a speed means the field has a meaningful range, which a drag expresses and a
-	// text box does not. Untagged fields keep the text box so precise values stay typeable.
 	if info.flags & {.Has_Min, .Has_Max, .Has_Speed} != {} {
 		tmp := read_any_float_as(value, f32)
 		speed := f32(info.speed) if .Has_Speed in info.flags else 0.05
@@ -823,12 +803,6 @@ draw_matrix_type :: proc(name: string, value: any, info: Draw_Info) -> (changed:
 	return
 }
 
-// imgui can edit 2 to 4 numeric components on one row. Without this a Vec3 reflects as an array
-// of three floats and draws as a collapsible node with three rows, which is a bad trade for the
-// most common type in a 3D editor.
-//
-// Each arm selects its imgui data type with an implicit selector so this file never spells an
-// imgui type name, which is how the rest of the package refers to the binding.
 @(private)
 draw_inline_vector :: proc(
 	name: string,
@@ -850,7 +824,6 @@ draw_inline_vector :: proc(
 	label := fmt.ctprint(name)
 	components := i32(count)
 
-	// A colour is the one case where the generic row is the wrong widget entirely.
 	if .Colour in info.flags && reflect.is_float(elem) && elem.size == 4 {
 		switch count {
 		case 3:
@@ -865,7 +838,6 @@ draw_inline_vector :: proc(
 
 	#partial switch elem_info in elem.variant {
 	case runtime.Type_Info_Float:
-		// Dragging suits spatial values, which is what most small float vectors are.
 		switch elem.size {
 		case 4: changed = imgui.DragScalarN(label, .Float, data, components, speed, low, high)
 		case 8: changed = imgui.DragScalarN(label, .Double, data, components, speed, low, high)
@@ -876,7 +848,6 @@ draw_inline_vector :: proc(
 		}
 		return changed, true
 	case runtime.Type_Info_Integer:
-		// Integers step rather than slide so they stay exact.
 		switch elem.size {
 		case 1: return imgui.InputScalarN(label, elem_info.signed ? .S8 : .U8, data, components), true
 		case 2: return imgui.InputScalarN(label, elem_info.signed ? .S16 : .U16, data, components), true
@@ -887,8 +858,6 @@ draw_inline_vector :: proc(
 	return false, false
 }
 
-// imgui takes bounds as pointers and treats min >= max as "unbounded", so an absent tag has to be
-// a nil pointer rather than a zero.
 @(private)
 bounds_f32 :: proc(info: Draw_Info) -> (low: rawptr, high: rawptr) {
 	@(static) low_value, high_value: f32
@@ -995,7 +964,6 @@ draw_enum_array_type :: proc(name: string, value: any, info: Draw_Info) -> (chan
 		defer imgui.TreePop()
 
 		array_info := type_info_of(value.id).variant.(reflect.Type_Info_Enumerated_Array)
-		// TODO: Implement.
 	}
 	return
 }
@@ -1034,8 +1002,6 @@ draw_fixed_capacity_dyn_array_type :: proc(name: string, value: any, info: Draw_
 		array_info := type_info_of(value.id).variant.(reflect.Type_Info_Fixed_Capacity_Dynamic_Array)
 		bytes := ([^]byte)(value.data)
 
-		// Unlike a dynamic array there is no header: the elements are stored inline and the length
-		// sits after them, which is why this reads through len_offset rather than a Raw_ struct.
 		length := (^int)(&bytes[array_info.len_offset])^
 
 		imgui.TextEx(fmt.ctprintf("len %v / cap %v", length, array_info.capacity))
@@ -1079,8 +1045,6 @@ draw_simd_vec_type :: proc(name: string, value: any, info: Draw_Info) -> (change
 	return
 }
 
-// TODO: What's this even meant to represent?
-// How should we display this?
 @(private)
 draw_soa_pointer_type :: proc(name: string, value: any, info: Draw_Info) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Soa_Pointer)
@@ -1097,8 +1061,6 @@ draw_soa_pointer_type :: proc(name: string, value: any, info: Draw_Info) -> (cha
 	return
 }
 
-// What should this even do? I'll just write the proc address.
-// Maybe we can make the proc callable with struct tags.
 @(private)
 draw_proc_type :: proc(name: string, value: any, info: Draw_Info, ptr: rawptr = nil) -> (changed: bool) {
 	assert_kind(reflect.type_kind(value.id), .Procedure)

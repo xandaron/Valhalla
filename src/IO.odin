@@ -219,4 +219,3 @@ keyCallback: GLFWKeyCallback : proc "c" (window: WindowHandle, key, scancode, ac
 		}
 	}
 }
-

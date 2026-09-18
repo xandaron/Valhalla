@@ -106,7 +106,6 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 		switch values[cachedIdx^].interpolation {
 		case .CubicSpline:
 			when T != Quat {
-				// Catmull-Rom spline - calculates tangents automatically
 				t1 := values[cachedIdx^].time
 				t2 := values[cachedIdx^ + 1].time
 				dt := f32((time - t1) / (t2 - t1))
@@ -114,17 +113,14 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 				p0 := values[cachedIdx^].value
 				p1 := values[cachedIdx^ + 1].value
 
-				// Get neighboring points for tangent calculation
 				p_prev :=
 					cachedIdx^ > 0 ? values[cachedIdx^ - 1].value : values[len(values) - 1].value
 				p_next :=
 					cachedIdx^ + 2 < u32(len(values)) ? values[cachedIdx^ + 2].value : values[0].value
 
-				// Catmull-Rom tangents (scaled by time differences for proper parameterization)
 				m0 := 0.5 * (p1 - p_prev)
 				m1 := 0.5 * (p_next - p0)
 
-				// Hermite interpolation
 				dt2 := dt * dt
 				dt3 := dt2 * dt
 				h00 := 2 * dt3 - 3 * dt2 + 1
@@ -134,8 +130,6 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 
 				return h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1
 			} else {
-				// Cubic spline interpolation is not typically used for quaternions
-				// So we will fallback to spherical linear interpolation for quaternions
 				fallthrough
 			}
 		case .SphericalLinear:
@@ -145,8 +139,6 @@ updateAnimations :: proc(scene: ^Scene, delta: f32) {
 				dt := (time - t1) / (t2 - t1)
 				return slerp(values[cachedIdx^].value, values[cachedIdx^ + 1].value, f32(dt))
 			} else {
-				// Spherical linear interpolation is only valid for quaternions
-				// So we will fallback to linear interpolation for other types
 				fallthrough
 			}
 		case .Linear:

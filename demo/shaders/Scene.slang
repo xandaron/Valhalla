@@ -96,7 +96,6 @@ FragOut frag(VertOut input) {
 	FragOut output;
 
 	static const int SAMPLES = 20;
-	// Sample offset directions for shadow sampling
 	static const float3 sampleOffsetDirections[SAMPLES] = {
 		float3(1, 0, 0),	float3(-1, 0, 0), float3(0, 1, 0), float3(0, -1, 0),
 		float3(0, 0, 1),	float3(0, 0, -1), float3(1, 1, 0), float3(-1, -1, 0),
@@ -144,13 +143,6 @@ FragOut frag(VertOut input) {
 
 		shadow /= float(SAMPLES);
 
-		// Point light photometry. An isotropic source of flux F has luminous intensity
-		// I = F / 4pi, giving illuminance E = I / d^2 at the surface, and a Lambertian surface
-		// reflects L = albedo * E * cos(theta) / pi. Albedo is applied once after the loop, so
-		// what accumulates here is E * cos(theta) / pi.
-		//
-		// The distance is clamped because a true point source diverges at its own position;
-		// the clamp stands in for the light having physical size.
 		static const float MIN_DISTANCE_SQUARED = 0.0001;
 		const float attenuation =
 				1.0 / (4.0 * PI * PI * max(lightSquaredDistance, MIN_DISTANCE_SQUARED));

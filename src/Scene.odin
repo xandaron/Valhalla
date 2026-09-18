@@ -6,11 +6,9 @@ Scene :: struct {
 	path:         string,
 	name:         string,
 
-	// Scene Settings
 	ambientLight: f32 `imrefl:"label=Ambient light,min=0,max=10,speed=0.01"`,
 	clearColour:  Vec4 `imrefl:"label=Clear colour,colour"`,
 
-	// Assets
 	models:       [dynamic]Model,
 	textures:     [dynamic]Texture,
 	objects:      [dynamic]Object,
@@ -22,7 +20,6 @@ Scene :: struct {
 	indices:      [dynamic]u32 `imrefl:"ignore"`,
 	boneCount:    int,
 
-	// Graphics Data
 	buffers:      SceneBuffers `imrefl:"ignore"`,
 }
 

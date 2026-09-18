@@ -4,8 +4,6 @@ import "base:runtime"
 import "core:os"
 import "core:reflect"
 
-// Serializes arbitrary data to disk using reflection.
-// Arrays and strings are handled using length-prefixed binary layouts matching src/Files.odin.
 save :: proc(fp: ^os.File, data: any) {
 	assert(fp != nil)
 	save_internal(fp, data)

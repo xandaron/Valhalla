@@ -4,9 +4,6 @@ import "base:runtime"
 import "core:reflect"
 import "core:strings"
 
-// Determines whether a struct field should be skipped based on struct tags.
-// Supports refdisk:"ignore", refdisk:"-", and imrefl:"ignore". `imreflect` reads the same
-// `imrefl` tag, so both must agree on its vocabulary.
 should_skip_field :: proc(tag: reflect.Struct_Tag) -> bool {
 	if val, ok := reflect.struct_tag_lookup(tag, "refdisk"); ok {
 		if val == "ignore" || val == "-" {
@@ -21,7 +18,6 @@ should_skip_field :: proc(tag: reflect.Struct_Tag) -> bool {
 	return false
 }
 
-// Checks if any field of a struct type has been marked to be ignored or skipped.
 has_ignored_fields :: proc(T: typeid) -> bool {
 	ti := runtime.type_info_base(type_info_of(T))
 	if _, ok := ti.variant.(runtime.Type_Info_Struct); ok {
@@ -34,8 +30,6 @@ has_ignored_fields :: proc(T: typeid) -> bool {
 	return false
 }
 
-// Checks if a type is plain data (contains no pointers, strings, dynamic arrays, slices, maps, procedures, or any).
-// Plain types can be serialized and deserialized in a single bulk read/write operation.
 is_type_plain :: proc(ti: ^runtime.Type_Info) -> bool {
 	if ti == nil do return false
 	base := runtime.type_info_base(ti)
@@ -71,7 +65,6 @@ is_type_plain :: proc(ti: ^runtime.Type_Info) -> bool {
 	}
 }
 
-// Writes an integer value to an any whose underlying type is an integer or rune.
 write_int_to_any :: proc(i: $T, value: any) {
 	switch runtime.typeid_underlying(value.id) {
 	case i8:      (^i8     )(value.data)^ = i8(i)

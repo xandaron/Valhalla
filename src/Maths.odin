@@ -29,7 +29,6 @@ IMAT2 :: linalg.MATRIX2F32_IDENTITY
 IMAT3 :: linalg.MATRIX3F32_IDENTITY
 IMAT4 :: linalg.MATRIX4F32_IDENTITY
 
-// Functions
 degrees :: linalg.to_degrees
 radians :: linalg.to_radians
 

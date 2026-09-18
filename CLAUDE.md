@@ -51,25 +51,10 @@ to; add a new section only if it is genuinely a new area of responsibility.
 
 ### Do not write comments
 
-Default to no comments. The code should read on its own, and a comment that restates it is noise
-to be removed.
+Do not write comments. Not explanatory ones, not "why" ones, not file headers. The code stands on
+its own.
 
-Comment only where a reader would otherwise be genuinely stuck, and then explain *why* rather
-than *what*:
-
-- a non-obvious constraint the code is obeying (spec requirements, hardware limits, driver
-  behaviour)
-- a deliberate choice that looks wrong until explained
-- an ordering or lifetime dependency that is invisible locally
-
-```odin
-// Must be per swapchain image rather than per frame in flight: nothing signals when the
-// presentation engine is finished with the semaphore.
-presentReady: []vk.Semaphore,
-```
-
-Do not add file headers, section prose, banner-comment explanations, or restatements of a
-function's name.
+The only exception is the section banners described above, which are structure rather than prose.
 
 ## Task tracking
 

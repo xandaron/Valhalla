@@ -13,16 +13,11 @@ import stbi "vendor:stb/image"
 import refdisk "../../ref-disk"
 import V "../../src"
 
-// Every asset this produces is generated from the code below, so the output carries no third
-// party licence. Regenerating is always safe: nothing here reads the existing project.
-
 // ===[ Options ]==============================================================
 
 Options :: struct {
 	projectDir:    string,
 	projectFile:   string,
-	// Resolved from the project file so the generator writes where the engine reads. Stored in
-	// the "./components/" form because descriptors keep paths relative to the project root.
 	componentsRel: string,
 	scenesRel:     string,
 	generatedRel:  string,
@@ -30,9 +25,6 @@ Options :: struct {
 	environment:   bool,
 	stress:        bool,
 	textureSize:   int,
-	// Whether the green channel points down. Assimp's tangents are derived from UVs that the
-	// engine flips on import, so which convention lands correct is a property of the import
-	// settings rather than of the maps; see README.
 	flipNormalY:   bool,
 	stressLights:  int,
 	stressDensity: int,
@@ -130,10 +122,7 @@ parseOptions :: proc() -> (opts: Options, ok: bool) {
 	return opts, true
 }
 
-
 // ===[ Deterministic Noise ]==================================================
-
-// Hashed rather than seeded from the clock so that regenerating produces byte-identical assets.
 
 hash3 :: proc(x, y, seed: u32) -> u32 {
 	h := seed + x * 374761393 + y * 668265263
@@ -149,8 +138,6 @@ smoothstep :: proc(t: f32) -> f32 {
 	return t * t * (3.0 - 2.0 * t)
 }
 
-// Tileable value noise. Lattice coordinates wrap at `period` so the result tiles seamlessly,
-// which matters because every surface here repeats its UVs.
 valueNoise :: proc(x, y: f32, period: u32, seed: u32) -> f32 {
 	xi := u32(math.floor(x))
 	yi := u32(math.floor(y))
@@ -189,7 +176,6 @@ fbm :: proc(x, y: f32, basePeriod: u32, octaves: int, seed: u32) -> f32 {
 	}
 	return total / normalisation
 }
-
 
 // ===[ Images ]===============================================================
 
@@ -235,9 +221,6 @@ writePNG :: proc(path: string, image: ^Image) -> bool {
 	return true
 }
 
-// Central differences on a wrapped height field. The surface normal of a height map h is
-// normalize(-dh/du, -dh/dv, 1); `strength` is just how tall the relief is taken to be relative
-// to a texel.
 heightToNormal :: proc(height: []f32, width, height_: int, strength: f32, flipY: bool) -> Image {
 	sample :: proc(height: []f32, width, height_, x, y: int) -> f32 {
 		xx := ((x % width) + width) % width
@@ -273,7 +256,6 @@ flatNormalImage :: proc(size: int) -> Image {
 	return image
 }
 
-
 // ===[ Patterns ]=============================================================
 
 Pattern :: struct {
@@ -287,8 +269,6 @@ patternDelete :: proc(pattern: ^Pattern) {
 	pattern.height = nil
 }
 
-// Running bond brick. The height field bevels towards the mortar so the normal map has a clear
-// direction change at every edge rather than a single-texel cliff.
 brickPattern :: proc(size: int, seed: u32) -> Pattern {
 	COLUMNS :: 4
 	ROWS :: 8
@@ -308,7 +288,6 @@ brickPattern :: proc(size: int, seed: u32) -> Pattern {
 			row := int(v * ROWS)
 			localV := v * ROWS - f32(row)
 
-			// Every other course shifts by half a brick.
 			offset := f32(row % 2) * 0.5
 			shifted := u * COLUMNS + offset
 			column := int(shifted)
@@ -333,7 +312,6 @@ brickPattern :: proc(size: int, seed: u32) -> Pattern {
 				grey := 0.48 + 0.10 * grain
 				colour = {grey, grey * 0.99, grey * 0.95}
 			} else {
-				// One hash per brick keeps the courses from looking rubber-stamped.
 				tint := hashFloat(u32(column), u32(row), seed)
 				base := [3]f32{0.42, 0.16, 0.12}
 				base += [3]f32{0.16, 0.08, 0.05} * (tint - 0.5) * 2
@@ -346,7 +324,6 @@ brickPattern :: proc(size: int, seed: u32) -> Pattern {
 	return pattern
 }
 
-// Square tiles with recessed grout.
 tilePattern :: proc(size: int, seed: u32) -> Pattern {
 	TILES :: 6
 	GROUT :: f32(0.04)
@@ -398,8 +375,6 @@ tilePattern :: proc(size: int, seed: u32) -> Pattern {
 	return pattern
 }
 
-// A grid of hemispheres. This is the unambiguous normal map: the relief is geometric, so if
-// tangent space is wrong the lighting on the domes is visibly lit from the wrong side.
 bumpPattern :: proc(size: int) -> Pattern {
 	DOMES :: 8
 	RADIUS :: f32(0.36)
@@ -431,8 +406,6 @@ bumpPattern :: proc(size: int) -> Pattern {
 	return pattern
 }
 
-// Flat two-tone reference surface. Deliberately has no relief: it is the control that the
-// normal-mapped surfaces are compared against.
 checkerImage :: proc(size: int) -> Image {
 	SQUARES :: 8
 	image := imageMake(size, size)
@@ -447,9 +420,6 @@ checkerImage :: proc(size: int) -> Image {
 	return image
 }
 
-// Deliberately the busiest map in the set: panel seams, bevels, rivet domes, diagonal ribs and a
-// hammered surface, all at different frequencies. A normal map only proves itself on detail the
-// geometry does not have, so this is the one to judge normal mapping by.
 ornamentPattern :: proc(size: int, seed: u32) -> Pattern {
 	PANELS :: 2
 	SEAM :: f32(0.045)
@@ -490,8 +460,6 @@ ornamentPattern :: proc(size: int, seed: u32) -> Pattern {
 				metal += 0.06 * rib * bevel
 			}
 
-			// Rivets march around the inside of each panel border, which is where the relief is
-			// most obviously three dimensional under a moving light.
 			rivetU := localU * RIVETS
 			rivetV := localV * RIVETS
 			cellU := int(rivetU)
@@ -540,8 +508,6 @@ plasterPattern :: proc(size: int, seed: u32) -> Pattern {
 	return pattern
 }
 
-// Binary zone plate. Ring frequency rises linearly with radius and reaches the Nyquist limit at
-// the edge, so minification without mip levels shows up as false rings rather than as grey.
 zonePlateImage :: proc(size: int) -> Image {
 	image := imageMake(size, size)
 	half := f32(size) * 0.5
@@ -562,8 +528,6 @@ hueColour :: proc(hue: f32) -> [3]f32 {
 	return {clamp(abs(h - 3) - 1, 0, 1), clamp(2 - abs(h - 2), 0, 1), clamp(2 - abs(h - 4), 0, 1)}
 }
 
-// Flat cells keep the PNG tiny on disk while the decoded image still costs its full size in
-// device memory, which is the cost being exercised.
 variantImage :: proc(size, variant, variants: int) -> Image {
 	CELLS :: 8
 	image := imageMake(size, size)
@@ -576,7 +540,6 @@ variantImage :: proc(size, variant, variants: int) -> Image {
 	}
 	return image
 }
-
 
 // ===[ Geometry ]=============================================================
 
@@ -634,7 +597,6 @@ makeCube :: proc(size, uvTiles: f32) -> Mesh {
 	mesh: Mesh
 	half := size * 0.5
 
-	// du cross dv must equal the outward normal, otherwise the face is wound inside out.
 	face :: proc(mesh: ^Mesh, origin, du, dv, normal: V.Vec3, uvTiles: f32) {
 		a := addVertex(mesh, origin, normal, {0, 0})
 		b := addVertex(mesh, origin + du, normal, {uvTiles, 0})
@@ -710,8 +672,6 @@ makeTorus :: proc(majorSegments, minorSegments: int, majorRadius, minorRadius, u
 	return mesh
 }
 
-// One object per file. The loader sizes an object's texture list from the model's mesh count,
-// so a file that imported as several meshes would index past it.
 writeOBJ :: proc(path, name: string, mesh: ^Mesh) -> bool {
 	builder := strings.builder_make(context.temp_allocator)
 
@@ -740,12 +700,7 @@ writeOBJ :: proc(path, name: string, mesh: ^Mesh) -> bool {
 	return true
 }
 
-
 // ===[ Rigged Meshes and glTF ]===============================================
-
-// OBJ carries no skeleton, so anything rigged is written as glTF 2.0: a JSON document beside a
-// binary buffer. assimp matches bones to nodes by name and keeps four weights per vertex, which
-// is exactly what the engine's Vertex stores.
 
 Joint :: struct {
 	name:        string,
@@ -766,9 +721,6 @@ riggedMeshDelete :: proc(rigged: ^RiggedMesh) {
 	delete(rigged.bones)
 }
 
-// A tapered column bound to a chain of bones running up its length. Every ring blends between the
-// two bones it sits between, so a bend deforms the surface smoothly instead of hinging, which is
-// the thing worth being able to see.
 makeRiggedColumn :: proc(
 	rings, segments, boneCount: int,
 	height, baseRadius, tipRadius: f32,
@@ -786,7 +738,6 @@ makeRiggedColumn :: proc(
 		)
 	}
 
-	// The side of a cone is not radial: the taper tilts the normal by the slope dr/dv.
 	slope := tipRadius - baseRadius
 	stride := u32(segments + 1)
 
@@ -841,8 +792,6 @@ gltfDelete :: proc(writer: ^GltfWriter) {
 	delete(writer.accessors)
 }
 
-// Every bufferView has to start on a four byte boundary, which is why the padding lives here
-// rather than being left to each caller to remember.
 gltfAdd :: proc(
 	writer: ^GltfWriter,
 	data: []u8,
@@ -896,7 +845,6 @@ writeGLTF :: proc(directory, file, name: string, rigged: ^RiggedMesh) -> bool {
 		maximum = linalg.max(maximum, position)
 	}
 
-	// POSITION is the one accessor the spec requires bounds on.
 	bounds := fmt.tprintf(
 		`,"min":[%.6f,%.6f,%.6f],"max":[%.6f,%.6f,%.6f]`,
 		minimum.x,
@@ -940,8 +888,6 @@ writeGLTF :: proc(directory, file, name: string, rigged: ^RiggedMesh) -> bool {
 		"SCALAR",
 	)
 
-	// The bind pose is the column standing straight, so each bone's inverse bind is just a
-	// translation back down to the origin. Column major, as glTF requires.
 	boneCount := len(rigged.bones)
 	inverseBinds := make([]f32, boneCount * 16, context.temp_allocator)
 	heightSoFar := f32(0)
@@ -975,8 +921,6 @@ writeGLTF :: proc(directory, file, name: string, rigged: ^RiggedMesh) -> bool {
 		fmt.tprintf(`,"min":[%.6f],"max":[%.6f]`, times[0], times[RIG_ANIMATION_KEYS - 1]),
 	)
 
-	// A travelling sine up the chain. The root stays put so the column reads as planted rather
-	// than sliding, and the last key repeats the first so the loop has no seam.
 	rotationAccessors := make([]int, boneCount, context.temp_allocator)
 	for boneIndex in 0 ..< boneCount {
 		samples := make([]f32, RIG_ANIMATION_KEYS * 4, context.temp_allocator)
@@ -1113,11 +1057,7 @@ writeGLTF :: proc(directory, file, name: string, rigged: ^RiggedMesh) -> bool {
 	return true
 }
 
-
 // ===[ Descriptors ]==========================================================
-
-// These go through refdisk against the engine's own structs rather than writing the byte layout
-// by hand, so a change to SceneData or ModelComponent cannot leave the generator behind.
 
 saveComponent :: proc(path: string, data: any) -> bool {
 	file, err := os.open(path, {.Write, .Create, .Trunc})
@@ -1155,7 +1095,6 @@ writeModelDescriptor :: proc(asset: Asset) -> bool {
 		},
 	)
 }
-
 
 // ===[ Scene Assembly ]=======================================================
 
@@ -1224,11 +1163,8 @@ addCamera :: proc(builder: ^Builder, name: string, eye, center: V.Vec3, far: f32
 	)
 }
 
-
 // ===[ Generation ]===========================================================
 
-// Indices into the descriptor lists below. Both scenes share one set, so these stay in step
-// with the order the lists are built in.
 Model :: enum u32 {
 	Plane = 0,
 	Cube,
@@ -1251,7 +1187,6 @@ Tex :: enum u32 {
 	OrnamentNormal,
 }
 
-// `rigged` selects glTF over OBJ, because only glTF can carry the skeleton and animation.
 MODEL_ASSETS := [Model]struct {
 	name:   string,
 	file:   string,
@@ -1308,8 +1243,6 @@ KnightPart :: enum u32 {
 	Sword,
 }
 
-// Referenced rather than generated: the stress scene needs a skinned, animated mesh, and nothing
-// here can make one. These are the descriptors knight.scene already uses.
 KNIGHT_PARTS := [KnightPart]string {
 	.Body   = "Knight.model",
 	.Helmet = "Knight_Helmet.model",
@@ -1318,8 +1251,6 @@ KNIGHT_PARTS := [KnightPart]string {
 
 KNIGHT_TEXTURES := [2]string{"knight.texture", "blank_normal.texture"}
 
-// Must equal the mesh count assimp produces for Knight_Simplified.glb: the loader indexes an
-// object's texture list by mesh, so a shorter list reads past its end.
 KNIGHT_MESH_COUNT :: 6
 KNIGHT_HEAD_BINDPOINT :: 0
 KNIGHT_RIGHT_HAND_BINDPOINT :: 2
@@ -1342,8 +1273,6 @@ variantTex :: proc(variant: int) -> u32 {
 
 GENERATED_SUBDIR :: "generated/"
 
-// The positional argument may be the project file or the directory holding it, because both are
-// natural to type and the engine itself now takes the file.
 resolveProject :: proc(opts: ^Options) -> bool {
 	opts.projectFile = opts.projectDir
 	if os.is_dir(opts.projectDir) {
@@ -1383,8 +1312,6 @@ resolveProject :: proc(opts: ^Options) -> bool {
 		return false
 	}
 
-	// loadProject already rejects a project that leaves any of these unset, so they are taken as
-	// given rather than defaulted a second time here.
 	opts.componentsRel = project.componentsPath
 	opts.scenesRel = project.scenesPath
 	opts.generatedRel = fmt.tprintf("%s%s", project.assetsPath, GENERATED_SUBDIR)
@@ -1417,8 +1344,6 @@ generateMeshes :: proc(opts: Options) -> bool {
 		fmt.printfln("  %s  (%v vertices, %v triangles)", path, len(mesh.positions), len(mesh.indices) / 3)
 	}
 
-	// Enough rings that the bend between bones is carried by the surface rather than by a handful
-	// of faces, which is the whole point of having it in the demo.
 	rig := makeRiggedColumn(48, 32, 8, 3.0, 0.30, 0.12)
 	defer riggedMeshDelete(&rig)
 	if !writeGLTF(dir, MODEL_ASSETS[.Rig].file, MODEL_ASSETS[.Rig].name, &rig) {
@@ -1567,36 +1492,25 @@ saveSceneFile :: proc(opts: Options, fileName, name: string, ambient: f32, build
 	return true
 }
 
-// Diagnostic scene. Ambient is deliberately low: a high ambient floor flattens relief and is the
-// quickest way to convince yourself normal mapping is broken when it is not.
 buildBenchScene :: proc(opts: Options) -> bool {
 	builder: Builder
 	commonLists(opts, &builder)
 
 	addObject(&builder, "Ground", u32(Model.Plane), {0, 0, 0}, {1, 1, 1}, u32(Tex.Checker), u32(Tex.FlatNormal))
 
-	// A/B pair: identical albedo and geometry, differing only in the normal map. Any difference
-	// between these two is normal mapping and nothing else.
 	addObject(&builder, "Sphere Flat (reference)", u32(Model.Sphere), {-4.5, 1, 0}, {2, 2, 2}, u32(Tex.Checker), u32(Tex.FlatNormal))
 	addObject(&builder, "Sphere Bumped", u32(Model.Sphere), {-1.5, 1, 0}, {2, 2, 2}, u32(Tex.Checker), u32(Tex.BumpNormal))
 
 	addObject(&builder, "Cube Brick", u32(Model.Cube), {1.5, 1, 0}, {2, 2, 2}, u32(Tex.BrickAlbedo), u32(Tex.BrickNormal))
 
-	// Non-uniform scale exercises the inverse transpose in the vertex shader; if that is wrong
-	// the lighting on this cube disagrees with the one beside it.
 	addObject(&builder, "Cube Squashed", u32(Model.Cube), {4.75, 0.75, 0}, {3, 1.5, 2}, u32(Tex.BrickAlbedo), u32(Tex.BrickNormal))
 
-	// Doubly curved with a wrapping UV seam, which is where tangent handedness goes wrong.
 	addObject(&builder, "Torus", u32(Model.Torus), {0, 1.1, 3.5}, {2, 2, 2}, u32(Tex.TileAlbedo), u32(Tex.TileNormal))
 
 	addObject(&builder, "Back Wall", u32(Model.Cube), {0, 3, 6.5}, {16, 6, 0.4}, u32(Tex.BrickAlbedo), u32(Tex.BrickNormal))
 
-	// Flat geometry carrying the busiest normal map in the set, so anything that looks like relief
-	// on it is normal mapping and nothing else.
 	addObject(&builder, "Ornament Panel", u32(Model.Cube), {-7.5, 1.6, 2.5}, {0.3, 3.2, 3.2}, u32(Tex.OrnamentAlbedo), u32(Tex.OrnamentNormal))
 
-	// Skinned and animated. The sway runs up a chain of eight bones, so a broken bind pose or a
-	// bad weight shows as a kink rather than something subtle.
 	addObject(
 		&builder,
 		"Rig",
@@ -1612,8 +1526,6 @@ buildBenchScene :: proc(opts: Options) -> bool {
 		},
 	)
 
-	// Two opposed coloured lights make the relief direction readable: a bump lit from the left
-	// and from the right should shade on opposite sides.
 	addLight(&builder, "Key (warm)", {-5, 4, -4}, {1.0, 0.78, 0.55}, 2200)
 	addLight(&builder, "Fill (cool)", {5, 3.5, -4}, {0.55, 0.72, 1.0}, 1700)
 	addLight(&builder, "Rim", {0, 5, 4}, {1, 1, 1}, 1100)
@@ -1623,8 +1535,6 @@ buildBenchScene :: proc(opts: Options) -> bool {
 	return saveSceneFile(opts, "bench", "Bench", 0.05, &builder)
 }
 
-// Presentable scene: a walled courtyard. Judges whether the renderer looks right overall rather
-// than whether a single feature works.
 buildEnvironmentScene :: proc(opts: Options) -> bool {
 	builder: Builder
 	commonLists(opts, &builder)
@@ -1652,8 +1562,6 @@ buildEnvironmentScene :: proc(opts: Options) -> bool {
 		{"Pillar Light Amber", {1.00, 0.75, 0.22}},
 	}
 
-	// Each pillar light sits outboard of its pillar, between it and the corner, so the pillar is
-	// lit from behind and throws a shadow inward across the floor rather than being washed flat.
 	PILLAR_LIGHT_SPREAD :: f32(1.3)
 	PILLAR_LIGHT_HEIGHT :: f32(1.8)
 
@@ -1696,9 +1604,6 @@ buildEnvironmentScene :: proc(opts: Options) -> bool {
 
 	addObject(&builder, "Ornament Plaque", u32(Model.Cube), {0, 2.2, 9.4}, {5, 3.4, 0.35}, u32(Tex.OrnamentAlbedo), u32(Tex.OrnamentNormal))
 
-	// Set across the view rather than along it, so both read as columns instead of overlapping.
-	// Checker albedo because the sway is the thing to see; the ornament normal rides on top to
-	// show a normal map surviving skinning, where the tangent frame is rebuilt per frame.
 	for position, i in ([2]V.Vec3{{-3.6, 0, 3.6}, {3.6, 0, -3.6}}) {
 		addObject(
 			&builder,
@@ -1717,8 +1622,6 @@ buildEnvironmentScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	// Deliberately dim and neutral: it reads the monument's shape without competing with the
-	// pillar lights, which are what actually colour the courtyard.
 	addLight(&builder, "Monument Key", {0, 3.6, 0}, {1.0, 1.0, 1.0}, 900)
 
 	addCamera(&builder, "Courtyard", {-8, 6, -8}, {0, 1, 0})
@@ -1784,9 +1687,6 @@ generateStressAssets :: proc(opts: Options) -> bool {
 	return true
 }
 
-// Performance scene. Each group targets one cost the renderer currently pays in full, and
-// -lights and -density scale them independently so frame time can be attributed by
-// regenerating rather than by guesswork.
 buildStressScene :: proc(opts: Options) -> bool {
 	builder: Builder
 	commonLists(opts, &builder)
@@ -1815,15 +1715,10 @@ buildStressScene :: proc(opts: Options) -> bool {
 		return (f32(index) - f32(count - 1) * 0.5) * spacing
 	}
 
-	// The zone plate repeats forty times across the floor, so almost all of it is minified.
 	addObject(&builder, "Floor", stressModel(.TiledPlane), {0, 0, 0}, {8, 1, 8}, ZONE_PLATE_TEX, u32(Tex.FlatNormal))
 
-	// Coplanar with the floor: only depth precision decides which surface wins each pixel.
 	addObject(&builder, "Z-Fight Patch", u32(Model.Plane), {20, 0, -55}, {0.5, 1, 0.5}, u32(Tex.BrickAlbedo), u32(Tex.BrickNormal))
 
-	// Many instances of a 24 vertex mesh. Transform.slang dispatches over vertices and loops
-	// over instances inside each invocation, so only 24 invocations run, each walking every
-	// instance. Every crate reads one of 48 distinct 1024x1024 textures.
 	crates := side(100, density)
 	for i in 0 ..< crates * crates {
 		x, z := i % crates, i / crates
@@ -1838,8 +1733,6 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	// Mid-poly instances. Per-vertex transform storage and shadow triangles both scale with
-	// vertices times instances, and nothing is culled.
 	orbs := side(20, density)
 	for i in 0 ..< orbs * orbs {
 		x, z := i % orbs, i / orbs
@@ -1854,8 +1747,6 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	// Skinned and animated, each carrying two bone attachments. Animation is evaluated per
-	// object on the CPU every frame.
 	knights := side(8, density)
 	for i in 0 ..< knights * knights {
 		x, z := i % knights, i / knights
@@ -1897,7 +1788,6 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	// A tall helix of tori behind the crates, throwing long shadows across the other groups.
 	tori := scaled(100, density)
 	for i in 0 ..< tori {
 		angle := f32(i) * 0.45
@@ -1913,8 +1803,6 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	// Panes facing the camera, listed far to near. Instances draw in list order, so each pane
-	// is fully shaded before the next one covers it and early depth testing rejects nothing.
 	panes := scaled(40, density)
 	facing := linalg.quaternion_angle_axis_f32(-math.PI / 2, V.Vec3{1, 0, 0})
 	for i in 0 ..< panes {
@@ -1930,8 +1818,6 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	// Posts much thinner than a shadow map texel, so their shadows break up rather than
-	// reading as lines.
 	posts := scaled(200, density)
 	for i in 0 ..< posts {
 		addObject(
@@ -1945,16 +1831,10 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	// Hundreds of thousands of triangles at the far corner of the floor, with no level of
-	// detail, drawn into every shadow view as well.
 	addObject(&builder, "Dense Sphere", stressModel(.DenseSphere), {62, 4, 70}, {8, 8, 8}, u32(Tex.Checker), u32(Tex.BumpNormal))
 
-	// High and far off, so each 512 texel cube face is stretched across the whole floor and
-	// shadow edges stair-step visibly.
 	addLight(&builder, "Sun", {-30, 60, -40}, {1.0, 0.95, 0.85}, 120000)
 
-	// Every light renders all geometry into six views and takes twenty shadow samples per
-	// shaded pixel whether or not it reaches anything. These contribute nothing at all.
 	buried := (opts.stressLights - 1) / 4
 	for i in 0 ..< buried {
 		addLight(
@@ -1987,7 +1867,6 @@ buildStressScene :: proc(opts: Options) -> bool {
 
 	return saveSceneFile(opts, "stress", "Stress", 0.05, &builder)
 }
-
 
 // ===[ Entry Point ]==========================================================
 

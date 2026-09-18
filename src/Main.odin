@@ -34,15 +34,12 @@ globals: struct {
 	projectFile:    string,
 	project:        ProjectData,
 
-	// Graphics Engine Data
 	graphicsData:   GraphicsData,
 
-	// Scene Data
 	scenes:         [dynamic]Scene,
 	activeScene:    u32,
 	uiData:         UIData,
 
-	// Debugging
 	baseDir:        string,
 	fps:            f64,
 	paused:         bool,
@@ -63,8 +60,6 @@ main :: proc() {
 	globals.projectFile, _ = filepath.abs(os.args[1], context.allocator)
 	globals.projectDir = filepath.dir(globals.projectFile)
 
-	// Every path inside the project file is relative to the file itself, so the working directory
-	// has to move before the first of them is resolved.
 	os.set_working_directory(globals.projectDir)
 
 	projectErr: LoadError
@@ -134,7 +129,6 @@ main :: proc() {
 	InitGraphicsInfo {
 		appVersion        = APP_VERSION,
 		windowTitle       = APP_NAME,
-		// TODO: Sort this out. I need to load shader descriptor files like the model and texture files
 		transformShader   = transformComp,
 		lightShaders      = {lightVert, lightFrag},
 		sceneShaders      = {sceneVert, sceneFrag},

@@ -23,8 +23,6 @@ struct Light {
 enum TextureIndex {
 	ALBEDO,
 	NORMAL,
-	// METALLIC,
-	// ROUGHNESS,
 
 	COUNT,
 };

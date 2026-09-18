@@ -45,8 +45,6 @@ DEVICE_EXTENSIONS: []cstring : {
 	vk.EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,
 }
 
-
-
 @(private = "file")
 MAX_FRAMES_IN_FLIGHT: u32 : 2
 
@@ -69,7 +67,6 @@ DEPTH_BIAS_CONSTANT: f32 : 1.25
 
 @(private = "file")
 DEPTH_BIAS_SLOPE: f32 : 1.75
-
 
 // ===[ Errors ]===============================================================
 
@@ -205,7 +202,6 @@ DescriptorHeapError :: enum {
 	HeapTooSmall,
 	OutOfTextureSlots,
 }
-
 
 // ===[ Shared Types ]=========================================================
 
@@ -361,8 +357,6 @@ CmdBufferIndex :: enum {
 TextureIndex :: enum {
 	Albedo,
 	NormalMap,
-	// MATERIAL,
-	// ROUGHNESS,
 }
 
 GLFWCallbacks :: struct {
@@ -375,7 +369,6 @@ GLFWCallbacks :: struct {
 
 SceneBuffers :: struct {
 	textures:           [dynamic]Image,
-	// TODO: Combine buffers into one buffer using offsets
 	vertexBuffer:       Buffer,
 	indexBuffer:        Buffer,
 	instanceBuffers:    [MAX_FRAMES_IN_FLIGHT]Buffer,
@@ -408,7 +401,6 @@ deleteSceneBuffers :: proc(using graphicsData: ^GraphicsData, buffers: ^SceneBuf
 }
 
 GraphicsData :: struct {
-	// Rendering push constants
 	contrast:            f32,
 	brightness:          f32,
 	saturation:          f32,
@@ -517,7 +509,6 @@ InitGraphicsInfo :: struct {
 	gizmoShaders:      [2][]byte,
 	postProcessShader: []byte,
 }
-
 
 // ===[ Lifecycle ]============================================================
 
@@ -732,7 +723,6 @@ waitDeviceIdle :: proc(using graphicsData: ^GraphicsData) -> vk.Result {
 	return vk.DeviceWaitIdle(device)
 }
 
-
 // ===[ Window and Input ]=====================================================
 
 updateWindow :: proc(using graphicsData: ^GraphicsData) -> (ret: bool) {
@@ -798,7 +788,6 @@ initWindow :: proc(using graphicsData: ^GraphicsData, windowTitle: cstring) -> W
 
 	return .None
 }
-
 
 // ===[ Instance and Device ]==================================================
 
@@ -1291,7 +1280,6 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	return .None
 }
 
-
 // ===[ Swapchain ]============================================================
 
 @(private = "file")
@@ -1373,8 +1361,6 @@ getRenderAspectRatio :: proc(using graphicsData: ^GraphicsData) -> f32 {
 	return f32(renderSize.x) / f32(renderSize.y)
 }
 
-// The render target has its own resolution and aspect, so fitting it to the swapchain leaves
-// black bars on one axis whenever the two aspects differ.
 @(private = "file")
 @(require_results)
 letterboxRect :: proc(
@@ -1625,7 +1611,6 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) {
 
 	markCommandsDirty(graphicsData, {.PostProcess})
 }
-
 
 // ===[ Device Memory ]========================================================
 
@@ -2118,7 +2103,6 @@ blockRelease :: proc(block: ^MemoryBlock, offset, size: vk.DeviceSize) {
 	}
 }
 
-
 // ===[ Staging Ring ]=========================================================
 
 @(private = "file")
@@ -2453,12 +2437,9 @@ stagingUploadBuffer :: proc(
 	return .None
 }
 
-
 // ===[ Buffers ]==============================================================
 
 @(require_results)
-// `usage2` carries flags that only exist in the 64-bit usage enum (the descriptor heap bit, for
-// instance). It is passed through a BufferUsageFlags2CreateInfo, which maintenance5 allows.
 @(private = "file")
 createBuffer :: proc(
 	using graphicsData: ^GraphicsData,
@@ -2474,8 +2455,6 @@ createBuffer :: proc(
 		usage = usage2,
 	}
 
-	// Descriptor heap writes describe a buffer by its device address, so every buffer that could
-	// end up in the heap needs this. Adding it unconditionally is simpler than tracking which do.
 	bufferInfo: vk.BufferCreateInfo = {
 		sType                 = .BUFFER_CREATE_INFO,
 		pNext                 = &usage2Info if usage2 != {} else nil,
@@ -2605,7 +2584,6 @@ deleteBuffer :: proc(using graphicsData: ^GraphicsData, buffer: ^Buffer) {
 	memoryFree(&graphicsData.memoryAllocator, &buffer.allocation)
 	buffer^ = {}
 }
-
 
 // ===[ Images and Samplers ]==================================================
 
@@ -2874,7 +2852,6 @@ copyBufferToImage :: proc(
 	)
 }
 
-
 @(private = "file")
 setViewportAndScissor :: proc(commandBuffer: vk.CommandBuffer, size: [2]u32) {
 	vk.CmdSetViewport(
@@ -2973,12 +2950,9 @@ copyImage :: proc(
 	)
 }
 
-
 @(private = "file")
 @(require_results)
 createSamplers :: proc(using graphicsData: ^GraphicsData) -> SamplerError {
-	// No VkSampler objects: the descriptor heap takes sampler create infos directly and writes
-	// the descriptor from them, so the sampler heap is the only place a sampler exists.
 	samplerInfo: vk.SamplerCreateInfo = {
 		sType                   = .SAMPLER_CREATE_INFO,
 		pNext                   = nil,
@@ -3046,7 +3020,6 @@ findSupportedDepthFormat :: proc(
 	log(.Error, "Failed to find supported format!")
 	return .UNDEFINED
 }
-
 
 // ===[ Texture Loading ]======================================================
 
@@ -3210,8 +3183,6 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 // ===[ Descriptor Heaps ]=====================================================
 
 @(private = "file")
-// Writes every descriptor for both frames into the heap. Replaces the old descriptor pools,
-// sets and set layouts entirely; see DescriptorHeap.odin.
 updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	buffers := &scene.buffers
 
@@ -3332,7 +3303,6 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	}
 }
 
-// Rewrites only the descriptors whose images are recreated on a swapchain resize.
 updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) {
 	for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		writeImageDescriptor(
@@ -4935,9 +4905,6 @@ cleanupPipeline :: proc(using graphicsData: ^GraphicsData, pipeline: ^Pipeline) 
 	vk.DestroyPipeline(device, pipeline.handle, nil)
 }
 
-// It is the callers responsibility to ensure they pass the correct
-// number of shaders to satisfy pipeline creation.
-// You will crash if you don't.
 updatePipelineShaders :: proc(
 	using graphicsData: ^GraphicsData,
 	pipelineIndex: PipelineIndex,
@@ -4964,7 +4931,6 @@ updatePipelineShaders :: proc(
 		markCommandsDirty(graphicsData, {.PostProcess})
 	}
 }
-
 
 // ===[ Commands and Synchronisation ]=========================================
 
@@ -5149,7 +5115,6 @@ endSingleTimeCommands :: proc(
 	}
 	vk.CreateFence(device, &fenceCreateInfo, nil, &fence)
 
-	// A command buffer can only be submitted to the family that owns its pool.
 	queue := computeCommandPool == commandPool ? computeQueue : graphicsQueue
 	vk.QueueSubmit2(queue, 1, &submitInfo, fence)
 	vk.WaitForFences(device, 1, &fence, true, ~u64(0))
@@ -5214,7 +5179,6 @@ createSyncObjects :: proc(using graphicsData: ^GraphicsData) -> SyncError {
 
 	return .None
 }
-
 
 // ===[ Scene and Frame Data ]=================================================
 
@@ -5509,7 +5473,6 @@ updateSceneData :: proc(
 	updateLightBuffer(graphicsData, scene, delta)
 	updateInstanceBuffer(graphicsData, scene, delta)
 }
-
 
 // ===[ Command Recording ]====================================================
 
@@ -5859,7 +5822,6 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		{
 			sType = .IMAGE_MEMORY_BARRIER_2,
 			pNext = nil,
-			// Sampled as the depth source by the post-process pass last frame.
 			srcStageMask = {.FRAGMENT_SHADER, .COMPUTE_SHADER},
 			srcAccessMask = {.SHADER_SAMPLED_READ},
 			dstStageMask = {.EARLY_FRAGMENT_TESTS},
@@ -6446,7 +6408,6 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 	}
 }
 
-
 // ===[ Frame Submission ]=====================================================
 
 @(require_results)
@@ -6634,7 +6595,6 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	currentFrame = (currentFrame + 1) % 2
 	return nil
 }
-
 
 // ===[ Dear ImGui ]===========================================================
 

@@ -104,8 +104,6 @@ parseOptions :: proc() -> (opts: Options, ok: bool) {
 	return opts, true
 }
 
-// The target may be the project file itself or the directory to put one in, because both are
-// natural things to type.
 resolveTarget :: proc(opts: ^Options) -> (projectFile: string, projectDir: string) {
 	if filepath.ext(opts.target) == PROJECT_EXTENSION {
 		projectFile = opts.target

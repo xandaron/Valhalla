@@ -367,23 +367,18 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 		}
 	}
 
-	// I could make this persistent but I don't think I need to
 	propertyStore := ai.CreatePropertyStore()
 
-	// Stops Assimp from checking the area of faces preventing it from culling faces that are too small
 	ai.SetImportPropertyInteger(propertyStore, ai.CONFIG_PP_FD_CHECKAREA, 0)
 
-	// Maximum number of bones per vertex
 	ai.SetImportPropertyInteger(propertyStore, ai.CONFIG_PP_LBW_MAX_WEIGHTS, 4)
 
-	// Remove point and line primitives
 	ai.SetImportPropertyInteger(
 		propertyStore,
 		ai.CONFIG_PP_SBP_REMOVE,
 		i32(ai.Primitive_Type_Flags{.POINT, .LINE}),
 	)
 
-	// Remove scene components that I don't need
 	ai.SetImportPropertyInteger(
 		propertyStore,
 		ai.CONFIG_PP_RVC_FLAGS,
@@ -399,11 +394,8 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 		.Triangulate,
 		.RemoveComponent,
 		.GenNormals,
-		// This seems like a good idea.
 		.SplitLargeMeshes,
 		.LimitBoneWeights,
-		// Maybe I should use this and add logging.
-		// .ValidateDataStructure,
 		.ImproveCacheLocality,
 		.SortByPType,
 		.FindDegenerates,
@@ -411,7 +403,6 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 		.GenUVCoords,
 		.OptimizeMeshes,
 		.OptimizeGraph,
-		// Correct the UVs and winding order for Vulkan.
 		.FlipUVs,
 		.FlipWindingOrder,
 		.GenBoundingBoxes,
@@ -434,7 +425,6 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 		return .InvalidArgument
 	}
 
-	// I'm finding meshes this way as the names of the meshes are rarely correct so I use the node name instead.
 	findMeshes :: proc(
 		aiScene: ^ai.Scene,
 		node: ^ai.Node,
@@ -546,8 +536,6 @@ loadModel :: proc(scene: ^Scene, model: ^Model) -> LoadError {
 						vertex.bones[n] = u32(boneIdx)
 						break
 					} else if n == 3 {
-						// Assimp should limit the number of weights to 4.
-						// If we reach here then something has gone wrong.
 						logf(.Warning, "Vertex has more than 4 bone weights!")
 					}
 				}

@@ -33,10 +33,8 @@ changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
 	object := &scene.objects[objectIdx]
 	model := &scene.models[object.modelIdx]
 
-	// Remove from old model's instance list
 	removeInstance(scene, model, object.instanceIdx)
 
-	// Add to new model's instance list
 	object.modelIdx = modelIdx
 	object.instanceIdx = addInstance(scene, &scene.models[modelIdx], objectIdx)
 }
@@ -118,9 +116,8 @@ addInstance :: proc(scene: ^Scene, model: ^Model, objectIdx: u32) -> u32 {
 }
 
 removeInstance :: proc(scene: ^Scene, model: ^Model, instanceIdx: u32) {
-	unordered_remove(&model.instances, instanceIdx) // Replace with last
+	unordered_remove(&model.instances, instanceIdx)
 	if u32(len(model.instances)) > instanceIdx {
-		// Update the moved instance's index
 		scene.objects[model.instances[instanceIdx]].instanceIdx = instanceIdx
 	}
 

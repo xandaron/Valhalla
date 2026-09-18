@@ -1,7 +1,5 @@
 import "Buffers.slang";
 
-// Scene textures live at their source resolution in the heap's texture region; the index comes
-// from HeapIndices.TextureIndices rather than an array layer.
 Texture2D textureAt(uint index) {
 	DescriptorHandle<Texture2D> d = { index };
 	return d;
