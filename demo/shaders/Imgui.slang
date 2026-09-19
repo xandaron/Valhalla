@@ -1,5 +1,4 @@
 import "Buffers.slang";
-import "Colour.slang";
 import "Textures.slang";
 #include "Resources.slang"
 
@@ -8,8 +7,6 @@ struct PushConstants {
 	float2 scale;
 	float2 translate;
 	uint texture;
-	TransferFunction transferFunction;
-	float paperWhiteNits;
 };
 
 static const float UI_GAMMA = 2.2;
@@ -51,11 +48,7 @@ struct FragOut {
 FragOut frag(VertOut input) {
 	float4 colour = input.colour * textureAt(pushConstants.texture)
 																		 .Sample(Resources.LinearSampler, input.uv);
-
-	if (pushConstants.transferFunction == TransferFunction.PQ) {
-		const float3 light = pow(colour.rgb, UI_GAMMA);
-		colour.rgb = pqEncode(rec709ToRec2020(light) * pushConstants.paperWhiteNits);
-	}
+	colour.rgb = pow(colour.rgb, UI_GAMMA);
 
 	FragOut output;
 	output.colour = colour;

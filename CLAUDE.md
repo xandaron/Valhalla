@@ -79,7 +79,8 @@ The app is a GUI program, so a change is not verified until it has been run. Two
 
 - Kill it and you skip `cleanupGraphics`, which is where the pipeline cache is saved, leak
   reporting runs, and teardown validation errors surface. Close the window instead
-  (`Process.CloseMainWindow()` from PowerShell) so shutdown actually executes.
+  (`Process.CloseMainWindow()` from PowerShell), or press **Ctrl+Q**, which is a clean exit that
+  works even with an imgui text field focused, so shutdown actually executes.
 - Validation output goes to **stderr**, ordinary logging to stdout. Check both.
 - Never minimise or close the user's other windows to get a clean screenshot. To raise the app,
   use `BringWindowToTop` / `SetForegroundWindow` on its own `MainWindowHandle` and capture that
@@ -140,10 +141,24 @@ reset the current frame's fence by then, so `recreateSwapchain`'s wait over ever
 would never return. Set `swapchainDirty` instead; `drawFrame` handles it at the next frame
 boundary, before any fence is reset.
 
-`drawFrame` issues two submits: transform (compute queue), then Light/Scene/PostProcess/Imgui as
-one batch on the graphics queue. Ordering inside that batch comes from pipeline barriers recorded
-in the passes themselves, not from semaphores — if you add or reorder passes, the barriers are
-what keeps it correct.
+`drawFrame` issues two submits: transform (compute queue), then Light/Scene/Imgui/PostProcess/
+Present as one batch on the graphics queue. Ordering inside that batch comes from pipeline
+barriers recorded in the passes themselves, not from semaphores — if you add or reorder passes,
+the barriers are what keeps it correct.
+
+imgui does not draw onto the scene. The Imgui pass renders into its own `R16G16B16A16_SFLOAT` UI
+image (`ImageSlot.UiImage`), cleared to transparent, and `Imgui.slang` always outputs linear light,
+so the image holds premultiplied coverage. PostProcess tonemaps the scene, composites
+`ui.rgb + scene * (1 - ui.a)` and applies the single Gamma or PQ encode, so overlay blending is
+the same in SDR and HDR. Imgui ends by moving the UI image to `GENERAL` for that compute read, and
+PostProcess ends by moving ProcessedImage to `TRANSFER_SRC`. Present is a small command buffer,
+re-recorded every frame because it depends on `imageIndex`, that blits ProcessedImage to the
+swapchain image and transitions it for present.
+
+The post-process and UI images are sized to `outputCapacity`, not `swapchain.extent`: the largest
+of the swapchain and every connected monitor's video mode, grown only when the window outgrows
+it. Anything that bounds work by the output must use `swapchain.extent` (PostProcess takes it as
+`outputExtentX/Y`), never the image's own dimensions.
 
 **Descriptors.** Uses `VK_EXT_descriptor_heap` in its **untyped** model; there are no descriptor
 sets, pools, set layouts or `VkPipelineLayout` objects anywhere, and no set/binding mappings.
@@ -154,11 +169,12 @@ Shaders declare no bindings. Each pass's push constants start with a `resources:
 block of plain integer indices; `HeapIndices` exposes each resource as a `property` that builds a
 `DescriptorHandle<T>` from the matching index, so shaders read
 `pushConstants.resources.Lights[i]`. Properties carry no storage, so the block is exactly one
-uint per resource (currently 15, 60 bytes).
+uint per resource (currently 16, 64 bytes).
 
 std430 sizes that block at its used bytes and aligns whatever follows it by *that member's* own
-rule, so a `u32` after it sits at 60 but a `float2` sits at 64. Odin's `Vec2` is `[2]f32` and needs
-only 4, which is the one place the two sides disagree — hence `ShaderVec2`, an 8-aligned pair used
+rule. At 64 bytes everything after it sits at 64, but at an odd count — 15 fields, 60 bytes — a
+`u32` after it sits at 60 while a `float2` sits at 64. Odin's `Vec2` is `[2]f32` and needs only 4,
+which is the one place the two sides disagree — hence `ShaderVec2`, an 8-aligned pair used
 for Imgui's `scale` and `translate`. Align the *type*, not the struct: `#align` on a push constant
 struct does not move interior fields, and `#min_field_align(8)` pushes the trailing `u32`s out of
 place too. A mismatch here is invisible at runtime — the pushed range still covers what the shader
@@ -251,8 +267,20 @@ helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived o
   engine infers nothing, and `loadProject` rejects a project that leaves a required field blank.
   Sensible defaults belong in `projectgen`, which bakes them into the file it writes, so what the
   engine reads is always explicit.
+- Machine state lives in the project's `configPath` (`CONFIG_PATH()`), which is gitignored and
+  created at startup if missing: `imgui.ini`, `pipeline_cache.bin` and `user.settings`. Nothing
+  per-machine goes in the project directory itself.
+- `user.settings` (`UserSettings` in `Files.odin`: `RenderSettings`, window geometry, camera
+  speeds) is the **one sanctioned default**. When it is missing or from another format version,
+  the engine uses `defaultUserSettings()`, because the engine writes that file itself — it is
+  not authored project data. It is loaded after `loadProject` and saved at shutdown, so it too
+  depends on a clean exit.
+- refdisk reads only its own tag (`refdisk:"ignore"`) and imreflect reads only
+  `imrefl:"..."`. Hiding a field from the editor does not drop it from a file, and vice versa.
 - `ProjectData.version` is the first field on purpose. refdisk is positional with no header, so
   offset 0 is the only place a version can be read before the rest of the layout is trusted.
-  Bump `PROJECT_FORMAT_VERSION` when the struct changes.
-- `docs/` and `pipeline_cache.bin` are gitignored.
+  Do **not** bump `PROJECT_FORMAT_VERSION` (or any other `*_FORMAT_VERSION`) yet: there is no
+  migrator to upgrade old files, so every version stays at 1 until one exists. When a struct
+  changes before then, regenerate the affected files instead.
+- `docs/`, `pipeline_cache.bin` and `config/` are gitignored.
 - Commit only when asked.

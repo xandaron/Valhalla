@@ -2,20 +2,10 @@ package RefDisk
 
 import "base:runtime"
 import "core:reflect"
-import "core:strings"
 
 should_skip_field :: proc(tag: reflect.Struct_Tag) -> bool {
-	if val, ok := reflect.struct_tag_lookup(tag, "refdisk"); ok {
-		if val == "ignore" || val == "-" {
-			return true
-		}
-	}
-	if val, ok := reflect.struct_tag_lookup(tag, "imrefl"); ok {
-		if strings.contains(val, "ignore") {
-			return true
-		}
-	}
-	return false
+	val, ok := reflect.struct_tag_lookup(tag, "refdisk")
+	return ok && val == "ignore"
 }
 
 has_ignored_fields :: proc(T: typeid) -> bool {

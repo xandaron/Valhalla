@@ -22,6 +22,8 @@ struct PushConstants {
 	uint contentExtentY;
 	TransferFunction transferFunction;
 	float paperWhiteNits;
+	uint outputExtentX;
+	uint outputExtentY;
 };
 
 [[vk::push_constant]]
@@ -39,31 +41,7 @@ float3 narkowiczACES(float3 colour) {
 							 0.0, 1.0);
 }
 
-[shader("compute")]
-[numthreads(32, 32, 1)]
-void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
-	uint x = dispatchThreadID.x;
-	uint y = dispatchThreadID.y;
-
-	uint2 imageSize;
-	Resources.RenderedImage.GetDimensions(imageSize.x, imageSize.y);
-	if (x >= imageSize.x || y >= imageSize.y) {
-		return;
-	}
-
-	const uint2 contentOffset =
-			uint2(pushConstants.contentOffsetX, pushConstants.contentOffsetY);
-	const uint2 contentExtent =
-			uint2(pushConstants.contentExtentX, pushConstants.contentExtentY);
-	const uint2 content = uint2(x, y) - contentOffset;
-	if (x < contentOffset.x || y < contentOffset.y || content.x >= contentExtent.x ||
-			content.y >= contentExtent.y) {
-		Resources.ProcessedImage[int2(x, y)] = float4(0.0, 0.0, 0.0, 1.0);
-		return;
-	}
-
-	float3 colour = Resources.RenderedImage[int2(x, y)].xyz;
-
+float3 grade(float3 colour) {
 	colour =
 			pushConstants.contrast * (colour - 0.5) + 0.5 + pushConstants.brightness;
 	colour = max(colour, 0.0);
@@ -80,6 +58,31 @@ void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
 		colour = narkowiczACES(colour);
 		break;
 	}
+	return colour;
+}
+
+[shader("compute")]
+[numthreads(32, 32, 1)]
+void comp(uint3 dispatchThreadID: SV_DispatchThreadID) {
+	uint x = dispatchThreadID.x;
+	uint y = dispatchThreadID.y;
+
+	if (x >= pushConstants.outputExtentX || y >= pushConstants.outputExtentY) {
+		return;
+	}
+
+	const uint2 contentOffset =
+			uint2(pushConstants.contentOffsetX, pushConstants.contentOffsetY);
+	const uint2 contentExtent =
+			uint2(pushConstants.contentExtentX, pushConstants.contentExtentY);
+	const uint2 content = uint2(x, y) - contentOffset;
+	const bool inContent = x >= contentOffset.x && y >= contentOffset.y &&
+												 content.x < contentExtent.x && content.y < contentExtent.y;
+
+	const float3 scene = inContent ? grade(Resources.RenderedImage[int2(x, y)].xyz)
+																 : float3(0.0, 0.0, 0.0);
+	const float4 ui = Resources.UiImage[int2(x, y)];
+	float3 colour = ui.rgb + scene * (1.0 - ui.a);
 
 	switch (pushConstants.transferFunction) {
 	case TransferFunction.Gamma:

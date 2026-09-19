@@ -155,14 +155,20 @@ inputDevice :: proc(event: InputEvent) -> InputDevice {
 handleInput :: proc(event: InputEvent) {
 	imguiInputEvent(&globals.graphicsData, event)
 
+	if e, ok := event.(KeyEvent);
+	   ok && e.key == glfw.KEY_Q && e.action == glfw.PRESS && e.mods & glfw.MOD_CONTROL != 0 {
+		requestClose(&globals.graphicsData)
+		return
+	}
+
 	consumed: bool
 	switch inputDevice(event) {
 	case .None:
 		return
 	case .Mouse:
-		consumed = globals.uiData.lockInput || imguiWantsMouse(&globals.graphicsData)
+		consumed = imguiWantsMouse(&globals.graphicsData)
 	case .Keyboard:
-		consumed = globals.uiData.lockInput || imguiWantsKeyboard(&globals.graphicsData)
+		consumed = imguiWantsKeyboard(&globals.graphicsData)
 	}
 
 	if e, ok := event.(CursorPosEvent); ok {
@@ -202,13 +208,6 @@ handleInput :: proc(event: InputEvent) {
 			globals.uiData.showDemo = !globals.uiData.showDemo
 		case glfw.KEY_M:
 			globals.uiData.showMetrics = !globals.uiData.showMetrics
-		case glfw.KEY_R:
-			shaders: [2][]byte
-			shaders[0], _ = compileShader("./shaders/Scene.slang", "vert", .VERTEX)
-			shaders[1], _ = compileShader("./shaders/Scene.slang", "norm", .FRAGMENT)
-			updatePipelineShaders(&globals.graphicsData, .Scene, shaders[:])
-			delete(shaders[0])
-			delete(shaders[1])
 		}
 	}
 }

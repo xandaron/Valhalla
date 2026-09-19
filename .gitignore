@@ -4,6 +4,7 @@ logs/
 projs/
 imgui.ini
 pipeline_cache.bin
+config/*
 *.exe
 *.pdb
 *.dbg

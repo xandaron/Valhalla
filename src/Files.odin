@@ -30,6 +30,7 @@ ProjectData :: struct {
 	assetsPath:     string,
 	componentsPath: string,
 	shadersPath:    string,
+	configPath:     string,
 	startupScene:   string,
 	defaultModel:   string,
 	defaultAlbedo:  string,
@@ -79,10 +80,87 @@ deleteProject :: proc(project: ^ProjectData) {
 	delete(project.assetsPath)
 	delete(project.componentsPath)
 	delete(project.shadersPath)
+	delete(project.configPath)
 	delete(project.startupScene)
 	delete(project.defaultModel)
 	delete(project.defaultAlbedo)
 	delete(project.defaultNormal)
+}
+
+USER_SETTINGS_FORMAT_VERSION :: u32(1)
+
+USER_SETTINGS_FILE :: "user.settings"
+
+WindowSettings :: struct {
+	placed:        bool,
+	x, y:          i32,
+	width, height: i32,
+}
+
+CameraSettings :: struct {
+	moveSpeed:        f32 `imrefl:"label=Move speed,min=0,speed=0.01"`,
+	rotationSpeed:    f32 `imrefl:"label=Rotation speed,min=0,speed=0.01"`,
+	mouseSensitivity: f32 `imrefl:"label=Mouse sensitivity,min=0,speed=0.01"`,
+}
+
+UserSettings :: struct {
+	version: u32,
+	render:  RenderSettings,
+	window:  WindowSettings,
+	camera:  CameraSettings,
+}
+
+defaultUserSettings :: proc() -> UserSettings {
+	return {
+		version = USER_SETTINGS_FORMAT_VERSION,
+		render = defaultRenderSettings(),
+		window = {width = 1600, height = 800},
+		camera = {moveSpeed = 1, rotationSpeed = 1, mouseSensitivity = 1},
+	}
+}
+
+loadUserSettings :: proc() -> (settings: UserSettings, loaded: bool) {
+	path := projectPath(CONFIG_PATH(), USER_SETTINGS_FILE)
+	if !os.exists(path) {
+		logf(.Info, "No user settings at %v, using defaults.", path)
+		return defaultUserSettings(), false
+	}
+
+	file, err := os.open(path, {.Read})
+	if err != nil {
+		logf(.Warning, "Failed to open user settings \"%s\": %v. Using defaults.", path, err)
+		return defaultUserSettings(), false
+	}
+	defer os.close(file)
+
+	settings = refdisk.load(file, UserSettings)
+	if settings.version != USER_SETTINGS_FORMAT_VERSION {
+		logf(
+			.Warning,
+			"User settings \"%s\" are format version %v, this build reads version %v. Using defaults.",
+			path,
+			settings.version,
+			USER_SETTINGS_FORMAT_VERSION,
+		)
+		return defaultUserSettings(), false
+	}
+	logf(.Info, "User settings loaded from %v", path)
+	return settings, true
+}
+
+saveUserSettings :: proc(settings: UserSettings) -> SaveError {
+	path := projectPath(CONFIG_PATH(), USER_SETTINGS_FILE)
+	file, err := os.open(path, {.Write, .Create, .Trunc})
+	if err != nil {
+		logf(.Error, "Failed to write user settings \"%s\": %v", path, err)
+		return .IO
+	}
+	defer os.close(file)
+
+	stored := settings
+	stored.version = USER_SETTINGS_FORMAT_VERSION
+	refdisk.save(file, stored)
+	return .None
 }
 
 SCENE_FORMAT_VERSION :: u32(1)
@@ -765,6 +843,7 @@ loadTextureComponent :: proc(texture: ^Texture) -> LoadError {
 SCENE_PATH :: #force_inline proc() -> string {return globals.project.scenesPath}
 RESOURCE_PATH :: #force_inline proc() -> string {return globals.project.componentsPath}
 SHADERS_PATH :: #force_inline proc() -> string {return globals.project.shadersPath}
+CONFIG_PATH :: #force_inline proc() -> string {return globals.project.configPath}
 ASSETS_PATH :: #force_inline proc() -> string {return globals.project.assetsPath}
 
 projectPath :: proc(directory, file: string) -> string {

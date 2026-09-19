@@ -12,7 +12,7 @@
 		property TextureCubeArray ShadowMap { get { return PC.resources.ShadowMap; } }             \
 		property Texture2D SceneDepth { get { return PC.resources.SceneDepth; } }                  \
 		property RWTexture2D<float4> RenderedImage { get { return PC.resources.RenderedImage; } }  \
-		property RWTexture2D<float4> ProcessedImage { get { return PC.resources.ProcessedImage; } } \
+		property RWTexture2D<float4> ProcessedImage { get { return PC.resources.ProcessedImage; } } 		property RWTexture2D<float4> UiImage { get { return PC.resources.UiImage; } }              \
 		property SamplerState LinearSampler { get { return PC.resources.LinearSampler; } }         \
 		property SamplerState AnisotropicSampler { get { return PC.resources.AnisotropicSampler; } } \
 	};                                                                                     \

@@ -54,6 +54,7 @@ struct HeapIndices {
 	uint sceneDepth;
 	uint renderedImage;
 	uint processedImage;
+	uint uiImage;
 	uint linearSampler;
 	uint anisotropicSampler;
 

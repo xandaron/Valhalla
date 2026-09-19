@@ -34,6 +34,13 @@ extension HeapIndices {
 		}
 	}
 
+	property RWTexture2D<float4> UiImage {
+		get {
+			DescriptorHandle<RWTexture2D<float4>> d = { uiImage };
+			return d;
+		}
+	}
+
 	property SamplerState LinearSampler {
 		get {
 			DescriptorHandle<SamplerState> d = { linearSampler };

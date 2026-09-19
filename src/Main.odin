@@ -16,6 +16,8 @@ LOG_TO_FILE :: false
 
 frameCount: u32 = 0
 fpsTimer: time.Time
+frameTimeTotal: f64 = 0
+frameTimeWorst: f64 = 0
 
 delta: f64 = 0
 lastFrameTime: time.Time
@@ -23,16 +25,13 @@ lastFrameTime: time.Time
 mouseMode := false
 mousePos: Vec2 = {0, 0}
 mouseDelta: Vec3 = {0, 0, 0}
-mouseSensitivity: f32 = 1
-
-cameraRotationSpeed: f32 = 1
-cameraMoveSpeed: f32 = 1
 
 globals: struct {
 	runtimeContext: runtime.Context,
 	projectDir:     string,
 	projectFile:    string,
 	project:        ProjectData,
+	settings:       UserSettings,
 
 	graphicsData:   GraphicsData,
 
@@ -42,6 +41,8 @@ globals: struct {
 
 	baseDir:        string,
 	fps:            f64,
+	frameTimeMs:    f64,
+	worstFrameMs:   f64,
 	paused:         bool,
 }
 
@@ -84,6 +85,15 @@ main :: proc() {
 
 	logf(.Info, "Project \"%v\" loaded from %v", globals.project.name, globals.projectFile)
 	defer deleteProject(&globals.project)
+
+	if !os.is_dir(CONFIG_PATH()) {
+		if err := os.make_directory_all(CONFIG_PATH()); err != nil {
+			logf(.Error, "Failed to create config directory \"%v\": %v", CONFIG_PATH(), err)
+			os.exit(1)
+		}
+	}
+	settingsLoaded: bool
+	globals.settings, settingsLoaded = loadUserSettings()
 
 	when ODIN_DEBUG {
 		tracker: mem.Tracking_Allocator
@@ -134,6 +144,9 @@ main :: proc() {
 	InitGraphicsInfo {
 		appVersion        = APP_VERSION,
 		windowTitle       = APP_NAME,
+		window            = globals.settings.window,
+		settings          = globals.settings.render,
+		gradeForOutput    = !settingsLoaded,
 		transformShader   = transformComp,
 		lightShaders      = {lightVert, lightFrag},
 		sceneShaders      = {sceneVert, sceneFrag},
@@ -143,6 +156,11 @@ main :: proc() {
 	},
 	)
 	defer cleanupGraphics(&globals.graphicsData)
+	defer {
+		globals.settings.render = globals.graphicsData.settings
+		globals.settings.window = windowGeometry(&globals.graphicsData, globals.settings.window)
+		saveUserSettings(globals.settings)
+	}
 
 	startupScene := len(os.args) > 2 ? os.args[2] : globals.project.startupScene
 	if startupScene == "" {
@@ -180,8 +198,11 @@ tickFrame :: proc() -> bool {
 	ticking = true
 	defer ticking = false
 
-	delta := f32(time.duration_seconds(time.since(lastFrameTime)))
+	frameSeconds := time.duration_seconds(time.since(lastFrameTime))
+	delta := f32(frameSeconds)
 	lastFrameTime = time.now()
+	frameTimeTotal += frameSeconds
+	frameTimeWorst = max(frameTimeWorst, frameSeconds)
 
 	scene := &globals.scenes[globals.activeScene]
 	camera := &scene.cameras[scene.activeCamera]
@@ -191,7 +212,7 @@ tickFrame :: proc() -> bool {
 	right := cross(up, forward)
 
 	cameraMove: Vec3
-	if !globals.uiData.lockInput && !imguiWantsKeyboard(&globals.graphicsData) {
+	if !imguiWantsKeyboard(&globals.graphicsData) {
 		held :: proc(key: i32) -> f32 {
 			return glfw.GetKey(globals.graphicsData.window, key) == glfw.PRESS ? 1 : 0
 		}
@@ -204,7 +225,7 @@ tickFrame :: proc() -> bool {
 
 	movement :=
 		delta *
-		cameraMoveSpeed *
+		globals.settings.camera.moveSpeed *
 		cameraMove *
 		Mat3{right.x, right.y, right.z, up.x, up.y, up.z, forward.x, forward.y, forward.z}
 	camera.eye += movement
@@ -212,12 +233,12 @@ tickFrame :: proc() -> bool {
 
 	if mouseMode {
 		if mouseDelta.xy != {0, 0} {
-			mouseDelta.xy *= mouseSensitivity
+			mouseDelta.xy *= globals.settings.camera.mouseSensitivity
 			axis: Vec3 = mouseDelta.xy * matrix[2, 3]f32{
 						up.x, up.y, up.z,
 						right.x, right.y, right.z,
 					}
-			rotation := rotate3(radians(cameraRotationSpeed), axis)
+			rotation := rotate3(radians(globals.settings.camera.rotationSpeed), axis)
 			forward = rotation * forward
 		}
 
@@ -266,7 +287,11 @@ calcFrameRate :: proc() {
 	frameCount += 1
 	if timeDelta := time.duration_seconds(time.since(fpsTimer)); timeDelta >= 1 {
 		globals.fps = f64(frameCount) / timeDelta
+		globals.frameTimeMs = 1000 * frameTimeTotal / f64(frameCount)
+		globals.worstFrameMs = 1000 * frameTimeWorst
 		frameCount = 0
+		frameTimeTotal = 0
+		frameTimeWorst = 0
 		fpsTimer = time.now()
 	}
 }

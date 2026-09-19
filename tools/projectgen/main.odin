@@ -15,6 +15,7 @@ Options :: struct {
 	componentsPath: string,
 	assetsPath:     string,
 	shadersPath:    string,
+	configPath:     string,
 	root:           string,
 	startupScene:   string,
 	defaultModel:   string,
@@ -34,6 +35,7 @@ usage :: proc() {
 	fmt.println("  -components:<dir>       defaults to ./components/")
 	fmt.println("  -assets:<dir>           defaults to ./assets/")
 	fmt.println("  -shaders:<dir>          defaults to ./shaders/")
+	fmt.println("  -config:<dir>           per-machine state, gitignored; defaults to ./config/")
 	fmt.println("  -startup:<scene>        scene the engine opens on launch")
 	fmt.println("  -default-model:<path>   model a new scene is seeded with")
 	fmt.println("  -default-albedo:<path>  albedo a new scene is seeded with")
@@ -49,6 +51,7 @@ parseOptions :: proc() -> (opts: Options, ok: bool) {
 		componentsPath = "./components/",
 		assetsPath     = "./assets/",
 		shadersPath    = "./shaders/",
+		configPath     = "./config/",
 		root           = ".",
 		makeDirs       = true,
 	}
@@ -80,6 +83,7 @@ parseOptions :: proc() -> (opts: Options, ok: bool) {
 		if v, found := value(arg, "-components:"); found {opts.componentsPath = v; continue}
 		if v, found := value(arg, "-assets:"); found {opts.assetsPath = v; continue}
 		if v, found := value(arg, "-shaders:"); found {opts.shadersPath = v; continue}
+		if v, found := value(arg, "-config:"); found {opts.configPath = v; continue}
 		if v, found := value(arg, "-startup:"); found {opts.startupScene = v; continue}
 		if v, found := value(arg, "-default-model:"); found {opts.defaultModel = v; continue}
 		if v, found := value(arg, "-default-albedo:"); found {opts.defaultAlbedo = v; continue}
@@ -144,7 +148,7 @@ main :: proc() {
 	}
 
 	if opts.makeDirs {
-		for sub in ([?]string{opts.scenesPath, opts.componentsPath, opts.assetsPath, opts.shadersPath}) {
+		for sub in ([?]string{opts.scenesPath, opts.componentsPath, opts.assetsPath, opts.shadersPath, opts.configPath}) {
 			path := fmt.tprintf("%s/%s", projectDir, sub)
 			if os.is_dir(path) {
 				continue
@@ -165,6 +169,7 @@ main :: proc() {
 		componentsPath = opts.componentsPath,
 		assetsPath     = opts.assetsPath,
 		shadersPath    = opts.shadersPath,
+		configPath     = opts.configPath,
 		startupScene   = opts.startupScene,
 		defaultModel   = opts.defaultModel,
 		defaultAlbedo  = opts.defaultAlbedo,

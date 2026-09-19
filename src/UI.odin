@@ -9,7 +9,6 @@ import "core:path/filepath"
 import "core:strings"
 
 UIData :: struct {
-	lockInput:           bool,
 	createComponentInfo: CreateComponentData,
 	showDemo:            bool,
 	showMetrics:         bool,
@@ -109,6 +108,14 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 	imgui.SetNextWindowBgAlpha(1.0)
 	if imgui.Begin("Editor", nil, {.MenuBar}) {
 		scene := &globals.scenes[globals.activeScene]
+		imgui.Text(
+			fmt.ctprintf(
+				"%.0f FPS  %.2f ms  (worst %.2f ms)",
+				globals.fps,
+				globals.frameTimeMs,
+				globals.worstFrameMs,
+			),
+		)
 		if imgui.BeginMenuBar() {
 			if imgui.BeginMenu("File") {
 				if imgui.MenuItem("Open") {
@@ -280,7 +287,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 		if imgui.CollapsingHeader("Settings##header") {
 			if imgui.Button("New Scene") {
-				uiData.lockInput = true
 				imgui.OpenPopup("New Scene")
 			}
 
@@ -300,33 +306,54 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				imgui.EndCombo()
 			}
 
-			if imgui.DragFloat("Contrast", &graphicsData.contrast, 0.01) {
-				graphicsData.reloadBuffers = true
-			}
-			if imgui.DragFloat("Brightness", &graphicsData.brightness, 0.01) {
-				graphicsData.reloadBuffers = true
-			}
-			if imgui.DragFloat("Saturation", &graphicsData.saturation, 0.01) {
-				graphicsData.reloadBuffers = true
-			}
-			if imgui.DragFloat("Exposure", &graphicsData.exposure, 0.01) {
-				graphicsData.reloadBuffers = true
-			}
-			if imgui.Combo(
-				"Tonemapper",
-				transmute(^i32)(&graphicsData.tonemapper),
-				"None\000Narkowicz ACES\000",
-			) {
-				graphicsData.reloadBuffers = true
+			settings := &graphicsData.settings
+			if ImRefl.draw_value("Render", settings^, {flags = {.Flatten}}) {
+				settings.maxFrameLatency = clamp(settings.maxFrameLatency, 1, frameLatencyLimit())
+				markCommandsDirty(graphicsData, {.Scene, .PostProcess})
 			}
 
-			imgui.BeginDisabled(hdrActive(graphicsData))
-			if imgui.DragFloat("Gamma", &graphicsData.gamma, 0.01) {
-				graphicsData.reloadBuffers = true
+			if ImRefl.draw_value(
+				"Gizmo radius",
+				settings.lightGizmoRadius,
+				{
+					flags = {.Has_Min, .Has_Max, .Has_Speed} +
+					(ImRefl.Draw_Flags{} if settings.showLightGizmos else {.Read_Only}),
+					min = 0.01,
+					max = 5,
+					speed = 0.01,
+				},
+			) {
+				markCommandsDirty(graphicsData, {.Scene})
 			}
-			imgui.EndDisabled()
+
+			if ImRefl.draw_value(
+				"Gamma",
+				settings.gamma,
+				{
+					flags = {.Has_Min, .Has_Speed} +
+					(ImRefl.Draw_Flags{.Read_Only} if hdrActive(graphicsData) else {}),
+					min = 0.1,
+					speed = 0.01,
+				},
+			) {
+				markCommandsDirty(graphicsData, {.PostProcess})
+			}
 			if hdrActive(graphicsData) {
 				imgui.SetItemTooltip("Unused in HDR; the PQ transfer function replaces it.")
+			}
+
+			if ImRefl.draw_value(
+				"Paper white (nits)",
+				settings.paperWhiteNits,
+				{
+					flags = {.Has_Min, .Has_Max, .Has_Speed} +
+					(ImRefl.Draw_Flags{} if hdrActive(graphicsData) else {.Read_Only}),
+					min = 50,
+					max = 1000,
+					speed = 1,
+				},
+			) {
+				markCommandsDirty(graphicsData, {.PostProcess})
 			}
 
 			available := hdrAvailable(graphicsData)
@@ -346,20 +373,8 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 				imgui.Text(hdrActive(graphicsData) ? "(HDR10 PQ)" : "(sRGB)")
 			}
 
-			if imgui.Checkbox("Light gizmos", &graphicsData.showLightGizmos) {
-				markCommandsDirty(graphicsData, {.Scene})
-			}
-			imgui.BeginDisabled(!graphicsData.showLightGizmos)
-			if imgui.DragFloat("Gizmo radius", &graphicsData.lightGizmoRadius, 0.01, 0.01, 5.0) {
-				markCommandsDirty(graphicsData, {.Scene})
-			}
-			imgui.EndDisabled()
-
-			imgui.BeginDisabled(!hdrActive(graphicsData))
-			if imgui.DragFloat("Paper white (nits)", &graphicsData.paperWhiteNits, 1.0, 50, 1000) {
-				graphicsData.reloadBuffers = true
-			}
-			imgui.EndDisabled()
+			imgui.SeparatorText("Camera")
+			ImRefl.draw_value("Camera", globals.settings.camera, {flags = {.Flatten}})
 		}
 
 		if imgui.CollapsingHeader("Scene##header") {
@@ -502,7 +517,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 		if imgui.CollapsingHeader("Models##header") {
 			if imgui.Button("Add New Model") {
-				uiData.lockInput = true
 				imgui.OpenPopup("New Model")
 			}
 
@@ -515,7 +529,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 		if imgui.CollapsingHeader("Textures##header") {
 			if imgui.Button("Add New Texture") {
-				uiData.lockInput = true
 				imgui.OpenPopup("New Texture")
 			}
 
@@ -572,7 +585,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 					log(.Error, "Failed to replace path seperators!")
 				} else if newScene(name, path) {
 					clearComponentData(createComponentInfo)
-					uiData.lockInput = false
 					imgui.CloseCurrentPopup()
 				}
 			}
@@ -581,7 +593,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.SameLine()
 		if imgui.Button("Cancel") {
 			imgui.CloseCurrentPopup()
-			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
 		imgui.End()
@@ -699,7 +710,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 				saveModelComponent(model)
 				clearComponentData(createComponentInfo)
-				uiData.lockInput = false
 				imgui.CloseCurrentPopup()
 			}
 		}
@@ -707,7 +717,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.SameLine()
 		if imgui.Button("Cancel") {
 			imgui.CloseCurrentPopup()
-			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
 		imgui.End()
@@ -822,7 +831,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 				saveTextureComponent(texture)
 				clearComponentData(createComponentInfo)
-				uiData.lockInput = false
 				imgui.CloseCurrentPopup()
 			}
 		}
@@ -830,7 +838,6 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 		imgui.SameLine()
 		if imgui.Button("Cancel") {
 			imgui.CloseCurrentPopup()
-			uiData.lockInput = false
 			clearComponentData(createComponentInfo)
 		}
 		imgui.End()

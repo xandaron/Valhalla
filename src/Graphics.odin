@@ -44,9 +44,54 @@ DEVICE_EXTENSIONS: []cstring : {
 }
 
 @(private = "file")
+PRESENT_WAIT_EXTENSIONS: []cstring : {
+	vk.KHR_PRESENT_ID_2_EXTENSION_NAME,
+	vk.KHR_PRESENT_WAIT_2_EXTENSION_NAME,
+}
+
+@(private = "file")
+PRESENT_WAIT_TIMEOUT: u64 : 250 * 1_000_000
+
+@(private = "file")
 MAX_FRAMES_IN_FLIGHT: u32 : 2
 
 RENDER_SIZE: [2]u32 : {1920, 1080}
+
+RenderSettings :: struct {
+	contrast:         f32        `imrefl:"label=Contrast,speed=0.01"`,
+	brightness:       f32        `imrefl:"label=Brightness,speed=0.01"`,
+	saturation:       f32        `imrefl:"label=Saturation,min=0,speed=0.01"`,
+	exposure:         f32        `imrefl:"label=Exposure,speed=0.01"`,
+	tonemapper:       ToneMapper `imrefl:"label=Tonemapper"`,
+	gamma:            f32        `imrefl:"ignore"`,
+	paperWhiteNits:   f32        `imrefl:"ignore"`,
+	showLightGizmos:  bool       `imrefl:"label=Light gizmos"`,
+	lightGizmoRadius: f32        `imrefl:"ignore"`,
+	maxFrameLatency:  u32        `imrefl:"label=Max frame latency"`,
+	hdr:              bool       `imrefl:"ignore"`,
+	renderSize:       [2]u32     `imrefl:"ignore"`,
+}
+
+defaultRenderSettings :: proc() -> RenderSettings {
+	return {
+		contrast = 1.0,
+		brightness = 0.0,
+		saturation = 1.0,
+		exposure = 0.0,
+		tonemapper = .NarkowiczACES,
+		gamma = 2.2,
+		paperWhiteNits = PAPER_WHITE_NITS,
+		showLightGizmos = true,
+		lightGizmoRadius = 0.1,
+		maxFrameLatency = MAX_FRAMES_IN_FLIGHT,
+		hdr = HDR_DEFAULT,
+		renderSize = RENDER_SIZE,
+	}
+}
+
+frameLatencyLimit :: proc() -> u32 {
+	return MAX_FRAMES_IN_FLIGHT
+}
 
 @(private = "file")
 SHADOW_RESOLUTION: [2]u32 : {512, 512}
@@ -240,6 +285,7 @@ HeapIndices :: struct {
 	sceneDepth:         u32,
 	renderedImage:      u32,
 	processedImage:     u32,
+	uiImage:            u32,
 	linearSampler:      u32,
 	anisotropicSampler: u32,
 }
@@ -294,26 +340,27 @@ PostProcess_PushConstants :: struct {
 	contentExtentY: u32,
 	transferFunction: TransferFunction,
 	paperWhiteNits: f32,
+	outputExtentX: u32,
+	outputExtentY: u32,
 }
 
 @(private = "file")
 Imgui_PushConstants :: struct {
-	resources:        HeapIndices,
-	scale:            ShaderVec2,
-	translate:        ShaderVec2,
-	texture:          u32,
-	transferFunction: TransferFunction,
-	paperWhiteNits:   f32,
+	resources: HeapIndices,
+	scale:     ShaderVec2,
+	translate: ShaderVec2,
+	texture:   u32,
 }
 
-#assert(size_of(HeapIndices) == 60)
+#assert(size_of(HeapIndices) == 64)
+#assert(offset_of(PostProcess_PushConstants, contrast) == 64)
+#assert(offset_of(PostProcess_PushConstants, outputExtentY) == 116)
+#assert(size_of(PostProcess_PushConstants) == 120)
 #assert(offset_of(Imgui_PushConstants, resources) == 0)
 #assert(offset_of(Imgui_PushConstants, scale) == 64)
 #assert(offset_of(Imgui_PushConstants, translate) == 72)
 #assert(offset_of(Imgui_PushConstants, texture) == 80)
-#assert(offset_of(Imgui_PushConstants, transferFunction) == 84)
-#assert(offset_of(Imgui_PushConstants, paperWhiteNits) == 88)
-#assert(size_of(Imgui_PushConstants) == 96)
+#assert(size_of(Imgui_PushConstants) == 88)
 
 TransferFunction :: enum u32 {
 	Gamma = 0,
@@ -378,8 +425,9 @@ CmdBufferIndex :: enum {
 	Transform = 0,
 	Light,
 	Scene,
-	PostProcess,
 	Imgui,
+	PostProcess,
+	Present,
 }
 
 TextureIndex :: enum {
@@ -421,12 +469,7 @@ deleteSceneBuffers :: proc(using graphicsData: ^GraphicsData, buffers: ^SceneBuf
 }
 
 GraphicsData :: struct {
-	contrast:            f32,
-	brightness:          f32,
-	saturation:          f32,
-	exposure:            f32,
-	tonemapper:          ToneMapper,
-	gamma:               f32,
+	settings:            RenderSettings,
 
 	// GLFW + IMGUI
 	window:              WindowHandle,
@@ -469,6 +512,9 @@ GraphicsData :: struct {
 	presentReady:        [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 	presentFences:       [MAX_FRAMES_IN_FLIGHT]vk.Fence,
 	presentPending:      [MAX_FRAMES_IN_FLIGHT]bool,
+	presentWait:         bool,
+	lastPresentId:       u64,
+	firstSwapchainId:    u64,
 	semaphores:          [SemaphoreIndex][MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 
 	// Commands
@@ -480,13 +526,9 @@ GraphicsData :: struct {
 	uniformBuffers:      [MAX_FRAMES_IN_FLIGHT]Buffer,
 
 	// Util
-	hdrRequested:        bool,
 	hdrSupported:        bool,
-	showLightGizmos:     bool,
-	lightGizmoRadius:    f32,
 	swapchainDirty:      bool,
-	paperWhiteNits:      f32,
-	renderSize:          [2]u32,
+	outputCapacity:      vk.Extent2D,
 	currentFrame:        u32,
 	reloadBuffers:       bool,
 	dirtyCommands:       bit_set[CmdBufferIndex],
@@ -522,6 +564,9 @@ Image :: struct {
 InitGraphicsInfo :: struct {
 	appVersion:        u32,
 	windowTitle:       cstring,
+	window:            WindowSettings,
+	settings:          RenderSettings,
+	gradeForOutput:    bool,
 
 	// Shaders
 	transformShader:   []byte,
@@ -557,7 +602,7 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 		logf(.Error, "Failed to create vulkan debug callback! vkResult: %v", res)
 	}
 
-	initWindow(&graphicsData, initInfo.windowTitle) or_return
+	initWindow(&graphicsData, initInfo.windowTitle, initInfo.window) or_return
 	pickPhysicalDevice(&graphicsData) or_return
 	createLogicalDevice(&graphicsData) or_return
 
@@ -568,7 +613,7 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 		memoryProperties,
 	)
 
-	graphicsData.hdrRequested = HDR_DEFAULT
+	graphicsData.settings = initInfo.settings
 	createSwapchain(&graphicsData)
 	if !graphicsData.hdrSupported {
 		log(.Info, "Surface offers no HDR10 format; HDR is unavailable.")
@@ -607,8 +652,6 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	createSyncObjects(&graphicsData) or_return
 	createSamplers(&graphicsData) or_return
 
-	graphicsData.renderSize = RENDER_SIZE
-
 	createPipelineCache(&graphicsData)
 
 	createTransformPipeline(&graphicsData, initInfo.transformShader)
@@ -625,27 +668,26 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	createScenePipeline(&graphicsData, initInfo.sceneShaders[:])
 	createGizmoPipeline(&graphicsData, initInfo.gizmoShaders[:])
 
+	outputCapacity = initialOutputCapacity(&graphicsData)
+
 	pipelines[.PostProcess].images = make([]Image, 2)
 	pipelines[.PostProcess].images[0].format = .R16G16B16A16_SFLOAT
 	pipelines[.PostProcess].images[1].format = .R16G16B16A16_SFLOAT
 	createPostProcessPipelineImages(&graphicsData)
 	createPostProcessPipeline(&graphicsData, initInfo.postProcessShader)
 
+	pipelines[.Imgui].images = make([]Image, 1)
+	pipelines[.Imgui].images[0].format = .R16G16B16A16_SFLOAT
+	createImguiPipelineImages(&graphicsData)
 	createImguiPipeline(&graphicsData, initInfo.imguiShaders[:])
 	initImgui(&graphicsData)
 
 	nameCoreObjects(&graphicsData)
 
 	currentFrame = 0
-	contrast = 1.0
-	brightness = 0.0
-	saturation = 1.0
-	exposure = 0.0
-	gamma = 2.2
-	paperWhiteNits = PAPER_WHITE_NITS
-	showLightGizmos = true
-	lightGizmoRadius = 0.1
-	applyHDRGrading(&graphicsData)
+	if initInfo.gradeForOutput {
+		applyHDRGrading(&graphicsData)
+	}
 
 	return graphicsData, nil
 }
@@ -689,6 +731,12 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 		graphicsCommandPool,
 		MAX_FRAMES_IN_FLIGHT,
 		&commandBuffers[.Imgui][0],
+	)
+	vk.FreeCommandBuffers(
+		device,
+		graphicsCommandPool,
+		MAX_FRAMES_IN_FLIGHT,
+		&commandBuffers[.Present][0],
 	)
 
 	vk.DestroyCommandPool(device, graphicsCommandPool, nil)
@@ -760,6 +808,28 @@ windowSize :: proc(using graphicsData: ^GraphicsData) -> (width: i32, height: i3
 	return glfw.GetWindowSize(window)
 }
 
+requestClose :: proc(using graphicsData: ^GraphicsData) {
+	glfw.SetWindowShouldClose(window, true)
+}
+
+windowGeometry :: proc(using graphicsData: ^GraphicsData, previous: WindowSettings) -> WindowSettings {
+	if glfw.GetWindowAttrib(window, glfw.ICONIFIED) != 0 ||
+	   glfw.GetWindowAttrib(window, glfw.MAXIMIZED) != 0 {
+		return previous
+	}
+
+	geometry := previous
+	geometry.width, geometry.height = glfw.GetWindowSize(window)
+	if geometry.width <= 0 || geometry.height <= 0 {
+		return previous
+	}
+	if glfw.GetPlatform() != glfw.PLATFORM_WAYLAND {
+		geometry.x, geometry.y = glfw.GetWindowPos(window)
+		geometry.placed = true
+	}
+	return geometry
+}
+
 setGLFWErrorCallback :: proc(errorCallback: GLFWErrorCallback) {
 	glfw.SetErrorCallback(errorCallback)
 }
@@ -769,12 +839,34 @@ pollingEvents: bool
 
 @(private = "file")
 @(require_results)
-initWindow :: proc(using graphicsData: ^GraphicsData, windowTitle: cstring) -> WindowError {
+initWindow :: proc(
+	using graphicsData: ^GraphicsData,
+	windowTitle: cstring,
+	geometry: WindowSettings,
+) -> WindowError {
+	onMonitor :: proc(x, y: i32) -> bool {
+		for monitor in glfw.GetMonitors() {
+			mx, my, mw, mh := glfw.GetMonitorWorkarea(monitor)
+			if x >= mx && y >= my && x < mx + mw && y < my + mh {
+				return true
+			}
+		}
+		return false
+	}
+
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
-	if window = glfw.CreateWindow(1600, 800, windowTitle, nil, nil); window == nil {
+	glfw.WindowHint(glfw.VISIBLE, false)
+	if window = glfw.CreateWindow(geometry.width, geometry.height, windowTitle, nil, nil);
+	   window == nil {
 		log(.Fatal, "Failed to create window.")
 		return .FailedToCreateWindow
 	}
+	if geometry.placed &&
+	   glfw.GetPlatform() != glfw.PLATFORM_WAYLAND &&
+	   onMonitor(geometry.x, geometry.y) {
+		glfw.SetWindowPos(window, geometry.x, geometry.y)
+	}
+	glfw.ShowWindow(window)
 
 	glfw.SetErrorCallback(glfwErrorCallback)
 	glfw.SetKeyCallback(window, keyCallback)
@@ -1016,7 +1108,6 @@ buildDeviceFeatures :: proc(chain: ^DeviceFeatures, request: bool) {
 	chain.vulkan13.synchronization2 = true
 	chain.vulkan13.dynamicRendering = true
 	chain.vulkan14.maintenance5 = true
-	chain.vulkan14.hostImageCopy = true
 	chain.computeDerivatives.computeDerivativeGroupQuads = true
 	chain.descriptorHeap.descriptorHeap = true
 	chain.untypedPointers.shaderUntypedPointers = true
@@ -1214,6 +1305,61 @@ pickPhysicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 
 @(private = "file")
 @(require_results)
+presentWaitSupported :: proc(using graphicsData: ^GraphicsData) -> bool {
+	extensionCount: u32
+	vk.EnumerateDeviceExtensionProperties(physicalDevice, nil, &extensionCount, nil)
+	available := make([]vk.ExtensionProperties, extensionCount, context.temp_allocator)
+	vk.EnumerateDeviceExtensionProperties(physicalDevice, nil, &extensionCount, raw_data(available))
+
+	outer: for name in PRESENT_WAIT_EXTENSIONS {
+		for &extension in available {
+			if name == cstring(&extension.extensionName[0]) {
+				continue outer
+			}
+		}
+		return false
+	}
+
+	presentId2Features: vk.PhysicalDevicePresentId2FeaturesKHR = {
+		sType = .PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR,
+	}
+	presentWait2Features: vk.PhysicalDevicePresentWait2FeaturesKHR = {
+		sType = .PHYSICAL_DEVICE_PRESENT_WAIT_2_FEATURES_KHR,
+		pNext = &presentId2Features,
+	}
+	deviceFeatures: vk.PhysicalDeviceFeatures2 = {
+		sType = .PHYSICAL_DEVICE_FEATURES_2,
+		pNext = &presentWait2Features,
+	}
+	vk.GetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures)
+	if !presentId2Features.presentId2 || !presentWait2Features.presentWait2 {
+		return false
+	}
+
+	presentId2Capabilities: vk.SurfaceCapabilitiesPresentId2KHR = {
+		sType = .SURFACE_CAPABILITIES_PRESENT_ID_2_KHR,
+	}
+	presentWait2Capabilities: vk.SurfaceCapabilitiesPresentWait2KHR = {
+		sType = .SURFACE_CAPABILITIES_PRESENT_WAIT_2_KHR,
+		pNext = &presentId2Capabilities,
+	}
+	capabilities: vk.SurfaceCapabilities2KHR = {
+		sType = .SURFACE_CAPABILITIES_2_KHR,
+		pNext = &presentWait2Capabilities,
+	}
+	if res := vk.GetPhysicalDeviceSurfaceCapabilities2KHR(
+		physicalDevice,
+		&vk.PhysicalDeviceSurfaceInfo2KHR{sType = .PHYSICAL_DEVICE_SURFACE_INFO_2_KHR, surface = surface},
+		&capabilities,
+	); res != .SUCCESS {
+		logf(.Warning, "Failed to query surface capabilities for present wait! vkResult: %v", res)
+		return false
+	}
+	return bool(presentId2Capabilities.presentId2Supported && presentWait2Capabilities.presentWait2Supported)
+}
+
+@(private = "file")
+@(require_results)
 createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	queueFamilies, _ = findQueueFamilies(physicalDevice, graphicsData)
 
@@ -1259,7 +1405,27 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 	features: DeviceFeatures
 	buildDeviceFeatures(&features, true)
 
-	requiredDeviceExtensions := DEVICE_EXTENSIONS
+	deviceExtensions := make([dynamic]cstring, context.temp_allocator)
+	append(&deviceExtensions, ..DEVICE_EXTENSIONS)
+
+	presentId2Features: vk.PhysicalDevicePresentId2FeaturesKHR = {
+		sType      = .PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR,
+		presentId2 = true,
+	}
+	presentWait2Features: vk.PhysicalDevicePresentWait2FeaturesKHR = {
+		sType        = .PHYSICAL_DEVICE_PRESENT_WAIT_2_FEATURES_KHR,
+		pNext        = &presentId2Features,
+		presentWait2 = true,
+	}
+	presentWait = presentWaitSupported(graphicsData)
+	if presentWait {
+		append(&deviceExtensions, ..PRESENT_WAIT_EXTENSIONS)
+		features.swapchainMaint1.pNext = &presentWait2Features
+		log(.Info, "Present wait supported; frame latency is paced with VK_KHR_present_wait2.")
+	} else {
+		log(.Info, "Present wait unsupported; frame latency is paced by present fences alone.")
+	}
+
 	createInfo: vk.DeviceCreateInfo = {
 		sType                   = .DEVICE_CREATE_INFO,
 		pNext                   = &features.features,
@@ -1268,8 +1434,8 @@ createLogicalDevice :: proc(using graphicsData: ^GraphicsData) -> DeviceError {
 		pQueueCreateInfos       = raw_data(queueCreateInfos),
 		enabledLayerCount       = 0,
 		ppEnabledLayerNames     = nil,
-		enabledExtensionCount   = u32(len(requiredDeviceExtensions)),
-		ppEnabledExtensionNames = raw_data(requiredDeviceExtensions),
+		enabledExtensionCount   = u32(len(deviceExtensions)),
+		ppEnabledExtensionNames = raw_data(deviceExtensions),
 		pEnabledFeatures        = nil,
 	}
 
@@ -1365,7 +1531,7 @@ getSwapcahainAspectRatio :: proc(using graphicsData: ^GraphicsData) -> f32 {
 }
 
 getRenderAspectRatio :: proc(using graphicsData: ^GraphicsData) -> f32 {
-	return f32(renderSize.x) / f32(renderSize.y)
+	return f32(settings.renderSize.x) / f32(settings.renderSize.y)
 }
 
 @(private = "file")
@@ -1474,7 +1640,7 @@ createSwapchain :: proc(using graphicsData: ^GraphicsData, oldSwapchain: vk.Swap
 		}
 	}
 
-	surfaceFormat, hdrActive := chooseFormat(swapchainSupport.formats, hdrRequested && hdrSupported)
+	surfaceFormat, hdrActive := chooseFormat(swapchainSupport.formats, settings.hdr && hdrSupported)
 	swapchain = {
 		transform = swapchainSupport.capabilities.currentTransform,
 		format    = surfaceFormat,
@@ -1497,7 +1663,7 @@ createSwapchain :: proc(using graphicsData: ^GraphicsData, oldSwapchain: vk.Swap
 	createInfo: vk.SwapchainCreateInfoKHR = {
 		sType                 = .SWAPCHAIN_CREATE_INFO_KHR,
 		pNext                 = nil,
-		flags                 = {},
+		flags                 = vk.SwapchainCreateFlagsKHR{.PRESENT_ID_2, .PRESENT_WAIT_2} if presentWait else {},
 		surface               = graphicsData.surface,
 		minImageCount         = swapchainImageCount,
 		imageFormat           = swapchain.format.format,
@@ -1518,6 +1684,7 @@ createSwapchain :: proc(using graphicsData: ^GraphicsData, oldSwapchain: vk.Swap
 	if res := vk.CreateSwapchainKHR(device, &createInfo, nil, &swapchain.handle); res != .SUCCESS {
 		log(.Fatal, "Failed to create swapchain! vkResult: %v", res)
 	}
+	firstSwapchainId = lastPresentId + 1
 
 	imageCount: u32
 	vk.GetSwapchainImagesKHR(device, swapchain.handle, &imageCount, nil)
@@ -1556,22 +1723,22 @@ cleanupSwapchain :: proc(graphicsData: ^GraphicsData, swapchain: Swapchain) {
 
 @(private = "file")
 applyHDRGrading :: proc(using graphicsData: ^GraphicsData) {
-	tonemapper = .None if swapchain.hdr else .NarkowiczACES
+	settings.tonemapper = .None if swapchain.hdr else .NarkowiczACES
 }
 
 setHDREnabled :: proc(using graphicsData: ^GraphicsData, enabled: bool) -> bool {
 	if enabled && !hdrSupported {
 		return false
 	}
-	if hdrRequested != enabled {
-		hdrRequested = enabled
+	if settings.hdr != enabled {
+		settings.hdr = enabled
 		swapchainDirty = true
 	}
 	return true
 }
 
 hdrEnabled :: proc(using graphicsData: ^GraphicsData) -> bool {
-	return hdrRequested
+	return settings.hdr
 }
 
 hdrActive :: proc(using graphicsData: ^GraphicsData) -> bool {
@@ -1580,6 +1747,33 @@ hdrActive :: proc(using graphicsData: ^GraphicsData) -> bool {
 
 hdrAvailable :: proc(using graphicsData: ^GraphicsData) -> bool {
 	return hdrSupported
+}
+
+@(private = "file")
+waitForFrameLatency :: proc(using graphicsData: ^GraphicsData) {
+	if !presentWait {
+		return
+	}
+
+	latency := u64(clamp(settings.maxFrameLatency, 1, MAX_FRAMES_IN_FLIGHT))
+	nextId := lastPresentId + 1
+	if nextId < firstSwapchainId + latency {
+		return
+	}
+
+	res := vk.WaitForPresent2KHR(
+		device,
+		swapchain.handle,
+		&vk.PresentWait2InfoKHR {
+			sType = .PRESENT_WAIT_2_INFO_KHR,
+			pNext = nil,
+			presentId = nextId - latency,
+			timeout = PRESENT_WAIT_TIMEOUT,
+		},
+	)
+	if res != .SUCCESS && res != .TIMEOUT && res != .SUBOPTIMAL_KHR && res != .ERROR_OUT_OF_DATE_KHR {
+		logf(.Warning, "Present wait failed! vkResult: %v", res)
+	}
 }
 
 @(private = "file")
@@ -1609,14 +1803,39 @@ recreateSwapchain :: proc(using graphicsData: ^GraphicsData) {
 	createSwapchain(graphicsData, oldSwapchain.handle)
 	cleanupSwapchain(graphicsData, oldSwapchain)
 
-	for &image in pipelines[.PostProcess].images {
-		deleteImage(graphicsData, &image)
-	}
-	createPostProcessPipelineImages(graphicsData)
+	if swapchain.extent.width > outputCapacity.width ||
+	   swapchain.extent.height > outputCapacity.height {
+		outputCapacity = {
+			width  = max(outputCapacity.width, swapchain.extent.width),
+			height = max(outputCapacity.height, swapchain.extent.height),
+		}
 
-	updateComputeDescriptorSets(graphicsData)
+		for &image in pipelines[.PostProcess].images {
+			deleteImage(graphicsData, &image)
+		}
+		createPostProcessPipelineImages(graphicsData)
+		deleteImage(graphicsData, &pipelines[.Imgui].images[0])
+		createImguiPipelineImages(graphicsData)
+
+		updateComputeDescriptorSets(graphicsData)
+	}
 
 	markCommandsDirty(graphicsData, {.PostProcess})
+}
+
+@(private = "file")
+@(require_results)
+initialOutputCapacity :: proc(using graphicsData: ^GraphicsData) -> vk.Extent2D {
+	capacity := swapchain.extent
+	for monitor in glfw.GetMonitors() {
+		mode := glfw.GetVideoMode(monitor)
+		if mode == nil {
+			continue
+		}
+		capacity.width = max(capacity.width, u32(mode.width))
+		capacity.height = max(capacity.height, u32(mode.height))
+	}
+	return capacity
 }
 
 // ===[ Device Memory ]========================================================
@@ -2609,10 +2828,11 @@ createImage :: proc(
 	sharingMode: vk.SharingMode,
 	queueFamilyIndexCount: u32,
 	queueFamilyIndices: [^]u32,
+	pNext: rawptr = nil,
 ) -> ImageError {
 	imageInfo: vk.ImageCreateInfo = {
 		sType                 = .IMAGE_CREATE_INFO,
-		pNext                 = nil,
+		pNext                 = pNext,
 		flags                 = flags,
 		imageType             = imageType,
 		format                = image.format,
@@ -2982,7 +3202,7 @@ createSamplers :: proc(using graphicsData: ^GraphicsData) -> SamplerError {
 		borderColor             = .INT_OPAQUE_BLACK,
 		unnormalizedCoordinates = false,
 	}
-	writeSamplerDescriptor(graphicsData, .Nearest, &samplerInfo)
+	writeSamplerDescriptor(graphicsData, .Linear, &samplerInfo)
 
 	properties: vk.PhysicalDeviceProperties2 = {
 		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
@@ -3071,6 +3291,14 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 
 		textureSize := vk.DeviceSize(width * height * 4)
 
+		viewFormats := [?]vk.Format{TEXTURE_COLOUR_FORMAT, TEXTURE_LINEAR_FORMAT}
+		formatList: vk.ImageFormatListCreateInfo = {
+			sType           = .IMAGE_FORMAT_LIST_CREATE_INFO,
+			pNext           = nil,
+			viewFormatCount = len(viewFormats),
+			pViewFormats    = &viewFormats[0],
+		}
+
 		image: Image = {
 			format = TEXTURE_COLOUR_FORMAT,
 		}
@@ -3084,11 +3312,12 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 			1,
 			{._1},
 			.OPTIMAL,
-			{.HOST_TRANSFER, .SAMPLED},
+			{.TRANSFER_DST, .SAMPLED},
 			{.DEVICE_LOCAL},
 			.EXCLUSIVE,
 			0,
 			nil,
+			&formatList,
 		); err != nil {
 			logf(.Error, "Failed to create image for %v! Error: %v", path, err)
 			return err
@@ -3133,54 +3362,53 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		}
 		image.linearHeapSlot = linearSlot
 
-		subresourceRange: vk.ImageSubresourceRange = {
-			aspectMask     = {.COLOR},
-			baseMipLevel   = 0,
-			levelCount     = 1,
-			baseArrayLayer = 0,
-			layerCount     = 1,
+		srcBuffer := staging.buffer
+		srcOffset, mapped, reserved := stagingReserve(graphicsData, textureSize)
+		if !reserved {
+			buffer, oversized, stagingErr := stagingOversized(graphicsData, textureSize)
+			if stagingErr != .None {
+				logf(.Error, "Failed to stage texture %v! Error: %v", path, stagingErr)
+				return stagingErr
+			}
+			srcBuffer = buffer
+			srcOffset = 0
+			mapped = oversized
 		}
-		transition: vk.HostImageLayoutTransitionInfo = {
-			sType            = .HOST_IMAGE_LAYOUT_TRANSITION_INFO,
-			pNext            = nil,
-			image            = image.vkImage,
-			oldLayout        = .UNDEFINED,
-			newLayout        = .SHADER_READ_ONLY_OPTIMAL,
-			subresourceRange = subresourceRange,
-		}
-		if res := vk.TransitionImageLayout(device, 1, &transition); res != .SUCCESS {
-			logf(.Error, "Failed to transition %v for host copy! vkResult: %v", path, res)
-			return ImageError.TransitionFailed
+		mem.copy(mapped, pixels, int(textureSize))
+
+		cmdBuffer, cmdErr := stagingCommands(graphicsData)
+		if cmdErr != .None {
+			logf(.Error, "Failed to record texture upload for %v! Error: %v", path, cmdErr)
+			return cmdErr
 		}
 
-		region: vk.MemoryToImageCopy = {
-			sType = .MEMORY_TO_IMAGE_COPY,
-			pNext = nil,
-			pHostPointer = pixels,
-			memoryRowLength = 0,
-			memoryImageHeight = 0,
-			imageSubresource = {
-				aspectMask = {.COLOR},
-				mipLevel = 0,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-			imageOffset = {0, 0, 0},
-			imageExtent = {u32(width), u32(height), 1},
-		}
-		copyInfo: vk.CopyMemoryToImageInfo = {
-			sType          = .COPY_MEMORY_TO_IMAGE_INFO,
-			pNext          = nil,
-			flags          = {},
-			dstImage       = image.vkImage,
-			dstImageLayout = .SHADER_READ_ONLY_OPTIMAL,
-			regionCount    = 1,
-			pRegions       = &region,
-		}
-		if res := vk.CopyMemoryToImage(device, &copyInfo); res != .SUCCESS {
-			logf(.Error, "Failed to host copy texture %v! vkResult: %v", path, res)
-			return ImageError.FailedToLoadImage
-		}
+		transitionImageLayout(
+			graphicsData,
+			cmdBuffer,
+			image.vkImage,
+			.UNDEFINED,
+			.TRANSFER_DST_OPTIMAL,
+			{.COLOR},
+			1,
+		)
+		copyBufferToImage(
+			graphicsData,
+			cmdBuffer,
+			srcBuffer,
+			srcOffset,
+			image.vkImage,
+			u32(width),
+			u32(height),
+		)
+		transitionImageLayout(
+			graphicsData,
+			cmdBuffer,
+			image.vkImage,
+			.TRANSFER_DST_OPTIMAL,
+			.SHADER_READ_ONLY_OPTIMAL,
+			{.COLOR},
+			1,
+		)
 
 		append(&buffers.textures, image)
 	}
@@ -3308,6 +3536,14 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			.GENERAL,
 			.STORAGE_IMAGE,
 		)
+		writeImageDescriptor(
+			graphicsData,
+			frame,
+			.UiImage,
+			&pipelines[.Imgui].images[0].viewInfo,
+			.GENERAL,
+			.STORAGE_IMAGE,
+		)
 	}
 }
 
@@ -3337,6 +3573,14 @@ updateComputeDescriptorSets :: proc(using graphicsData: ^GraphicsData) {
 			.GENERAL,
 			.STORAGE_IMAGE,
 		)
+		writeImageDescriptor(
+			graphicsData,
+			frame,
+			.UiImage,
+			&pipelines[.Imgui].images[0].viewInfo,
+			.GENERAL,
+			.STORAGE_IMAGE,
+		)
 	}
 }
 
@@ -3361,11 +3605,12 @@ ImageSlot :: enum u32 {
 	SceneDepth     = 1,
 	RenderedImage  = 2,
 	ProcessedImage = 3,
+	UiImage        = 4,
 }
 
 @(private = "file")
 SamplerSlot :: enum u32 {
-	Nearest    = 0,
+	Linear      = 0,
 	Anisotropic = 1,
 }
 
@@ -3555,7 +3800,8 @@ createDescriptorHeaps :: proc(using graphicsData: ^GraphicsData) -> DescriptorHe
 		sceneDepth         = imageSlotIndex(graphicsData, .SceneDepth),
 		renderedImage      = imageSlotIndex(graphicsData, .RenderedImage),
 		processedImage     = imageSlotIndex(graphicsData, .ProcessedImage),
-		linearSampler      = samplerSlotIndex(graphicsData, .Nearest),
+		uiImage            = imageSlotIndex(graphicsData, .UiImage),
+		linearSampler      = samplerSlotIndex(graphicsData, .Linear),
 		anisotropicSampler = samplerSlotIndex(graphicsData, .Anisotropic),
 	}
 
@@ -3766,13 +4012,15 @@ Pipeline :: struct {
 }
 
 @(private = "file")
-PIPELINE_CACHE_PATH: string : "pipeline_cache.bin"
+PIPELINE_CACHE_PATH :: proc() -> string {
+	return projectPath(CONFIG_PATH(), "pipeline_cache.bin")
+}
 
 @(private = "file")
 createPipelineCache :: proc(using graphicsData: ^GraphicsData) {
-	initialData, readErr := os.read_entire_file(PIPELINE_CACHE_PATH, context.temp_allocator)
+	initialData, readErr := os.read_entire_file(PIPELINE_CACHE_PATH(), context.temp_allocator)
 	if readErr != nil {
-		logf(.Info, "No pipeline cache at %v, starting cold.", PIPELINE_CACHE_PATH)
+		logf(.Info, "No pipeline cache at %v, starting cold.", PIPELINE_CACHE_PATH())
 		initialData = nil
 	}
 
@@ -3809,16 +4057,16 @@ savePipelineCache :: proc(using graphicsData: ^GraphicsData) {
 		return
 	}
 
-	if writeErr := os.write_entire_file(PIPELINE_CACHE_PATH, data); writeErr != nil {
+	if writeErr := os.write_entire_file(PIPELINE_CACHE_PATH(), data); writeErr != nil {
 		logf(
 			.Warning,
 			"Failed to write pipeline cache to %v! Error: %v",
-			PIPELINE_CACHE_PATH,
+			PIPELINE_CACHE_PATH(),
 			writeErr,
 		)
 		return
 	}
-	logf(.Info, "Wrote %v bytes of pipeline cache to %v.", size, PIPELINE_CACHE_PATH)
+	logf(.Info, "Wrote %v bytes of pipeline cache to %v.", size, PIPELINE_CACHE_PATH())
 }
 
 @(private = "file")
@@ -4250,8 +4498,8 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		&pipelines[.Scene].images[0],
 		{},
 		.D2,
-		renderSize.x,
-		renderSize.y,
+		settings.renderSize.x,
+		settings.renderSize.y,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -4282,8 +4530,8 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		&pipelines[.Scene].images[1],
 		{},
 		.D2,
-		renderSize.x,
-		renderSize.y,
+		settings.renderSize.x,
+		settings.renderSize.y,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -4724,14 +4972,21 @@ createGizmoPipeline :: proc(
 
 @(private = "file")
 createPostProcessPipelineImages :: proc(using graphicsData: ^GraphicsData) {
+	logf(
+		.Info,
+		"Allocating post-process images at %vx%v.",
+		outputCapacity.width,
+		outputCapacity.height,
+	)
+
 	err: Error
 	err = createImage(
 		graphicsData,
 		&pipelines[.PostProcess].images[0],
 		nil,
 		.D2,
-		swapchain.extent.width,
-		swapchain.extent.height,
+		outputCapacity.width,
+		outputCapacity.height,
 		1,
 		{._1},
 		.OPTIMAL,
@@ -4762,12 +5017,12 @@ createPostProcessPipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		&pipelines[.PostProcess].images[1],
 		nil,
 		.D2,
-		swapchain.extent.width,
-		swapchain.extent.height,
+		outputCapacity.width,
+		outputCapacity.height,
 		1,
 		{._1},
 		.OPTIMAL,
-		{.TRANSFER_SRC, .COLOR_ATTACHMENT, .STORAGE},
+		{.TRANSFER_SRC, .STORAGE},
 		{.DEVICE_LOCAL},
 		.EXCLUSIVE,
 		0,
@@ -4910,6 +5165,52 @@ createPostProcessPipeline :: proc(
 }
 
 @(private = "file")
+createImguiPipelineImages :: proc(using graphicsData: ^GraphicsData) {
+	image := &pipelines[.Imgui].images[0]
+	if err := createImage(
+		graphicsData,
+		image,
+		nil,
+		.D2,
+		outputCapacity.width,
+		outputCapacity.height,
+		1,
+		{._1},
+		.OPTIMAL,
+		{.COLOR_ATTACHMENT, .STORAGE},
+		{.DEVICE_LOCAL},
+		.EXCLUSIVE,
+		0,
+		nil,
+	); err != nil {
+		logf(.Fatal, "Failed to create UI image! Error: %v", err)
+	}
+
+	viewErr: ImageError
+	image.view, image.viewInfo, viewErr = createImageView(
+		graphicsData,
+		image.vkImage,
+		.D2,
+		image.format,
+		{.COLOR},
+		1,
+	)
+	if viewErr != .None {
+		logf(.Fatal, "Failed to create UI image view! Error: %v", viewErr)
+	}
+
+	cmdBuffer, cmdErr := beginSingleTimeCommands(graphicsData, graphicsCommandPool)
+	if cmdErr != .None {
+		log(.Fatal, "Failed to start commands! %v", cmdErr)
+	}
+	transitionImageLayout(graphicsData, cmdBuffer, image.vkImage, .UNDEFINED, .GENERAL, {.COLOR}, 1)
+	if endErr := endSingleTimeCommands(graphicsData, cmdBuffer, graphicsCommandPool);
+	   endErr != .None {
+		log(.Fatal, "Failed to submit commands! %v", endErr)
+	}
+}
+
+@(private = "file")
 createImguiPipeline :: proc(using graphicsData: ^GraphicsData, shaders: [][]byte) {
 	createFlags: vk.PipelineCreateFlags2CreateInfo = {
 		sType = .PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
@@ -4955,7 +5256,7 @@ createImguiPipeline :: proc(using graphicsData: ^GraphicsData, shaders: [][]byte
 		pNext = nil,
 		viewMask = 0,
 		colorAttachmentCount = 1,
-		pColorAttachmentFormats = &pipelines[.PostProcess].images[1].format,
+		pColorAttachmentFormats = &pipelines[.Imgui].images[0].format,
 		depthAttachmentFormat = .UNDEFINED,
 		stencilAttachmentFormat = .UNDEFINED,
 	}
@@ -5171,6 +5472,15 @@ createCommandBuffers :: proc(using graphicsData: ^GraphicsData) -> CommandBuffer
 		device,
 		&allocInfo,
 		&commandBuffers[.Imgui][0],
+	); res != .SUCCESS {
+		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
+		return .FailedToAllocateCommandBuffer
+	}
+
+	if res := vk.AllocateCommandBuffers(
+		device,
+		&allocInfo,
+		&commandBuffers[.Present][0],
 	); res != .SUCCESS {
 		logf(.Fatal, "Failed to allocate command buffer! vkResult: %v", res)
 		return .FailedToAllocateCommandBuffer
@@ -5689,8 +5999,8 @@ updateCommandBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 					recordSceneCommands(graphicsData, bufferIndex, scene)
 			case .PostProcess:
 					recordPostProcessCommands(graphicsData, bufferIndex)
-			case .Imgui:
-				log(.Error, "Imgui is re-recorded every frame by drawFrame; marking it dirty does nothing.")
+			case .Imgui, .Present:
+				logf(.Error, "%v is re-recorded every frame by drawFrame; marking it dirty does nothing.", pass)
 			}
 		}
 	}
@@ -5977,7 +6287,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 
 	vkBeginLabel(cmdBuffer, "Scene", {0.4, 0.6, 0.9, 1})
 
-	setViewportAndScissor(cmdBuffer, renderSize)
+	setViewportAndScissor(cmdBuffer, settings.renderSize)
 
 	entryBarriers := [?]vk.ImageMemoryBarrier2 {
 		{
@@ -6043,7 +6353,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			sType = .RENDERING_INFO,
 			pNext = nil,
 			flags = nil,
-			renderArea = vk.Rect2D{offset = {0, 0}, extent = {renderSize.x, renderSize.y}},
+			renderArea = vk.Rect2D{offset = {0, 0}, extent = {settings.renderSize.x, settings.renderSize.y}},
 			layerCount = 1,
 			viewMask = 0,
 			colorAttachmentCount = 1,
@@ -6118,12 +6428,12 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		}
 	}
 
-	if showLightGizmos && len(scene.lights) > 0 {
+	if settings.showLightGizmos && len(scene.lights) > 0 {
 		vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Gizmo].handle)
 
 		gizmoConstants: Gizmo_PushConstants = {
 			resources = heapIndices,
-			radius    = lightGizmoRadius,
+			radius    = settings.lightGizmoRadius,
 		}
 		vk.CmdPushDataEXT(
 			cmdBuffer,
@@ -6221,7 +6531,7 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 
 	vkBeginLabel(cmdBuffer, "Post Process", {0.8, 0.4, 0.8, 1})
 
-	contentOffset, contentExtent := letterboxRect(renderSize, swapchain.extent)
+	contentOffset, contentExtent := letterboxRect(settings.renderSize, swapchain.extent)
 
 	imageBarriers := [?]vk.ImageMemoryBarrier2 {
 		{
@@ -6285,7 +6595,7 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		cmdBuffer,
 		pipelines[.Scene].images[0].vkImage,
 		pipelines[.PostProcess].images[0].vkImage,
-		{renderSize.x, renderSize.y},
+		{settings.renderSize.x, settings.renderSize.y},
 		contentExtent,
 		contentOffset,
 		0,
@@ -6330,18 +6640,20 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 
 	pushConstants: PostProcess_PushConstants = {
 		resources = heapIndices,
-		contrast   = contrast,
-		brightness = brightness,
-		saturation = saturation,
-		exposure   = pow(f32(2.0), exposure),
-		tonemapper = tonemapper,
-		gamma      = gamma,
+		contrast   = settings.contrast,
+		brightness = settings.brightness,
+		saturation = settings.saturation,
+		exposure   = pow(f32(2.0), settings.exposure),
+		tonemapper = settings.tonemapper,
+		gamma      = settings.gamma,
 		contentOffsetX = u32(contentOffset.x),
 		contentOffsetY = u32(contentOffset.y),
 		contentExtentX = contentExtent.width,
 		contentExtentY = contentExtent.height,
 		transferFunction = .PQ if swapchain.hdr else .Gamma,
-		paperWhiteNits = paperWhiteNits,
+		paperWhiteNits = settings.paperWhiteNits,
+		outputExtentX = swapchain.extent.width,
+		outputExtentY = swapchain.extent.height,
 	}
 	vk.CmdPushDataEXT(
 		cmdBuffer,
@@ -6362,6 +6674,40 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 		1,
 	)
 
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 1,
+			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
+				sType = .IMAGE_MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = {.COMPUTE_SHADER},
+				srcAccessMask = {.SHADER_STORAGE_WRITE},
+				dstStageMask = {.BLIT},
+				dstAccessMask = {.TRANSFER_READ},
+				oldLayout = .GENERAL,
+				newLayout = .TRANSFER_SRC_OPTIMAL,
+				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				image = pipelines[.PostProcess].images[1].vkImage,
+				subresourceRange = vk.ImageSubresourceRange {
+					aspectMask = {.COLOR},
+					baseMipLevel = 0,
+					levelCount = 1,
+					baseArrayLayer = 0,
+					layerCount = 1,
+				},
+			},
+		},
+	)
+
 	vkEndLabel(cmdBuffer)
 
 	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
@@ -6370,7 +6716,7 @@ recordPostProcessCommands :: proc(using graphicsData: ^GraphicsData, index: u32)
 }
 
 @(private = "file")
-recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, imageIndex: u32) {
+recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32) {
 	imgui.Render()
 	imguiUpdateTextures(graphicsData)
 
@@ -6403,14 +6749,14 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 				sType = .IMAGE_MEMORY_BARRIER_2,
 				pNext = nil,
 				srcStageMask = {.COMPUTE_SHADER},
-				srcAccessMask = {.SHADER_STORAGE_WRITE},
+				srcAccessMask = {.SHADER_STORAGE_READ},
 				dstStageMask = {.COLOR_ATTACHMENT_OUTPUT},
-				dstAccessMask = {.COLOR_ATTACHMENT_READ},
+				dstAccessMask = {.COLOR_ATTACHMENT_READ, .COLOR_ATTACHMENT_WRITE},
 				oldLayout = .GENERAL,
 				newLayout = .COLOR_ATTACHMENT_OPTIMAL,
 				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				image = pipelines[.PostProcess].images[1].vkImage,
+				image = pipelines[.Imgui].images[0].vkImage,
 				subresourceRange = vk.ImageSubresourceRange {
 					aspectMask = {.COLOR},
 					baseMipLevel = 0,
@@ -6438,14 +6784,14 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 			pColorAttachments = &vk.RenderingAttachmentInfo {
 				sType = .RENDERING_ATTACHMENT_INFO,
 				pNext = nil,
-				imageView = pipelines[.PostProcess].images[1].view,
+				imageView = pipelines[.Imgui].images[0].view,
 				imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
 				resolveMode = nil,
 				resolveImageView = 0,
 				resolveImageLayout = .UNDEFINED,
-				loadOp = .LOAD,
+				loadOp = .CLEAR,
 				storeOp = .STORE,
-				clearValue = {color = {float32 = {0, 0, 0, 1}}},
+				clearValue = {color = {float32 = {0, 0, 0, 0}}},
 			},
 			pDepthAttachment = nil,
 			pStencilAttachment = nil,
@@ -6453,49 +6799,6 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 	)
 	imguiRenderDrawData(graphicsData, cmdBuffer, index)
 	vk.CmdEndRendering(cmdBuffer)
-
-	imageBarriers := [?]vk.ImageMemoryBarrier2 {
-		{
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			pNext = nil,
-			srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
-			srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-			dstStageMask = {.BLIT},
-			dstAccessMask = {.TRANSFER_READ},
-			oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-			newLayout = .TRANSFER_SRC_OPTIMAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.PostProcess].images[1].vkImage,
-			subresourceRange = vk.ImageSubresourceRange {
-				aspectMask = {.COLOR},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-		},
-		{
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			pNext = nil,
-			srcStageMask = {.BLIT},
-			srcAccessMask = {.TRANSFER_READ},
-			dstStageMask = {.BLIT},
-			dstAccessMask = {.TRANSFER_WRITE},
-			oldLayout = .UNDEFINED,
-			newLayout = .TRANSFER_DST_OPTIMAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = swapchain.images[imageIndex],
-			subresourceRange = vk.ImageSubresourceRange {
-				aspectMask = {.COLOR},
-				baseMipLevel = 0,
-				levelCount = 1,
-				baseArrayLayer = 0,
-				layerCount = 1,
-			},
-		},
-	}
 
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
@@ -6507,8 +6810,84 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 			pMemoryBarriers = nil,
 			bufferMemoryBarrierCount = 0,
 			pBufferMemoryBarriers = nil,
-			imageMemoryBarrierCount = len(imageBarriers),
-			pImageMemoryBarriers = &imageBarriers[0],
+			imageMemoryBarrierCount = 1,
+			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
+				sType = .IMAGE_MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+				srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+				dstStageMask = {.COMPUTE_SHADER},
+				dstAccessMask = {.SHADER_STORAGE_READ},
+				oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+				newLayout = .GENERAL,
+				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				image = pipelines[.Imgui].images[0].vkImage,
+				subresourceRange = vk.ImageSubresourceRange {
+					aspectMask = {.COLOR},
+					baseMipLevel = 0,
+					levelCount = 1,
+					baseArrayLayer = 0,
+					layerCount = 1,
+				},
+			},
+		},
+	)
+
+	vkEndLabel(cmdBuffer)
+
+	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
+		logf(.Fatal, "Failed to record ui command buffer! vkResult: %v", res)
+	}
+}
+
+@(private = "file")
+recordPresentCommands :: proc(using graphicsData: ^GraphicsData, index: u32, imageIndex: u32) {
+	beginInfo: vk.CommandBufferBeginInfo = {
+		sType            = .COMMAND_BUFFER_BEGIN_INFO,
+		pNext            = nil,
+		flags            = {.ONE_TIME_SUBMIT},
+		pInheritanceInfo = nil,
+	}
+
+	cmdBuffer := commandBuffers[.Present][index]
+	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
+		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
+	}
+
+	vkBeginLabel(cmdBuffer, "Present", {0.5, 0.5, 0.9, 1})
+
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 1,
+			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
+				sType = .IMAGE_MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = {.BLIT},
+				srcAccessMask = {.TRANSFER_READ},
+				dstStageMask = {.BLIT},
+				dstAccessMask = {.TRANSFER_WRITE},
+				oldLayout = .UNDEFINED,
+				newLayout = .TRANSFER_DST_OPTIMAL,
+				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				image = swapchain.images[imageIndex],
+				subresourceRange = vk.ImageSubresourceRange {
+					aspectMask = {.COLOR},
+					baseMipLevel = 0,
+					levelCount = 1,
+					baseArrayLayer = 0,
+					layerCount = 1,
+				},
+			},
 		},
 	)
 
@@ -6587,7 +6966,7 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32, image
 	vkEndLabel(cmdBuffer)
 
 	if res := vk.EndCommandBuffer(cmdBuffer); res != .SUCCESS {
-		logf(.Fatal, "Failed to record ui command buffer! vkResult: %v", res)
+		logf(.Fatal, "Failed to record present command buffer! vkResult: %v", res)
 	}
 }
 
@@ -6604,6 +6983,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 
 	vk.WaitForFences(device, 1, &inFlightFrames[currentFrame], true, max(u64))
 	waitForPresent(graphicsData, currentFrame)
+	waitForFrameLatency(graphicsData)
 
 	imageIndex: u32
 	if res := vk.AcquireNextImageKHR(
@@ -6629,7 +7009,9 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 
 	stagedBefore := staging.submitted
 	vk.ResetCommandBuffer(commandBuffers[.Imgui][currentFrame], {})
-	recordImguiCommands(graphicsData, currentFrame, imageIndex)
+	recordImguiCommands(graphicsData, currentFrame)
+	vk.ResetCommandBuffer(commandBuffers[.Present][currentFrame], {})
+	recordPresentCommands(graphicsData, currentFrame, imageIndex)
 	stagingFlush(graphicsData)
 
 	submitInfo: vk.SubmitInfo2 = {
@@ -6684,13 +7066,19 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 		{
 			sType = .COMMAND_BUFFER_SUBMIT_INFO,
 			pNext = nil,
+			commandBuffer = commandBuffers[.Imgui][currentFrame],
+			deviceMask = 0,
+		},
+		{
+			sType = .COMMAND_BUFFER_SUBMIT_INFO,
+			pNext = nil,
 			commandBuffer = commandBuffers[.PostProcess][currentFrame],
 			deviceMask = 0,
 		},
 		{
 			sType = .COMMAND_BUFFER_SUBMIT_INFO,
 			pNext = nil,
-			commandBuffer = commandBuffers[.Imgui][currentFrame],
+			commandBuffer = commandBuffers[.Present][currentFrame],
 			deviceMask = 0,
 		},
 	}
@@ -6752,9 +7140,16 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	}
 
 	vk.ResetFences(device, 1, &presentFences[currentFrame])
+	presentId := lastPresentId + 1
+	presentIdInfo: vk.PresentId2KHR = {
+		sType          = .PRESENT_ID_2_KHR,
+		pNext          = nil,
+		swapchainCount = 1,
+		pPresentIds    = &presentId,
+	}
 	presentFenceInfo: vk.SwapchainPresentFenceInfoKHR = {
 		sType          = .SWAPCHAIN_PRESENT_FENCE_INFO_KHR,
-		pNext          = nil,
+		pNext          = &presentIdInfo if presentWait else nil,
 		swapchainCount = 1,
 		pFences        = &presentFences[currentFrame],
 	}
@@ -6772,6 +7167,7 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	presentResult := vk.QueuePresentKHR(presentQueue, &presentInfo)
 	if presentResult == .SUCCESS || presentResult == .SUBOPTIMAL_KHR {
 		presentPending[currentFrame] = true
+		lastPresentId = presentId
 	}
 
 	#partial switch presentResult {
@@ -6816,6 +7212,9 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 	imguiContext = imgui.CreateContext(nil)
 	imgui.StyleColorsClassic(nil)
 
+	imguiPlatform.iniPath = strings.clone_to_cstring(projectPath(CONFIG_PATH(), "imgui.ini"))
+	imgui.GetIO().IniFilename = imguiPlatform.iniPath
+
 	initImguiPlatform(graphicsData)
 
 	initImguiRenderer(graphicsData)
@@ -6823,9 +7222,11 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 
 @(private = "file")
 cleanupImgui :: proc(using graphicsData: ^GraphicsData) {
+	iniPath := imguiPlatform.iniPath
 	cleanupImguiRenderer(graphicsData)
 	cleanupImguiPlatform(graphicsData)
 	imgui.DestroyContext(imguiContext)
+	delete(iniPath)
 }
 
 @(private = "file")
@@ -6835,6 +7236,7 @@ ImguiPlatform :: struct {
 	lastValidMousePos: imgui.Vec2,
 	mouseInWindow:     bool,
 	time:              f64,
+	iniPath:           cstring,
 }
 
 @(private = "file")
@@ -7603,15 +8005,13 @@ imguiRenderDrawData :: proc(
 
 	scale := Vec2{2 / drawData.DisplaySize.x, 2 / drawData.DisplaySize.y}
 	pushConstants: Imgui_PushConstants = {
-		resources        = heapIndices,
-		scale            = {scale.x, scale.y},
-		translate        = {
+		resources = heapIndices,
+		scale     = {scale.x, scale.y},
+		translate = {
 			-1 - drawData.DisplayPos.x * scale.x,
 			-1 - drawData.DisplayPos.y * scale.y,
 		},
-		texture          = 0,
-		transferFunction = .PQ if swapchain.hdr else .Gamma,
-		paperWhiteNits   = paperWhiteNits,
+		texture   = 0,
 	}
 
 	imguiSetupRenderState(graphicsData, cmdBuffer, frame, &pushConstants, framebufferSize)
