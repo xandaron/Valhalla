@@ -121,7 +121,7 @@ FragOut frag(VertOut input) {
 	for (uint index = 0; index < Resources.Uniforms[0].lightCount; index++) {
 		const Light light = Resources.Lights[index];
 
-		const float3 relativePosition = light.position.xyz - input.worldPosition;
+		const float3 relativePosition = light.position - input.worldPosition;
 		const float lightSquaredDistance = dot(relativePosition, relativePosition);
 		const float lightDistance = sqrt(lightSquaredDistance);
 		const float3 negativeLightDirection = relativePosition / lightDistance;
