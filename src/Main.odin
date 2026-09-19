@@ -5,6 +5,7 @@ import "core:log"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
+import "core:strconv"
 import "core:strings"
 import "core:time"
 import "vendor:glfw"
@@ -51,7 +52,7 @@ main :: proc() {
 	defer log.destroy_console_logger(context.logger)
 
 	if len(os.args) < 2 {
-		logf(.Error, "Usage: %v <path_to_project_file> [scene]", os.args[0])
+		logf(.Error, "Usage: %v <path_to_project_file> [scene] [-external[:port]]", os.args[0])
 		os.exit(1)
 	} else if !os.exists(os.args[1]) {
 		logf(.Error, "%v: project file not found!", os.args[1])
@@ -64,6 +65,24 @@ main :: proc() {
 	os.set_working_directory(globals.projectDir)
 
 	projectErr: LoadError
+	startupSceneOverride := ""
+	externalPort := -1
+	for arg in os.args[2:] {
+		if strings.has_prefix(arg, "-external") {
+			externalPort = EXTERNAL_DEFAULT_PORT
+			if _, _, value := strings.partition(arg, ":"); value != "" {
+				parsed, ok := strconv.parse_int(value)
+				if !ok {
+					logf(.Error, "Invalid external port \"%v\".", value)
+					os.exit(1)
+				}
+				externalPort = parsed
+			}
+		} else {
+			startupSceneOverride = arg
+		}
+	}
+
 	globals.project, projectErr = loadProject(globals.projectFile)
 	if projectErr != .None {
 		logf(.Error, "Failed to load project \"%v\": %v", globals.projectFile, projectErr)
@@ -147,6 +166,7 @@ main :: proc() {
 		window            = globals.settings.window,
 		settings          = globals.settings.render,
 		gradeForOutput    = !settingsLoaded,
+		focusOnShow       = externalPort < 0,
 		transformShader   = transformComp,
 		lightShaders      = {lightVert, lightFrag},
 		sceneShaders      = {sceneVert, sceneFrag},
@@ -162,7 +182,12 @@ main :: proc() {
 		saveUserSettings(globals.settings)
 	}
 
-	startupScene := len(os.args) > 2 ? os.args[2] : globals.project.startupScene
+	if externalPort >= 0 {
+		externalInit(externalPort)
+	}
+	defer externalShutdown()
+
+	startupScene := startupSceneOverride != "" ? startupSceneOverride : globals.project.startupScene
 	if startupScene == "" {
 		logf(.Error, "Project declares no startup scene and none was given on the command line.")
 		os.exit(1)
@@ -175,6 +200,7 @@ main :: proc() {
 		}
 		delete(globals.scenes)
 	}
+	defer deleteUIData(&globals.uiData)
 
 	updateSceneBuffers(&globals.graphicsData, &globals.scenes[0])
 	free_all(context.temp_allocator)
@@ -197,6 +223,8 @@ tickFrame :: proc() -> bool {
 	}
 	ticking = true
 	defer ticking = false
+
+	externalTick()
 
 	frameSeconds := time.duration_seconds(time.since(lastFrameTime))
 	delta := f32(frameSeconds)

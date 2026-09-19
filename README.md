@@ -53,21 +53,52 @@ checkable work in [Tasks](#tasks).
 
 | # | Undertaking | State |
 | --- | --- | --- |
-| 1 | **Colour correctness** — colour space handling and light falloff are done; gizmo picking remains | Partly done |
-| 2 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
-| 3 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
-| 4 | **Shader loading and hot reload** — shaders are hardcoded at startup and nothing reaches the reload path | Not started |
-| 5 | **Renderer performance** — buffer consolidation, swapchain format selection | Partly done |
-| 6 | **Project files** — a migrator for outdated file versions | Partly done |
+| 1 | **Scene editor** — docking, an object catalog and inspector, click-to-select, tabs and renaming, so scenes can be built in the editor | Partly done |
+| 2 | **Colour correctness** — colour space handling, light falloff and gizmo picking | Done |
+| 3 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
+| 4 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
+| 5 | **Shader loading and hot reload** — shaders are hardcoded at startup and nothing reaches the reload path | Not started |
+| 6 | **Renderer performance** — buffer consolidation, swapchain format selection | Partly done |
+| 7 | **Project files** — a migrator for outdated file versions | Partly done |
 
 ## Tasks
 
-### 1. Colour correctness
+### 1. Scene editor
 
-- [ ] Gizmo picking — the billboards are real geometry, so clicking one to select its light is
-      now feasible
+The editor is a main menu bar and docked panels around a passthrough central node the scene
+shows through: Objects, Lights and Scenes on the left, the Inspector on the right, and Scene,
+Settings, Models and Textures below it. **F1** hides all of it, and so does fly mode (middle
+click) until it ends.
 
-### 2. Light types
+- [x] **Docking.** `DockSpaceOverViewport` with a passthrough central node; the default layout is
+      built with the DockBuilder when `imgui.ini` holds none
+- [x] **Object inspector.** Reflected fields plus the model, animation clip and texture pickers;
+      lights are inspected the same way
+- [x] **Click to select.** `cursorRay` builds the ray from the letterboxed content rect and the
+      active camera; `pick` tests each mesh's box in object space via `objectTransform`,
+      which the instance buffer shares, so attachments are honoured. Light gizmos are picked as
+      spheres of `lightGizmoRadius` while they are shown
+- [x] **Object catalog.** Objects panel, filterable by name
+- [x] **Tabs.** Each inspector tab has a pin left of its name, off by default. Showing an unpinned
+      tab, including a newly opened one, closes every other unpinned tab. The Scenes panel lists every `.scene` in the scenes directory and
+      opens or switches to one on click
+- [x] **Renaming.** `nameField` in `UI.odin`, backed by a `strings.Builder` that `InputText`'s
+      `.CallbackResize` grows; commits on deactivation. Renames objects and scenes
+- [ ] The scene still renders across the whole window behind the panels. Letterboxing it into the
+      central node would need PostProcess re-recorded whenever the dock layout changes, and
+      `cursorToRenderNDC` moved to the same rect
+- [ ] Picking uses bind-pose mesh boxes, so animated and skinned objects are picked by where their
+      rest pose is
+- [ ] Deleting objects. Selection and open tabs are indices into `scene.objects`, so removal must
+      remap them (and every `Attachment.targetIdx`)
+- [ ] If the name field becomes imreflect's string widget, so every string field is editable,
+      settle first who owns the string's memory, since imreflect cannot know the allocator
+
+### 2. Colour correctness
+
+- [x] Gizmo picking — clicking a light's billboard opens it in the inspector (see 1)
+
+### 3. Light types
 
 - [ ] Directional lights
 - [ ] Spot lights
@@ -75,14 +106,14 @@ checkable work in [Tasks](#tasks).
       single struct in `SceneData.odin`
 - [ ] Editor support for creating and editing each type
 
-### 3. Shadow quality and cost
+### 4. Shadow quality and cost
 
 - [ ] Per-face culling — every light currently submits all geometry to all six views
 - [ ] Skip faces a light cannot affect
-- [ ] Cascaded shadow maps for directional lights (depends on 2, light types)
+- [ ] Cascaded shadow maps for directional lights (depends on 3, light types)
 - [ ] Revisit the fixed 512x512 `SHADOW_RESOLUTION` and the 20-sample PCF loop
 
-### 4. Shader loading and hot reload
+### 5. Shader loading and hot reload
 
 Shaders are compiled from ten hardcoded `compileShader` calls in `Main.odin`, and nothing calls
 `updatePipelineShaders` any more, although it still rebuilds any of the six pipelines and dirties
@@ -91,13 +122,13 @@ and stage to each pipeline; reload driven by that manifest, which must leave a w
 alone when a compile fails; and deciding whether shaders ship with the engine or are copied into
 a project at creation, since a fresh project has none and cannot start.
 
-### 5. Renderer performance
+### 6. Renderer performance
 
 - [ ] Combine the per-purpose scene buffers into one buffer with offsets (`SceneBuffers`)
 - [ ] Improve swapchain format selection, which currently takes the first format offered
       unless HDR is enabled
 
-### 6. Project files
+### 7. Project files
 
 The engine is given a project file, not a directory, and can only ever load one — creating a
 project is `tools/projectgen`'s job. Both the engine and the tools share `ProjectData`, so the

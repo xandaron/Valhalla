@@ -1083,7 +1083,9 @@ writeTextureDescriptor :: proc(asset: Asset) -> bool {
 	)
 }
 
-writeModelDescriptor :: proc(asset: Asset) -> bool {
+writeModelDescriptor :: proc(asset: Asset, bindpoints: []V.Bindpoint = nil) -> bool {
+	points := make([dynamic]V.Bindpoint, context.temp_allocator)
+	append(&points, ..bindpoints)
 	return saveComponent(
 		asset.descriptorPath,
 		V.ModelComponent {
@@ -1092,6 +1094,7 @@ writeModelDescriptor :: proc(asset: Asset) -> bool {
 			position = {0, 0, 0},
 			rotation = V.IQUAT,
 			scale = {1, 1, 1},
+			bindpoints = points,
 		},
 	)
 }
@@ -1237,35 +1240,24 @@ STRESS_VARIANTS :: 48
 STRESS_VARIANT_SIZE :: 1024
 STRESS_ZONE_PLATE_SIZE :: 4096
 
-KnightPart :: enum u32 {
-	Body = 0,
-	Helmet,
-	Sword,
+RIG_BONES :: 8
+RIG_HEIGHT :: 3.0
+
+RigBindpoint :: enum u32 {
+	Top = 0,
+	Mid,
 }
 
-KNIGHT_PARTS := [KnightPart]string {
-	.Body   = "Knight.model",
-	.Helmet = "Knight_Helmet.model",
-	.Sword  = "Knight_Sword.model",
+RIG_BINDPOINTS := [RigBindpoint]V.Bindpoint {
+	.Top = {name = "Top", boneIdx = RIG_BONES - 1, offsetMatrix = V.IMAT4},
+	.Mid = {name = "Mid", boneIdx = RIG_BONES / 2, offsetMatrix = V.IMAT4},
 }
-
-KNIGHT_TEXTURES := [2]string{"knight.texture", "blank_normal.texture"}
-
-KNIGHT_MESH_COUNT :: 6
-KNIGHT_HEAD_BINDPOINT :: 0
-KNIGHT_RIGHT_HAND_BINDPOINT :: 2
 
 stressModel :: proc(model: StressModel) -> u32 {
 	return u32(len(Model)) + u32(model)
 }
 
-knightModel :: proc(part: KnightPart) -> u32 {
-	return u32(len(Model) + len(StressModel)) + u32(part)
-}
-
 ZONE_PLATE_TEX :: u32(len(Tex))
-KNIGHT_ALBEDO_TEX :: u32(len(Tex)) + 1 + STRESS_VARIANTS
-KNIGHT_NORMAL_TEX :: KNIGHT_ALBEDO_TEX + 1
 
 variantTex :: proc(variant: int) -> u32 {
 	return u32(len(Tex)) + 1 + u32(variant % STRESS_VARIANTS)
@@ -1344,7 +1336,7 @@ generateMeshes :: proc(opts: Options) -> bool {
 		fmt.printfln("  %s  (%v vertices, %v triangles)", path, len(mesh.positions), len(mesh.indices) / 3)
 	}
 
-	rig := makeRiggedColumn(48, 32, 8, 3.0, 0.30, 0.12)
+	rig := makeRiggedColumn(48, 32, RIG_BONES, RIG_HEIGHT, 0.30, 0.12)
 	defer riggedMeshDelete(&rig)
 	if !writeGLTF(dir, MODEL_ASSETS[.Rig].file, MODEL_ASSETS[.Rig].name, &rig) {
 		return false
@@ -1418,6 +1410,10 @@ generateTextures :: proc(opts: Options) -> bool {
 generateDescriptors :: proc(opts: Options) -> bool {
 	for model in Model {
 		entry := MODEL_ASSETS[model]
+		bindpoints: []V.Bindpoint
+		if model == .Rig {
+			bindpoints = slice.enumerated_array(&RIG_BINDPOINTS)
+		}
 		if !writeModelDescriptor(
 			Asset {
 				name = entry.name,
@@ -1434,6 +1430,7 @@ generateDescriptors :: proc(opts: Options) -> bool {
 					modelExtension(model),
 				),
 			},
+			bindpoints,
 		) {
 			return false
 		}
@@ -1693,15 +1690,9 @@ buildStressScene :: proc(opts: Options) -> bool {
 	for model in StressModel {
 		append(&builder.models, fmt.tprintf("%s%s.model", opts.componentsRel, STRESS_MODEL_ASSETS[model].file))
 	}
-	for file in KNIGHT_PARTS {
-		append(&builder.models, fmt.tprintf("%s%s", opts.componentsRel, file))
-	}
 	append(&builder.textures, fmt.tprintf("%sgen_zone_plate.texture", opts.componentsRel))
 	for variant in 0 ..< STRESS_VARIANTS {
 		append(&builder.textures, fmt.tprintf("%sgen_variant_%02d.texture", opts.componentsRel, variant))
-	}
-	for file in KNIGHT_TEXTURES {
-		append(&builder.textures, fmt.tprintf("%s%s", opts.componentsRel, file))
 	}
 
 	density := f32(opts.stressDensity) / 100
@@ -1747,18 +1738,17 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 	}
 
-	knights := side(8, density)
-	for i in 0 ..< knights * knights {
-		x, z := i % knights, i / knights
+	rigs := side(8, density)
+	for i in 0 ..< rigs * rigs {
+		x, z := i % rigs, i / rigs
 		body := addObject(
 			&builder,
-			fmt.tprintf("Knight %v", i),
-			knightModel(.Body),
-			{48 + centred(x, knights, 3), 0, 15 + centred(z, knights, 3)},
+			fmt.tprintf("Rig %v", i),
+			u32(Model.Rig),
+			{48 + centred(x, rigs, 3), 0, 15 + centred(z, rigs, 3)},
 			{1, 1, 1},
-			KNIGHT_ALBEDO_TEX,
-			KNIGHT_NORMAL_TEX,
-			meshCount = KNIGHT_MESH_COUNT,
+			u32(Tex.Checker),
+			u32(Tex.OrnamentNormal),
 			animation = V.AnimationComponent {
 				idx = 0,
 				timer = f64(hashFloat(u32(i), 0, 5)) * 2,
@@ -1768,23 +1758,23 @@ buildStressScene :: proc(opts: Options) -> bool {
 		)
 		addObject(
 			&builder,
-			fmt.tprintf("Knight %v Helmet", i),
-			knightModel(.Helmet),
+			fmt.tprintf("Rig %v Cap", i),
+			u32(Model.Sphere),
 			{0, 0, 0},
-			{1, 1, 1},
-			KNIGHT_ALBEDO_TEX,
-			KNIGHT_NORMAL_TEX,
-			attachment = {targetIdx = i32(body), bindpointIdx = KNIGHT_HEAD_BINDPOINT},
+			{0.4, 0.4, 0.4},
+			u32(Tex.PlasterAlbedo),
+			u32(Tex.PlasterNormal),
+			attachment = {targetIdx = i32(body), bindpointIdx = u32(RigBindpoint.Top)},
 		)
 		addObject(
 			&builder,
-			fmt.tprintf("Knight %v Sword", i),
-			knightModel(.Sword),
-			{0, 0, 0},
-			{1, 1, 1},
-			KNIGHT_ALBEDO_TEX,
-			KNIGHT_NORMAL_TEX,
-			attachment = {targetIdx = i32(body), bindpointIdx = KNIGHT_RIGHT_HAND_BINDPOINT},
+			fmt.tprintf("Rig %v Blade", i),
+			u32(Model.Cube),
+			{0.45, 0, 0},
+			{0.6, 0.08, 0.2},
+			u32(Tex.BrickAlbedo),
+			u32(Tex.BrickNormal),
+			attachment = {targetIdx = i32(body), bindpointIdx = u32(RigBindpoint.Mid)},
 		)
 	}
 

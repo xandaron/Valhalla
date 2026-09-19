@@ -1,7 +1,7 @@
 package Valhalla
 
 Object :: struct {
-	name:        string,
+	name:        string `imrefl:"ignore"`,
 	flags:       ObjectFlags,
 	position:    Vec3 `imrefl:"label=Position,speed=0.1"`,
 	rotation:    Quat `imrefl:"label=Rotation,euler"`,
@@ -37,6 +37,30 @@ changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
 
 	object.modelIdx = modelIdx
 	object.instanceIdx = addInstance(scene, &scene.models[modelIdx], objectIdx)
+}
+
+objectTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
+	model := &scene.models[object.modelIdx]
+	local := transform(
+		object.position + model.position,
+		object.rotation * model.rotation,
+		object.scale * model.scale,
+	)
+	if object.attachment.targetIdx < 0 {
+		return local
+	}
+
+	target := &scene.objects[object.attachment.targetIdx]
+	targetModel := &scene.models[target.modelIdx]
+	bindpoint := &targetModel.bindpoints[object.attachment.bindpointIdx]
+	return(
+		transform(
+			target.position + targetModel.position,
+			target.rotation * targetModel.rotation,
+			target.scale * targetModel.scale,
+		) *
+		target.animation.state[bindpoint.boneIdx] *
+		local 	)
 }
 
 Texture :: struct {
@@ -186,7 +210,7 @@ projection :: proc(camera: Camera) -> Mat4 {
 }
 
 PointLight :: struct {
-	name:     string `imrefl:"label=Name"`,
+	name:     string `imrefl:"ignore"`,
 	position: Vec3 `imrefl:"label=Position,speed=0.1"`,
 	colour:   Vec3 `imrefl:"label=Colour,colour"`,
 	lumens:   f32 `imrefl:"label=Lumens,min=0,max=100000,speed=10"`,

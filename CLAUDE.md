@@ -82,9 +82,38 @@ The app is a GUI program, so a change is not verified until it has been run. Two
   (`Process.CloseMainWindow()` from PowerShell), or press **Ctrl+Q**, which is a clean exit that
   works even with an imgui text field focused, so shutdown actually executes.
 - Validation output goes to **stderr**, ordinary logging to stdout. Check both.
-- Never minimise or close the user's other windows to get a clean screenshot. To raise the app,
-  use `BringWindowToTop` / `SetForegroundWindow` on its own `MainWindowHandle` and capture that
-  window's rect; if something still occludes it, capture anyway and say so.
+- **Never drive the real mouse or keyboard** (`SetCursorPos`, `mouse_event`, `SendKeys`), and
+  never minimise, close or raise the user's windows. The user is working on the same machine;
+  simulated input has landed in their windows before. Use the external API instead.
+
+### The external API
+
+`-external[:port]` (default 47470) makes the app listen on `127.0.0.1` for newline-terminated
+text commands, one reply line each (`ok ...` or `err ...`). It lives in `src/External.odin`.
+The window is shown without taking focus in this mode. Input is injected through `handleInput`,
+the same path GLFW's callbacks use, so it exercises imgui and picking exactly as real input does.
+A click spans three frames (move, press, release) so imgui's hover state is current when it lands.
+
+| Command | Effect |
+| --- | --- |
+| `ping` | `ok pong` |
+| `state` | JSON: scene, loaded scenes, UI hidden, fly mode, selection, inspector tabs, window size, FPS |
+| `move X Y` / `click X Y [left\|right\|middle] [ctrl] [shift] [alt]` / `down` / `up` | mouse, in window coordinates (the screenshot's pixels at 100% scaling) |
+| `scroll DY`, `key NAME [mods]`, `text STRING` | wheel, key press+release (`F1`, `ENTER`, `A`, ...), typed characters |
+| `wait FRAMES` | let frames pass |
+| `screenshot PATH` | PNG of the presented frame, read back from the post-process image (HDR is PQ-decoded to sRGB) |
+| `capture PREFIX FRAMES` | save each of the next frames as `PREFIX_000.png`... while other commands run |
+| `quit` | clean exit, same as Ctrl+Q |
+
+Screenshots come from the GPU, not the desktop, so occlusion and HDR capture quirks do not
+apply. From PowerShell:
+
+```powershell
+$c = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 47470)
+$w = New-Object System.IO.StreamWriter($c.GetStream()); $w.AutoFlush = $true; $w.NewLine = "`n"
+$r = New-Object System.IO.StreamReader($c.GetStream())
+$w.WriteLine("state"); $r.ReadLine()
+```
 
 Validation layers and `SYNCHRONIZATION_VALIDATION` are enabled in `createInstance`, so
 synchronisation mistakes are caught at runtime. A silent run is meaningful evidence; take it
@@ -230,11 +259,15 @@ share a block, which sidesteps `bufferImageGranularity` by construction — pres
 separation. `memoryAllocatorReportLeaks` runs at shutdown.
 
 Uploads go through a staging ring: one persistently mapped buffer paced by a timeline semaphore,
-accumulating into a single command buffer. `stagingWait` before anything reads an uploaded
+accumulating into one command buffer per batch. A batch's command buffer returns to
+`idleCommands` only once the timeline passes its value (`stagingRetire`); re-beginning one that is
+still pending is a validation error, and it only shows when uploads land on consecutive frames
+(imgui's font atlas growing does this). `stagingWait` before anything reads an uploaded
 resource. `beginSingleTimeCommands`/`endSingleTimeCommands` still exist but are only for
 one-off layout transitions; they block, so do not use them for uploads.
 
-**Other files.** `Main.odin` owns the `globals` struct and the frame loop. `Files.odin` handles
+**Other files.** `Main.odin` owns the `globals` struct and the frame loop. `External.odin` is the
+external API above; it is the one component the user chose to give its own file. `Files.odin` handles
 scene/model/texture serialisation (assimp). `Shaders.odin` compiles `.slang` sources at runtime through the `slang/`
 bindings, which wrap Slang's COM-lite interfaces as plain Odin procs (`slang.load_module`,
 `slang.release`, ...) — there is no C shim and no vtable calls at the call site;

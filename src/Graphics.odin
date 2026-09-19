@@ -532,6 +532,7 @@ GraphicsData :: struct {
 	currentFrame:        u32,
 	reloadBuffers:       bool,
 	dirtyCommands:       bit_set[CmdBufferIndex],
+	screenshot:          Screenshot,
 }
 
 @(private = "file")
@@ -567,6 +568,7 @@ InitGraphicsInfo :: struct {
 	window:            WindowSettings,
 	settings:          RenderSettings,
 	gradeForOutput:    bool,
+	focusOnShow:       bool,
 
 	// Shaders
 	transformShader:   []byte,
@@ -602,7 +604,7 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 		logf(.Error, "Failed to create vulkan debug callback! vkResult: %v", res)
 	}
 
-	initWindow(&graphicsData, initInfo.windowTitle, initInfo.window) or_return
+	initWindow(&graphicsData, initInfo.windowTitle, initInfo.window, initInfo.focusOnShow) or_return
 	pickPhysicalDevice(&graphicsData) or_return
 	createLogicalDevice(&graphicsData) or_return
 
@@ -808,6 +810,25 @@ windowSize :: proc(using graphicsData: ^GraphicsData) -> (width: i32, height: i3
 	return glfw.GetWindowSize(window)
 }
 
+cursorToRenderNDC :: proc(using graphicsData: ^GraphicsData, cursor: Vec2) -> (ndc: Vec2, inside: bool) {
+	windowWidth, windowHeight := glfw.GetWindowSize(window)
+	if windowWidth <= 0 || windowHeight <= 0 || swapchain.extent.width == 0 || swapchain.extent.height == 0 {
+		return
+	}
+	pixel :=
+		cursor *
+		Vec2 {
+				f32(swapchain.extent.width) / f32(windowWidth),
+				f32(swapchain.extent.height) / f32(windowHeight),
+			}
+	offset, extent := letterboxRect(settings.renderSize, swapchain.extent)
+	ndc =
+		(pixel - Vec2{f32(offset.x), f32(offset.y)}) / Vec2{f32(extent.width), f32(extent.height)} * 2 -
+		1
+	inside = abs(ndc.x) <= 1 && abs(ndc.y) <= 1
+	return
+}
+
 requestClose :: proc(using graphicsData: ^GraphicsData) {
 	glfw.SetWindowShouldClose(window, true)
 }
@@ -843,6 +864,7 @@ initWindow :: proc(
 	using graphicsData: ^GraphicsData,
 	windowTitle: cstring,
 	geometry: WindowSettings,
+	focusOnShow: bool,
 ) -> WindowError {
 	onMonitor :: proc(x, y: i32) -> bool {
 		for monitor in glfw.GetMonitors() {
@@ -856,6 +878,7 @@ initWindow :: proc(
 
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	glfw.WindowHint(glfw.VISIBLE, false)
+	glfw.WindowHint(glfw.FOCUS_ON_SHOW, b32(focusOnShow))
 	if window = glfw.CreateWindow(geometry.width, geometry.height, windowTitle, nil, nil);
 	   window == nil {
 		log(.Fatal, "Failed to create window.")
@@ -2336,8 +2359,9 @@ STAGING_SIZE: vk.DeviceSize : 64 * 1024 * 1024
 
 @(private = "file")
 StagingBatch :: struct {
-	head:  u64,
-	value: u64,
+	head:          u64,
+	value:         u64,
+	commandBuffer: vk.CommandBuffer,
 }
 
 @(private = "file")
@@ -2356,6 +2380,7 @@ StagingRing :: struct {
 
 	commandBuffer: vk.CommandBuffer,
 	recording:     bool,
+	idleCommands:  [dynamic]vk.CommandBuffer,
 
 	oversized:     [dynamic]Buffer,
 }
@@ -2366,6 +2391,7 @@ stagingInit :: proc(graphicsData: ^GraphicsData) -> StagingError {
 	ring := &graphicsData.staging
 	ring.size = STAGING_SIZE
 	ring.pending = make([dynamic]StagingBatch)
+	ring.idleCommands = make([dynamic]vk.CommandBuffer)
 	ring.oversized = make([dynamic]Buffer)
 
 	buffer: Buffer
@@ -2410,12 +2436,12 @@ stagingDestroy :: proc(graphicsData: ^GraphicsData) {
 
 	stagingWait(graphicsData)
 
-	if ring.commandBuffer != nil {
+	if len(ring.idleCommands) > 0 {
 		vk.FreeCommandBuffers(
 			graphicsData.device,
 			graphicsData.graphicsCommandPool,
-			1,
-			&ring.commandBuffer,
+			u32(len(ring.idleCommands)),
+			raw_data(ring.idleCommands),
 		)
 	}
 	vk.DestroySemaphore(graphicsData.device, ring.timeline, nil)
@@ -2423,6 +2449,7 @@ stagingDestroy :: proc(graphicsData: ^GraphicsData) {
 	memoryFree(&graphicsData.memoryAllocator, &ring.allocation)
 
 	delete(ring.pending)
+	delete(ring.idleCommands)
 	delete(ring.oversized)
 	ring^ = {}
 }
@@ -2435,7 +2462,10 @@ stagingCommands :: proc(graphicsData: ^GraphicsData) -> (vk.CommandBuffer, Stagi
 		return ring.commandBuffer, .None
 	}
 
-	if ring.commandBuffer == nil {
+	stagingRetire(graphicsData)
+	if len(ring.idleCommands) > 0 {
+		ring.commandBuffer = pop(&ring.idleCommands)
+	} else {
 		allocInfo: vk.CommandBufferAllocateInfo = {
 			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 			pNext              = nil,
@@ -2545,6 +2575,8 @@ stagingFlush :: proc(graphicsData: ^GraphicsData) {
 	}
 	ring.recording = false
 	ring.submitted += 1
+	commandBuffer := ring.commandBuffer
+	ring.commandBuffer = nil
 
 	submitInfo: vk.SubmitInfo2 = {
 		sType                    = .SUBMIT_INFO_2,
@@ -2554,7 +2586,7 @@ stagingFlush :: proc(graphicsData: ^GraphicsData) {
 		pCommandBufferInfos      = &vk.CommandBufferSubmitInfo {
 			sType = .COMMAND_BUFFER_SUBMIT_INFO,
 			pNext = nil,
-			commandBuffer = ring.commandBuffer,
+			commandBuffer = commandBuffer,
 			deviceMask = 0,
 		},
 		signalSemaphoreInfoCount = 1,
@@ -2569,10 +2601,31 @@ stagingFlush :: proc(graphicsData: ^GraphicsData) {
 	}
 	if res := vk.QueueSubmit2(graphicsData.graphicsQueue, 1, &submitInfo, 0); res != .SUCCESS {
 		logf(.Error, "Failed to submit staging commands! vkResult: %v", res)
+		append(&ring.idleCommands, commandBuffer)
 		return
 	}
 
-	append(&ring.pending, StagingBatch{head = ring.head, value = ring.submitted})
+	append(
+		&ring.pending,
+		StagingBatch{head = ring.head, value = ring.submitted, commandBuffer = commandBuffer},
+	)
+}
+
+@(private = "file")
+stagingRetire :: proc(graphicsData: ^GraphicsData) {
+	ring := &graphicsData.staging
+	completed: u64
+	if res := vk.GetSemaphoreCounterValue(graphicsData.device, ring.timeline, &completed);
+	   res != .SUCCESS {
+		logf(.Error, "Failed to read staging timeline! vkResult: %v", res)
+		return
+	}
+
+	for len(ring.pending) > 0 && ring.pending[0].value <= completed {
+		ring.tail = ring.pending[0].head
+		append(&ring.idleCommands, ring.pending[0].commandBuffer)
+		ordered_remove(&ring.pending, 0)
+	}
 }
 
 @(private = "file")
@@ -2597,6 +2650,7 @@ stagingWaitBatch :: proc(graphicsData: ^GraphicsData) {
 	}
 
 	ring.tail = batch.head
+	append(&ring.idleCommands, batch.commandBuffer)
 	ordered_remove(&ring.pending, 0)
 }
 
@@ -5853,31 +5907,7 @@ updateInstanceBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene, delta: 
 			value := objectIdx
 			object := &scene.objects[objectIdx]
 
-			modelTransform: Mat4 = ---
-			if object.attachment.targetIdx >= 0 {
-					attachmentObject := &scene.objects[object.attachment.targetIdx]
-					attachmentModel := &scene.models[attachmentObject.modelIdx]
-					bindpoint := &attachmentModel.bindpoints[object.attachment.bindpointIdx]
-
-					modelTransform =
-						transform(
-							attachmentObject.position + attachmentModel.position,
-							attachmentObject.rotation * attachmentModel.rotation,
-							attachmentObject.scale * attachmentModel.scale,
-						) *
-						attachmentObject.animation.state[bindpoint.boneIdx] *
-						transform(
-							object.position + model.position,
-							object.rotation * model.rotation,
-							object.scale * model.scale,
-						)
-			} else {
-					modelTransform = transform(
-						object.position + model.position,
-						object.rotation * model.rotation,
-						object.scale * model.scale,
-					)
-			}
+			modelTransform := objectTransform(scene, object)
 
 			instanceData[instanceIdx] = {
 					modelTransform = modelTransform,
@@ -6856,6 +6886,7 @@ recordPresentCommands :: proc(using graphicsData: ^GraphicsData, index: u32, ima
 	}
 
 	vkBeginLabel(cmdBuffer, "Present", {0.5, 0.5, 0.9, 1})
+	recordScreenshotCopy(graphicsData, cmdBuffer)
 
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
@@ -7138,6 +7169,10 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 		logf(.Fatal, "Failed to submit graphics command buffers! vkResult: %v", res)
 		return .FailedToSubmitMainCommandBuffer
 	}
+	if screenshot.recorded {
+		vk.WaitForFences(device, 1, &inFlightFrames[currentFrame], true, max(u64))
+		saveScreenshot(graphicsData)
+	}
 
 	vk.ResetFences(device, 1, &presentFences[currentFrame])
 	presentId := lastPresentId + 1
@@ -7185,6 +7220,193 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 	return nil
 }
 
+// ===[ Screenshots ]==========================================================
+
+@(private = "file")
+Screenshot :: struct {
+	path:     string,
+	buffer:   Buffer,
+	extent:   vk.Extent2D,
+	hdr:      bool,
+	recorded: bool,
+	saved:    bool,
+}
+
+requestScreenshot :: proc(using graphicsData: ^GraphicsData, path: string) -> bool {
+	if screenshot.path != "" {
+		return false
+	}
+	screenshot.path = strings.clone(path)
+	screenshot.saved = false
+	return true
+}
+
+screenshotPending :: proc(using graphicsData: ^GraphicsData) -> bool {
+	return screenshot.path != ""
+}
+
+screenshotSaved :: proc(using graphicsData: ^GraphicsData) -> bool {
+	return screenshot.saved
+}
+
+@(private = "file")
+recordScreenshotCopy :: proc(using graphicsData: ^GraphicsData, cmdBuffer: vk.CommandBuffer) {
+	if screenshot.path == "" || screenshot.recorded {
+		return
+	}
+
+	screenshot.extent = swapchain.extent
+	screenshot.hdr = hdrActive(graphicsData)
+	size := int(screenshot.extent.width) * int(screenshot.extent.height) * 8
+	if err := createBuffer(
+		graphicsData,
+		size,
+		{.TRANSFER_DST},
+		{.HOST_VISIBLE, .HOST_COHERENT},
+		&screenshot.buffer,
+	); err != nil {
+		logf(.Error, "Failed to create screenshot buffer! Error: %v", err)
+		delete(screenshot.path)
+		screenshot.path = ""
+		return
+	}
+
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 1,
+			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
+				sType = .IMAGE_MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = {.ALL_COMMANDS},
+				srcAccessMask = {.MEMORY_WRITE},
+				dstStageMask = {.COPY},
+				dstAccessMask = {.TRANSFER_READ},
+				oldLayout = .TRANSFER_SRC_OPTIMAL,
+				newLayout = .TRANSFER_SRC_OPTIMAL,
+				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				image = pipelines[.PostProcess].images[1].vkImage,
+				subresourceRange = vk.ImageSubresourceRange {
+					aspectMask = {.COLOR},
+					baseMipLevel = 0,
+					levelCount = 1,
+					baseArrayLayer = 0,
+					layerCount = 1,
+				},
+			},
+		},
+	)
+
+	vk.CmdCopyImageToBuffer2(
+		cmdBuffer,
+		&vk.CopyImageToBufferInfo2 {
+			sType = .COPY_IMAGE_TO_BUFFER_INFO_2,
+			pNext = nil,
+			srcImage = pipelines[.PostProcess].images[1].vkImage,
+			srcImageLayout = .TRANSFER_SRC_OPTIMAL,
+			dstBuffer = screenshot.buffer.buffer,
+			regionCount = 1,
+			pRegions = &vk.BufferImageCopy2 {
+				sType = .BUFFER_IMAGE_COPY_2,
+				pNext = nil,
+				bufferOffset = 0,
+				bufferRowLength = 0,
+				bufferImageHeight = 0,
+				imageSubresource = {
+					aspectMask = {.COLOR},
+					mipLevel = 0,
+					baseArrayLayer = 0,
+					layerCount = 1,
+				},
+				imageOffset = {0, 0, 0},
+				imageExtent = {screenshot.extent.width, screenshot.extent.height, 1},
+			},
+		},
+	)
+
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 1,
+			pMemoryBarriers = &vk.MemoryBarrier2 {
+				sType = .MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = {.COPY},
+				srcAccessMask = {.TRANSFER_WRITE},
+				dstStageMask = {.HOST},
+				dstAccessMask = {.HOST_READ},
+			},
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 0,
+			pImageMemoryBarriers = nil,
+		},
+	)
+
+	screenshot.recorded = true
+}
+
+@(private = "file")
+saveScreenshot :: proc(using graphicsData: ^GraphicsData) {
+	pqDecode :: proc(value: f32) -> f32 {
+		M1 :: 0.1593017578125
+		M2 :: 78.84375
+		C1 :: 0.8359375
+		C2 :: 18.8515625
+		C3 :: 18.6875
+		e := pow(max(value, 0), 1.0 / M2)
+		return pow(max(e - C1, 0) / (C2 - C3 * e), 1.0 / M1) * 10000
+	}
+
+	width := int(screenshot.extent.width)
+	height := int(screenshot.extent.height)
+	source := ([^]u16)(screenshot.buffer.mapped)[:width * height * 4]
+	pixels := make([]u8, width * height * 4, context.temp_allocator)
+	for i in 0 ..< width * height {
+		colour: Vec3
+		for channel in 0 ..< 3 {
+			colour[channel] = f32(transmute(f16)source[i * 4 + channel])
+		}
+		if screenshot.hdr {
+			linear := Vec3{pqDecode(colour.r), pqDecode(colour.g), pqDecode(colour.b)} / settings.paperWhiteNits
+			linear = Vec3 {
+				1.6605 * linear.r - 0.5876 * linear.g - 0.0728 * linear.b,
+				-0.1246 * linear.r + 1.1329 * linear.g - 0.0083 * linear.b,
+				-0.0182 * linear.r - 0.1006 * linear.g + 1.1187 * linear.b,
+			}
+			for channel in 0 ..< 3 {
+				colour[channel] = pow(clamp(linear[channel], 0, 1), 1.0 / 2.2)
+			}
+		}
+		for channel in 0 ..< 3 {
+			pixels[i * 4 + channel] = u8(clamp(colour[channel], 0, 1) * 255 + 0.5)
+		}
+		pixels[i * 4 + 3] = 255
+	}
+
+	path := strings.clone_to_cstring(screenshot.path, context.temp_allocator)
+	screenshot.saved = img.write_png(path, i32(width), i32(height), 4, raw_data(pixels), i32(width * 4)) != 0
+	if !screenshot.saved {
+		logf(.Error, "Failed to write screenshot to \"%v\".", screenshot.path)
+	}
+
+	deleteBuffer(graphicsData, &screenshot.buffer)
+	delete(screenshot.path)
+	screenshot.path = ""
+	screenshot.recorded = false
+}
+
 // ===[ Dear ImGui ]===========================================================
 
 @(private = "file")
@@ -7211,9 +7433,11 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 
 	imguiContext = imgui.CreateContext(nil)
 	imgui.StyleColorsClassic(nil)
+	imgui.GetStyle().Colors[imgui.GuiCol.WindowBg].w = 1
 
 	imguiPlatform.iniPath = strings.clone_to_cstring(projectPath(CONFIG_PATH(), "imgui.ini"))
 	imgui.GetIO().IniFilename = imguiPlatform.iniPath
+	imgui.GetIO().ConfigFlags += {.DockingEnable}
 
 	initImguiPlatform(graphicsData)
 
@@ -7364,11 +7588,11 @@ imguiInputEvent :: proc(using graphicsData: ^GraphicsData, event: InputEvent) {
 
 	switch e in event {
 	case KeyEvent:
-		imguiKeyEvent(graphicsData, e.key, e.scancode, e.action)
+		imguiKeyEvent(graphicsData, e.key, e.scancode, e.action, e.mods)
 	case CharEvent:
 		imguiCharEvent(graphicsData, e.codepoint)
 	case MouseButtonEvent:
-		imguiMouseButtonEvent(graphicsData, e.button, e.action)
+		imguiMouseButtonEvent(graphicsData, e.button, e.action, e.mods)
 	case CursorPosEvent:
 		imguiCursorPosEvent(graphicsData, e.x, e.y)
 	case ScrollEvent:
@@ -7381,12 +7605,12 @@ imguiInputEvent :: proc(using graphicsData: ^GraphicsData, event: InputEvent) {
 }
 
 @(private = "file")
-imguiKeyEvent :: proc(using graphicsData: ^GraphicsData, key, scancode, action: i32) {
+imguiKeyEvent :: proc(using graphicsData: ^GraphicsData, key, scancode, action, mods: i32) {
 	if action != glfw.PRESS && action != glfw.RELEASE {
 		return
 	}
 
-	imguiUpdateKeyModifiers(graphicsData)
+	imguiUpdateKeyModifiers(graphicsData, mods)
 	imgui.AddKeyEvent(
 		imgui.GetIO(),
 		imguiKeyFromGLFW(imguiTranslateKey(key, scancode)),
@@ -7400,12 +7624,12 @@ imguiCharEvent :: proc(using graphicsData: ^GraphicsData, codepoint: rune) {
 }
 
 @(private = "file")
-imguiMouseButtonEvent :: proc(using graphicsData: ^GraphicsData, button, action: i32) {
+imguiMouseButtonEvent :: proc(using graphicsData: ^GraphicsData, button, action, mods: i32) {
 	if button < 0 || button >= i32(imgui.GuiMouseButton.COUNT) {
 		return
 	}
 
-	imguiUpdateKeyModifiers(graphicsData)
+	imguiUpdateKeyModifiers(graphicsData, mods)
 	imgui.AddMouseButtonEvent(imgui.GetIO(), button, action == glfw.PRESS)
 }
 
@@ -7457,27 +7681,34 @@ imguiGetClipboardText :: proc "c" (ctx: ^imgui.GuiContext) -> cstring {
 }
 
 @(private = "file")
-imguiUpdateKeyModifiers :: proc(using graphicsData: ^GraphicsData) {
-	keyDown :: proc(window: WindowHandle, left, right: i32) -> bool {
-		return glfw.GetKey(window, left) == glfw.PRESS || glfw.GetKey(window, right) == glfw.PRESS
+imguiUpdateKeyModifiers :: proc(using graphicsData: ^GraphicsData, mods: i32) {
+	keyDown :: proc(window: WindowHandle, left, right: i32, mods, mod: i32) -> bool {
+		return(
+			mods & mod != 0 ||
+			glfw.GetKey(window, left) == glfw.PRESS ||
+			glfw.GetKey(window, right) == glfw.PRESS 	)
 	}
 
 	io := imgui.GetIO()
 	imgui.AddKeyEvent(
 		io,
 		.Mod_Ctrl,
-		keyDown(window, glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL),
+		keyDown(window, glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL, mods, glfw.MOD_CONTROL),
 	)
 	imgui.AddKeyEvent(
 		io,
 		.Mod_Shift,
-		keyDown(window, glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT),
+		keyDown(window, glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT, mods, glfw.MOD_SHIFT),
 	)
-	imgui.AddKeyEvent(io, .Mod_Alt, keyDown(window, glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT))
+	imgui.AddKeyEvent(
+		io,
+		.Mod_Alt,
+		keyDown(window, glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT, mods, glfw.MOD_ALT),
+	)
 	imgui.AddKeyEvent(
 		io,
 		.Mod_Super,
-		keyDown(window, glfw.KEY_LEFT_SUPER, glfw.KEY_RIGHT_SUPER),
+		keyDown(window, glfw.KEY_LEFT_SUPER, glfw.KEY_RIGHT_SUPER, mods, glfw.MOD_SUPER),
 	)
 }
 
