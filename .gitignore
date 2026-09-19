@@ -8,6 +8,7 @@ config/*
 *.exe
 *.pdb
 *.dbg
+*.settings
 
 // Generated Files
 demo/components/*
