@@ -839,6 +839,21 @@ cursorToRenderNDC :: proc(using graphicsData: ^GraphicsData, cursor: Vec2) -> (n
 	return
 }
 
+renderNDCToCursor :: proc(using graphicsData: ^GraphicsData, ndc: Vec2) -> Vec2 {
+	windowWidth, windowHeight := glfw.GetWindowSize(window)
+	if swapchain.extent.width == 0 || swapchain.extent.height == 0 {
+		return {}
+	}
+	offset, extent := letterboxRect(settings.renderSize, swapchain.extent)
+	pixel := (ndc + 1) * 0.5 * Vec2{f32(extent.width), f32(extent.height)} + Vec2{f32(offset.x), f32(offset.y)}
+	return(
+		pixel *
+		Vec2 {
+				f32(windowWidth) / f32(swapchain.extent.width),
+				f32(windowHeight) / f32(swapchain.extent.height),
+			} 	)
+}
+
 requestClose :: proc(using graphicsData: ^GraphicsData) {
 	glfw.SetWindowShouldClose(window, true)
 }

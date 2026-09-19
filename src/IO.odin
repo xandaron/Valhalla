@@ -178,7 +178,10 @@ handleInput :: proc(event: InputEvent) {
 
 	#partial switch e in event {
 	case MouseButtonEvent:
-		if e.button == glfw.MOUSE_BUTTON_LEFT && e.action == glfw.PRESS && !mouseMode {
+		if e.button == glfw.MOUSE_BUTTON_LEFT &&
+		   e.action == glfw.PRESS &&
+		   !mouseMode &&
+		   !globals.uiData.gizmo.hot {
 			if origin, direction, ok := cursorRay(mousePos); ok {
 				if item, hit := pick(&globals.scenes[globals.activeScene], origin, direction); hit {
 					inspect(item)

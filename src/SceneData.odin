@@ -50,6 +50,14 @@ objectTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
 		return local
 	}
 
+	return objectParentTransform(scene, object) * local
+}
+
+objectParentTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
+	if object.attachment.targetIdx < 0 {
+		return IMAT4
+	}
+
 	target := &scene.objects[object.attachment.targetIdx]
 	targetModel := &scene.models[target.modelIdx]
 	targetTransform := transform(
@@ -58,13 +66,13 @@ objectTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
 		target.scale * targetModel.scale,
 	)
 	if int(object.attachment.bindpointIdx) >= len(targetModel.bindpoints) {
-		return targetTransform * local
+		return targetTransform
 	}
 	bindpoint := &targetModel.bindpoints[object.attachment.bindpointIdx]
 	if int(bindpoint.boneIdx) >= len(target.animation.state) {
-		return targetTransform * local
+		return targetTransform
 	}
-	return targetTransform * target.animation.state[bindpoint.boneIdx] * local
+	return targetTransform * target.animation.state[bindpoint.boneIdx]
 }
 
 Texture :: struct {

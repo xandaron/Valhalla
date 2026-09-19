@@ -30,6 +30,7 @@ UIData :: struct {
 	debugFace:           int,
 	debugRanges:         [DebugImage][2]f32,
 	debugDockRequested:  bool,
+	gizmo:               Gizmo,
 	settingsDockId:      imgui.GuiID,
 }
 
@@ -47,6 +48,27 @@ InspectorTab :: struct {
 	item:   InspectorItem,
 	id:     u32,
 	pinned: bool,
+}
+
+GizmoHandle :: enum {
+	None,
+	AxisX,
+	AxisY,
+	AxisZ,
+	PlaneYZ,
+	PlaneXZ,
+	PlaneXY,
+}
+
+Gizmo :: struct {
+	hot:         bool,
+	hovered:     GizmoHandle,
+	active:      GizmoHandle,
+	item:        InspectorItem,
+	grab:        Vec3,
+	startWorld:  Vec3,
+	startLocal:  Vec3,
+	toLocal:     Mat3,
 }
 
 TextField :: struct {
@@ -337,6 +359,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 	drawMainMenu(graphicsData)
 	drawDockSpace()
+	drawTranslateGizmo(graphicsData)
 
 	drawObjectCatalog(graphicsData)
 	drawLightsPanel(graphicsData)
@@ -532,6 +555,222 @@ drawMainMenu :: proc(graphicsData: ^GraphicsData) {
 		imgui.GetWindowWidth() - imgui.CalcTextSize(readout).x - imgui.GetStyle().ItemSpacing.x * 2,
 	)
 	imgui.Text(readout)
+}
+
+@(private = "file")
+GIZMO_AXES := [3]Vec3{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
+
+@(private = "file")
+GIZMO_COLOURS := [3]u32{0xFF3C3CDC, 0xFF3CC83C, 0xFFDC7832}
+
+@(private = "file")
+GIZMO_HOT_COLOUR :: 0xFF28DCF0
+
+@(private = "file")
+gizmoTarget :: proc(scene: ^Scene, item: InspectorItem) -> (world: Vec3, local: ^Vec3, toLocal: Mat3, ok: bool) {
+	switch item.kind {
+	case .Object:
+		if int(item.index) >= len(scene.objects) {
+			return
+		}
+		object := &scene.objects[item.index]
+		world = (objectTransform(scene, object) * Vec4{0, 0, 0, 1}).xyz
+		toLocal = Mat3(inverse(objectParentTransform(scene, object)))
+		return world, &object.position, toLocal, true
+	case .Light:
+		if int(item.index) >= len(scene.lights) {
+			return
+		}
+		light := &scene.lights[item.index]
+		return light.position, &light.position, Mat3(1), true
+	}
+	return
+}
+
+@(private = "file")
+gizmoGrab :: proc(handle: GizmoHandle, origin: Vec3, rayOrigin, rayDirection: Vec3) -> (point: Vec3, ok: bool) {
+	switch handle {
+	case .None:
+		return
+	case .AxisX, .AxisY, .AxisZ:
+		axis := GIZMO_AXES[int(handle) - int(GizmoHandle.AxisX)]
+		b := dot(axis, rayDirection)
+		denominator := 1 - b * b
+		if denominator < 1e-5 {
+			return
+		}
+		offset := origin - rayOrigin
+		t := (b * dot(rayDirection, offset) - dot(axis, offset)) / denominator
+		return origin + axis * t, true
+	case .PlaneYZ, .PlaneXZ, .PlaneXY:
+		normal := GIZMO_AXES[int(handle) - int(GizmoHandle.PlaneYZ)]
+		denominator := dot(normal, rayDirection)
+		if abs(denominator) < 1e-5 {
+			return
+		}
+		s := dot(normal, origin - rayOrigin) / denominator
+		if s < 0 {
+			return
+		}
+		return rayOrigin + rayDirection * s, true
+	}
+	return
+}
+
+@(private = "file")
+drawTranslateGizmo :: proc(graphicsData: ^GraphicsData) {
+	gizmo := &globals.uiData.gizmo
+	gizmo.hot = false
+	gizmo.hovered = .None
+
+	selected, hasSelection := globals.uiData.selected.?
+	if !hasSelection || mouseMode {
+		gizmo.active = .None
+		return
+	}
+	if gizmo.active != .None && gizmo.item != selected {
+		gizmo.active = .None
+	}
+
+	scene := &globals.scenes[globals.activeScene]
+	world, local, toLocal, ok := gizmoTarget(scene, selected)
+	if !ok {
+		gizmo.active = .None
+		return
+	}
+
+	camera := scene.cameras[scene.activeCamera]
+	viewProjection := projection(camera) * view(camera)
+	project :: proc(graphicsData: ^GraphicsData, viewProjection: Mat4, point: Vec3) -> (screen: Vec2, visible: bool) {
+		clip := viewProjection * Vec4{point.x, point.y, point.z, 1}
+		if clip.w <= 1e-4 {
+			return
+		}
+		return renderNDCToCursor(graphicsData, clip.xy / clip.w), true
+	}
+
+	origin := gizmo.active != .None ? gizmo.startWorld : world
+	centre, visible := project(graphicsData, viewProjection, world)
+	if !visible {
+		gizmo.active = .None
+		return
+	}
+	size := length(world - camera.eye) * 0.15
+
+	axisEnds: [3]Vec2
+	axisVisible: [3]bool
+	for axis, i in GIZMO_AXES {
+		axisEnds[i], axisVisible[i] = project(graphicsData, viewProjection, world + axis * size)
+	}
+	planeCorners: [3][4]Vec2
+	planeVisible: [3]bool
+	for normal in 0 ..< 3 {
+		a := GIZMO_AXES[(normal + 1) % 3] * size
+		b := GIZMO_AXES[(normal + 2) % 3] * size
+		corners := [4]Vec3 {
+			world + a * 0.2 + b * 0.2,
+			world + a * 0.45 + b * 0.2,
+			world + a * 0.45 + b * 0.45,
+			world + a * 0.2 + b * 0.45,
+		}
+		planeVisible[normal] = true
+		for corner, c in corners {
+			screen, onScreen := project(graphicsData, viewProjection, corner)
+			planeCorners[normal][c] = screen
+			planeVisible[normal] &&= onScreen
+		}
+	}
+
+	io := imgui.GetIO()
+	mouse := Vec2{io.MousePos.x, io.MousePos.y}
+	if gizmo.active == .None && !io.WantCaptureMouse {
+		insideQuad :: proc(point: Vec2, quad: [4]Vec2) -> bool {
+			sign: f32
+			for i in 0 ..< 4 {
+				edge := quad[(i + 1) % 4] - quad[i]
+				side := edge.x * (point.y - quad[i].y) - edge.y * (point.x - quad[i].x)
+				if sign == 0 {
+					sign = side
+				} else if side * sign < 0 {
+					return false
+				}
+			}
+			return true
+		}
+		segmentDistance :: proc(point, a, b: Vec2) -> f32 {
+			ab := b - a
+			t := clamp(dot(point - a, ab) / max(dot(ab, ab), 1e-6), 0, 1)
+			return length(point - (a + ab * t))
+		}
+
+		for normal in 0 ..< 3 {
+			if planeVisible[normal] && insideQuad(mouse, planeCorners[normal]) {
+				gizmo.hovered = GizmoHandle(int(GizmoHandle.PlaneYZ) + normal)
+			}
+		}
+		if gizmo.hovered == .None {
+			for i in 0 ..< 3 {
+				if axisVisible[i] && segmentDistance(mouse, centre, axisEnds[i]) < 7 {
+					gizmo.hovered = GizmoHandle(int(GizmoHandle.AxisX) + i)
+				}
+			}
+		}
+
+		if gizmo.hovered != .None && imgui.IsMouseClicked(.Left) {
+			if rayOrigin, rayDirection, rayOk := cursorRay(mouse); rayOk {
+				if grab, grabOk := gizmoGrab(gizmo.hovered, world, rayOrigin, rayDirection); grabOk {
+					gizmo.active = gizmo.hovered
+					gizmo.item = selected
+					gizmo.grab = grab
+					gizmo.startWorld = world
+					gizmo.startLocal = local^
+					gizmo.toLocal = toLocal
+				}
+			}
+		}
+	}
+
+	if gizmo.active != .None {
+		if !imgui.IsMouseDown(.Left) {
+			gizmo.active = .None
+		} else if rayOrigin, rayDirection, rayOk := cursorRay(mouse); rayOk {
+			if point, pointOk := gizmoGrab(gizmo.active, origin, rayOrigin, rayDirection); pointOk {
+				local^ = gizmo.startLocal + gizmo.toLocal * (point - gizmo.grab)
+			}
+		}
+	}
+	gizmo.hot = gizmo.hovered != .None || gizmo.active != .None
+
+	drawList := imgui.GetBackgroundDrawList()
+	highlight := gizmo.active != .None ? gizmo.active : gizmo.hovered
+	for normal in 0 ..< 3 {
+		if !planeVisible[normal] {
+			continue
+		}
+		handle := GizmoHandle(int(GizmoHandle.PlaneYZ) + normal)
+		colour := handle == highlight ? u32(GIZMO_HOT_COLOUR) : GIZMO_COLOURS[normal]
+		quad := planeCorners[normal]
+		imgui.DrawList_AddQuadFilled(drawList, quad[0], quad[1], quad[2], quad[3], (colour & 0x00FFFFFF) | 0x60000000)
+		imgui.DrawList_AddQuad(drawList, quad[0], quad[1], quad[2], quad[3], colour, 1.5)
+	}
+	for i in 0 ..< 3 {
+		if !axisVisible[i] {
+			continue
+		}
+		handle := GizmoHandle(int(GizmoHandle.AxisX) + i)
+		colour := handle == highlight ? u32(GIZMO_HOT_COLOUR) : GIZMO_COLOURS[i]
+		direction := axisEnds[i] - centre
+		span := length(direction)
+		if span < 1 {
+			continue
+		}
+		direction /= span
+		side := Vec2{-direction.y, direction.x}
+		headBase := axisEnds[i] - direction * 12
+		imgui.DrawList_AddLine(drawList, centre, headBase, colour, 3)
+		imgui.DrawList_AddTriangleFilled(drawList, axisEnds[i], headBase + side * 6, headBase - side * 6, colour)
+	}
+	imgui.DrawList_AddCircleFilled(drawList, centre, 4, 0xFFFFFFFF)
 }
 
 @(private = "file")

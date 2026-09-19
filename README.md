@@ -79,6 +79,10 @@ click) until it ends.
       which the instance buffer shares, so attachments are honoured. Light gizmos are picked as
       spheres of `lightGizmoRadius` while they are shown
 - [x] **Object catalog.** Objects panel, filterable by name
+- [x] **Translate gizmo.** The selected object or light shows X/Y/Z arrows and plane pads, drawn
+      on imgui's background draw list; arrows drag along the closest point between the mouse ray
+      and the axis, pads along the ray's hit on the plane through the gizmo. Attached objects are
+      moved in their parent's space, so the handles stay world-aligned
 - [x] **Tabs.** Each inspector tab has a pin left of its name, off by default. Showing an unpinned
       tab, including a newly opened one, closes every other unpinned tab. The Scenes panel lists every `.scene` in the scenes directory and
       opens or switches to one on click
