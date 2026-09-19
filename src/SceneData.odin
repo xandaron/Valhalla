@@ -52,21 +52,25 @@ objectTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
 
 	target := &scene.objects[object.attachment.targetIdx]
 	targetModel := &scene.models[target.modelIdx]
+	targetTransform := transform(
+		target.position + targetModel.position,
+		target.rotation * targetModel.rotation,
+		target.scale * targetModel.scale,
+	)
+	if int(object.attachment.bindpointIdx) >= len(targetModel.bindpoints) {
+		return targetTransform * local
+	}
 	bindpoint := &targetModel.bindpoints[object.attachment.bindpointIdx]
-	return(
-		transform(
-			target.position + targetModel.position,
-			target.rotation * targetModel.rotation,
-			target.scale * targetModel.scale,
-		) *
-		target.animation.state[bindpoint.boneIdx] *
-		local 	)
+	if int(bindpoint.boneIdx) >= len(target.animation.state) {
+		return targetTransform * local
+	}
+	return targetTransform * target.animation.state[bindpoint.boneIdx] * local
 }
 
 Texture :: struct {
-	path:      string,
-	assetPath: string,
-	name:      string,
+	path:      string `imrefl:"ignore"`,
+	assetPath: string `imrefl:"ignore"`,
+	name:      string `imrefl:"ignore"`,
 }
 
 deleteTexture :: proc(texture: ^Texture) {
@@ -76,9 +80,9 @@ deleteTexture :: proc(texture: ^Texture) {
 }
 
 Model :: struct {
-	path:       string,
-	assetPath:  string,
-	name:       string,
+	path:       string `imrefl:"ignore"`,
+	assetPath:  string `imrefl:"ignore"`,
+	name:       string `imrefl:"ignore"`,
 	position:   Vec3 `imrefl:"label=Position,speed=0.1"`,
 	rotation:   Quat `imrefl:"label=Rotation,euler"`,
 	scale:      Vec3 `imrefl:"label=Scale,speed=0.1"`,

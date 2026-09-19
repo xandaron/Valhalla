@@ -147,7 +147,13 @@ externalTick :: proc() {
 		if screenshotPending(&globals.graphicsData) {
 			return
 		}
-		externalSend(screenshotSaved(&globals.graphicsData) ? "ok" : "err screenshot failed")
+		if !screenshotSaved(&globals.graphicsData) {
+			externalSend("err capture failed")
+		} else if low, high, dump := screenshotRange(&globals.graphicsData); dump {
+			externalSend(fmt.tprintf("ok min=%v max=%v", low, high))
+		} else {
+			externalSend("ok")
+		}
 	}
 	externalFreeStep(step)
 	ordered_remove(&external.steps, 0)
@@ -265,10 +271,12 @@ externalParse :: proc(line: string) {
 		}
 		externalInject(CursorPosEvent{x, y})
 		if command != "up" {
+			externalModifiers(mods, glfw.PRESS)
 			externalInject(MouseButtonEvent{button, glfw.PRESS, mods})
 		}
 		if command != "down" {
 			externalInject(MouseButtonEvent{button, glfw.RELEASE, mods})
+			externalModifiers(mods, glfw.RELEASE)
 		}
 		externalReply("ok")
 
@@ -295,8 +303,10 @@ externalParse :: proc(line: string) {
 		for arg in args[1:] {
 			mods |= externalModifier(arg)
 		}
+		externalModifiers(mods, glfw.PRESS)
 		externalInject(KeyEvent{key, 0, glfw.PRESS, mods})
 		externalInject(KeyEvent{key, 0, glfw.RELEASE, mods})
+		externalModifiers(mods, glfw.RELEASE)
 		externalReply("ok")
 
 	case "text":
@@ -329,6 +339,47 @@ externalParse :: proc(line: string) {
 		}
 		append(&external.steps, ExternalStep{kind = .AwaitScreenshot})
 
+	case "images":
+		listing := strings.builder_make(context.temp_allocator)
+		strings.write_string(&listing, "ok")
+		for kind in DebugImage {
+			info := debugImageInfo(&globals.graphicsData, kind)
+			fmt.sbprintf(
+				&listing,
+				" %s=%vx%vx%v",
+				EXTERNAL_IMAGE_NAMES[kind],
+				info.extent.width,
+				info.extent.height,
+				info.layers,
+			)
+		}
+		externalReply("%s", strings.to_string(listing))
+
+	case "dump":
+		if len(args) < 2 {
+			externalReply("err usage: dump IMAGE PATH [layer]")
+			return
+		}
+		kind, known := externalImage(args[0])
+		if !known {
+			externalReply("err unknown image %q; see images", args[0])
+			return
+		}
+		layer: u32
+		if len(args) > 2 {
+			value, ok := strconv.parse_uint(args[2])
+			if !ok {
+				externalReply("err bad layer %q", args[2])
+				return
+			}
+			layer = u32(value)
+		}
+		if !requestDebugDump(&globals.graphicsData, kind, layer, args[1]) {
+			externalReply("err cannot dump %s layer %v now", args[0], layer)
+			return
+		}
+		append(&external.steps, ExternalStep{kind = .AwaitScreenshot})
+
 	case "capture":
 		frames, ok := number(args, 1)
 		if len(args) < 2 || !ok || frames < 1 {
@@ -347,6 +398,48 @@ externalParse :: proc(line: string) {
 
 	case:
 		externalReply("err unknown command %q", command)
+	}
+}
+
+@(private = "file")
+EXTERNAL_IMAGE_NAMES := [DebugImage]string {
+	.SceneColour  = "scene-colour",
+	.SceneDepth   = "scene-depth",
+	.ShadowColour = "shadow-colour",
+	.ShadowDepth  = "shadow-depth",
+	.Output       = "output",
+	.Interface    = "ui",
+}
+
+@(private = "file")
+externalImage :: proc(name: string) -> (kind: DebugImage, ok: bool) {
+	for candidate in DebugImage {
+		if EXTERNAL_IMAGE_NAMES[candidate] == name {
+			return candidate, true
+		}
+	}
+	return {}, false
+}
+
+@(private = "file")
+externalModifiers :: proc(mods: i32, action: i32) {
+	MODIFIER_KEYS :: [?][2]i32 {
+		{glfw.MOD_CONTROL, glfw.KEY_LEFT_CONTROL},
+		{glfw.MOD_SHIFT, glfw.KEY_LEFT_SHIFT},
+		{glfw.MOD_ALT, glfw.KEY_LEFT_ALT},
+		{glfw.MOD_SUPER, glfw.KEY_LEFT_SUPER},
+	}
+	held := action == glfw.PRESS ? i32(0) : mods
+	for pair in MODIFIER_KEYS {
+		if mods & pair[0] == 0 {
+			continue
+		}
+		if action == glfw.PRESS {
+			held |= pair[0]
+		} else {
+			held &~= pair[0]
+		}
+		externalInject(KeyEvent{pair[1], 0, action, held})
 	}
 }
 

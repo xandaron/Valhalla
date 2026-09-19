@@ -23,9 +23,14 @@ UIData :: struct {
 	selectionScene:      u32,
 	sceneFiles:          [dynamic]string,
 	sceneFilesScanned:   bool,
-	objectFilter:        TextField,
-	itemName:            TextField,
-	sceneName:           TextField,
+	objectFilter:        strings.Builder,
+	editField:           TextField,
+	debugImage:          DebugImage,
+	debugLight:          int,
+	debugFace:           int,
+	debugRanges:         [DebugImage][2]f32,
+	debugDockRequested:  bool,
+	settingsDockId:      imgui.GuiID,
 }
 
 InspectorKind :: enum {
@@ -45,9 +50,9 @@ InspectorTab :: struct {
 }
 
 TextField :: struct {
-	builder: strings.Builder,
-	target:  ^string,
-	active:  bool,
+	builder:   strings.Builder,
+	target:    rawptr,
+	lastFrame: i32,
 }
 
 deleteUIData :: proc(uiData: ^UIData) {
@@ -56,9 +61,8 @@ deleteUIData :: proc(uiData: ^UIData) {
 		delete(path)
 	}
 	delete(uiData.sceneFiles)
-	strings.builder_destroy(&uiData.objectFilter.builder)
-	strings.builder_destroy(&uiData.itemName.builder)
-	strings.builder_destroy(&uiData.sceneName.builder)
+	strings.builder_destroy(&uiData.objectFilter)
+	strings.builder_destroy(&uiData.editField.builder)
 }
 
 @(private = "file")
@@ -73,38 +77,60 @@ textFieldResize :: proc "c" (data: ^imgui.GuiInputTextCallbackData) -> i32 {
 }
 
 @(private = "file")
-textField :: proc(
+inputBuilder :: proc(
 	label: cstring,
-	field: ^TextField,
+	builder: ^strings.Builder,
 	flags: imgui.GuiInputTextFlags = {},
-) -> (
-	changed, committed: bool,
-) {
-	text := strings.to_cstring(&field.builder)
-	changed = imgui.InputText(
+) -> bool {
+	text := strings.to_cstring(builder)
+	changed := imgui.InputText(
 		label,
 		text,
-		c.size_t(len(field.builder.buf) + 1),
+		c.size_t(len(builder.buf) + 1),
 		flags + {.CallbackResize},
 		textFieldResize,
-		&field.builder,
+		builder,
 	)
-	resize(&field.builder.buf, len(cstring(raw_data(field.builder.buf))))
-	field.active = imgui.IsItemActive()
-	committed = imgui.IsItemDeactivatedAfterEdit()
+	resize(&builder.buf, len(cstring(raw_data(builder.buf))))
+	return changed
+}
+
+@(private = "file")
+stringField :: proc(
+	label: cstring,
+	field: ^TextField,
+	value: string,
+	target: rawptr,
+) -> (
+	text: string,
+	committed: bool,
+) {
+	frame := imgui.GetFrameCount()
+	if field.target == target && field.lastFrame >= frame - 1 {
+		inputBuilder(label, &field.builder)
+		field.lastFrame = frame
+		if imgui.IsItemDeactivated() {
+			field.target = nil
+			return strings.to_string(field.builder), imgui.IsItemDeactivatedAfterEdit()
+		}
+		return
+	}
+
+	scratch := strings.builder_make(context.temp_allocator)
+	strings.write_string(&scratch, value)
+	inputBuilder(label, &scratch)
+	if imgui.IsItemActive() {
+		strings.builder_reset(&field.builder)
+		strings.write_string(&field.builder, strings.to_string(scratch))
+		field.target = target
+		field.lastFrame = frame
+	}
 	return
 }
 
 @(private = "file")
 nameField :: proc(label: cstring, field: ^TextField, name: ^string) -> bool {
-	if !field.active || field.target != name {
-		strings.builder_reset(&field.builder)
-		strings.write_string(&field.builder, name^)
-		field.target = name
-	}
-
-	_, committed := textField(label, field)
-	text := strings.to_string(field.builder)
+	text, committed := stringField(label, field, name^, name)
 	if !committed || text == "" || text == name^ {
 		return false
 	}
@@ -320,6 +346,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 	drawSettingsPanel(graphicsData)
 	drawModelsPanel(graphicsData)
 	drawTexturesPanel(graphicsData)
+	drawDebugPanel(graphicsData)
 
 	if uiData.pendingPopup != nil {
 		imgui.OpenPopup(uiData.pendingPopup)
@@ -349,7 +376,15 @@ drawDockSpace :: proc() {
 		imgui.DockBuilderDockWindow("Settings", bottomRight)
 		imgui.DockBuilderDockWindow("Models", bottomRight)
 		imgui.DockBuilderDockWindow("Textures", bottomRight)
+		imgui.DockBuilderDockWindow("Debug", bottomRight)
 		imgui.DockBuilderFinish(dockSpace)
+	}
+	uiData := &globals.uiData
+	if !uiData.debugDockRequested &&
+	   uiData.settingsDockId != 0 &&
+	   imgui.FindWindowByName("Debug") == nil {
+		imgui.DockBuilderDockWindow("Debug", uiData.settingsDockId)
+		uiData.debugDockRequested = true
 	}
 	imgui.DockSpaceOverViewport(dockSpace, nil, {.PassthruCentralNode})
 }
@@ -516,10 +551,10 @@ drawObjectCatalog :: proc(graphicsData: ^GraphicsData) {
 	}
 	imgui.SameLine()
 	imgui.SetNextItemWidth(-1)
-	textField("##filter", &uiData.objectFilter)
+	inputBuilder("##filter", &uiData.objectFilter)
 	imgui.SetItemTooltip("Filter by name")
 
-	filter := strings.to_lower(strings.to_string(uiData.objectFilter.builder), context.temp_allocator)
+	filter := strings.to_lower(strings.to_string(uiData.objectFilter), context.temp_allocator)
 	for &object, objectIdx in scene.objects {
 		if filter != "" && !strings.contains(strings.to_lower(object.name, context.temp_allocator), filter) {
 			continue
@@ -739,7 +774,7 @@ closeOtherUnpinned :: proc(uiData: ^UIData, keep: InspectorItem) {
 @(private = "file")
 drawLightInspector :: proc(graphicsData: ^GraphicsData, scene: ^Scene, lightIdx: u32) {
 	light := &scene.lights[lightIdx]
-	nameField(fmt.ctprintf("Name##light%v", lightIdx), &globals.uiData.itemName, &light.name)
+	nameField(fmt.ctprintf("Name##light%v", lightIdx), &globals.uiData.editField, &light.name)
 	if ImRefl.draw_value(light.name, light^, {flags = {.Flatten}}) {
 		sceneEdited(graphicsData)
 	}
@@ -750,7 +785,7 @@ drawObjectInspector :: proc(graphicsData: ^GraphicsData, scene: ^Scene, objectId
 	object := &scene.objects[objectIdx]
 	suffix := fmt.tprintf("##object%v", objectIdx)
 
-	nameField(fmt.ctprintf("Name%v", suffix), &globals.uiData.itemName, &object.name)
+	nameField(fmt.ctprintf("Name%v", suffix), &globals.uiData.editField, &object.name)
 
 	if ImRefl.draw_value(object.name, object^, {flags = {.Flatten}}) {
 		sceneEdited(graphicsData)
@@ -855,7 +890,7 @@ drawScenePanel :: proc(graphicsData: ^GraphicsData) {
 	}
 
 	scene := &globals.scenes[globals.activeScene]
-	nameField("Name##scene", &uiData.sceneName, &scene.name)
+	nameField("Name##scene", &uiData.editField, &scene.name)
 	if ImRefl.draw_value("Ambient light", scene.ambientLight) {
 		graphicsData.reloadBuffers = true
 	}
@@ -885,8 +920,29 @@ drawModelsPanel :: proc(graphicsData: ^GraphicsData) {
 	}
 
 	scene := &globals.scenes[globals.activeScene]
-	for &model in scene.models {
-		if ImRefl.draw_value(model.name, model) {
+	for &model, modelIdx in scene.models {
+		if !imgui.TreeNode(fmt.ctprintf("%s###model%v", model.name, modelIdx)) {
+			continue
+		}
+		defer imgui.TreePop()
+
+		nameField(fmt.ctprintf("Name##model%v", modelIdx), &uiData.editField, &model.name)
+		if asset, committed := stringField(
+			fmt.ctprintf("Asset##model%v", modelIdx),
+			&uiData.editField,
+			model.assetPath,
+			&model.assetPath,
+		); committed && asset != "" && asset != model.assetPath {
+			path := strings.clone(asset, context.temp_allocator)
+			if err := changeModelAsset(scene, u32(modelIdx), path); err != .None {
+				logf(.Error, "Failed to load model asset \"%s\": %v", path, err)
+			} else {
+				graphicsData.reloadBuffers = true
+				markCommandsDirty(graphicsData, DIRTY_ALL)
+			}
+		}
+
+		if ImRefl.draw_value(model.name, model, {flags = {.Flatten}}) {
 			sceneEdited(graphicsData)
 		}
 	}
@@ -905,15 +961,38 @@ drawTexturesPanel :: proc(graphicsData: ^GraphicsData) {
 	}
 
 	scene := &globals.scenes[globals.activeScene]
-	for &texture in scene.textures {
-		ImRefl.draw_value(texture.name, texture)
+	for &texture, textureIdx in scene.textures {
+		if !imgui.TreeNode(fmt.ctprintf("%s###texture%v", texture.name, textureIdx)) {
+			continue
+		}
+		defer imgui.TreePop()
+
+		nameField(fmt.ctprintf("Name##texture%v", textureIdx), &uiData.editField, &texture.name)
+		if asset, committed := stringField(
+			fmt.ctprintf("Asset##texture%v", textureIdx),
+			&uiData.editField,
+			texture.assetPath,
+			&texture.assetPath,
+		); committed && asset != "" && asset != texture.assetPath {
+			path := strings.clone(asset, context.temp_allocator)
+			if err := changeTextureImage(graphicsData, scene, u32(textureIdx), path); err != nil {
+				logf(.Error, "Failed to load texture asset \"%s\": %v", path, err)
+			}
+		}
+
+		if id, size, ok := texturePreview(graphicsData, scene, u32(textureIdx)); ok && size.x > 0 {
+			width := min(imgui.GetContentRegionAvail().x, 256)
+			imgui.Image({_TexID = id}, {width, width * size.y / size.x})
+		}
 	}
 }
 
 @(private = "file")
 drawSettingsPanel :: proc(graphicsData: ^GraphicsData) {
 	defer imgui.End()
-	if !imgui.Begin("Settings") {
+	visible := imgui.Begin("Settings")
+	globals.uiData.settingsDockId = imgui.GetWindowDockID()
+	if !visible {
 		return
 	}
 
@@ -986,6 +1065,100 @@ drawSettingsPanel :: proc(graphicsData: ^GraphicsData) {
 
 	imgui.SeparatorText("Camera")
 	ImRefl.draw_value("Camera", globals.settings.camera, {flags = {.Flatten}})
+}
+
+@(private = "file")
+drawDebugPanel :: proc(graphicsData: ^GraphicsData) {
+	uiData := &globals.uiData
+	if imgui.FindWindowByName("Debug") == nil && !uiData.debugDockRequested {
+		return
+	}
+	defer imgui.End()
+	if !imgui.Begin("Debug") {
+		return
+	}
+
+	if imgui.BeginCombo("Image", toCstring(DEBUG_IMAGE_NAMES[uiData.debugImage])) {
+		for kind in DebugImage {
+			if !debugImageInfo(graphicsData, kind).previewable {
+				continue
+			}
+			if imgui.Selectable(toCstring(DEBUG_IMAGE_NAMES[kind]), kind == uiData.debugImage) {
+				uiData.debugImage = kind
+			}
+		}
+		imgui.EndCombo()
+	}
+
+	info := debugImageInfo(graphicsData, uiData.debugImage)
+	if info.layers == 0 {
+		imgui.TextDisabled("This image does not exist right now.")
+		return
+	}
+
+	layer: u32
+	if uiData.debugImage == .ShadowColour || uiData.debugImage == .ShadowDepth {
+		CUBE_FACE_NAMES :: [SHADOW_CUBE_FACES]cstring{"+X", "-X", "+Y", "-Y", "+Z", "-Z"}
+
+		lights := globals.scenes[globals.activeScene].lights[:]
+		lightCount := min(len(lights), int(info.layers) / SHADOW_CUBE_FACES)
+		if lightCount == 0 {
+			imgui.TextDisabled("The scene has no lights.")
+			return
+		}
+		uiData.debugLight = clamp(uiData.debugLight, 0, lightCount - 1)
+		uiData.debugFace = clamp(uiData.debugFace, 0, SHADOW_CUBE_FACES - 1)
+
+		if imgui.BeginCombo("Light", fmt.ctprintf("%s##debuglight", lights[uiData.debugLight].name)) {
+			for lightIdx in 0 ..< lightCount {
+				label := fmt.ctprintf("%s##debuglight%v", lights[lightIdx].name, lightIdx)
+				if imgui.Selectable(label, lightIdx == uiData.debugLight) {
+					uiData.debugLight = lightIdx
+				}
+			}
+			imgui.EndCombo()
+		}
+
+		faceNames := CUBE_FACE_NAMES
+		if imgui.BeginCombo("Face", faceNames[uiData.debugFace]) {
+			for face in 0 ..< SHADOW_CUBE_FACES {
+				if imgui.Selectable(faceNames[face], face == uiData.debugFace) {
+					uiData.debugFace = face
+				}
+			}
+			imgui.EndCombo()
+		}
+		layer = u32(uiData.debugLight * SHADOW_CUBE_FACES + uiData.debugFace)
+	}
+
+	defaultRange := [2]f32{0, 1}
+	if info.depth {
+		defaultRange = {0.98, 1}
+	} else if uiData.debugImage == .ShadowColour {
+		defaultRange = {0, 30}
+	}
+	range := &uiData.debugRanges[uiData.debugImage]
+	if range[0] == range[1] {
+		range^ = defaultRange
+	}
+	imgui.DragFloatRange2("Range", &range[0], &range[1], 0.001)
+	imgui.SameLine()
+	if imgui.Button("Reset") {
+		range^ = defaultRange
+	}
+	imgui.TextDisabled(fmt.ctprintf("%vx%v  %v", info.extent.width, info.extent.height, info.image.format))
+
+	id, size, uvMax, ok := debugPreview(
+		graphicsData,
+		uiData.debugImage,
+		layer,
+		range[0],
+		range[1],
+	)
+	if ok && size.x > 0 {
+		width := imgui.GetContentRegionAvail().x
+		imgui.Image({_TexID = id}, {width, width * size.y / size.x}, {0, 0}, uvMax)
+	}
 }
 
 @(private = "file")

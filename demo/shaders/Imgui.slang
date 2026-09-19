@@ -7,6 +7,9 @@ struct PushConstants {
 	float2 scale;
 	float2 translate;
 	uint texture;
+	float rangeMin;
+	float rangeMax;
+	uint remap;
 };
 
 static const float UI_GAMMA = 2.2;
@@ -46,8 +49,12 @@ struct FragOut {
 
 [shader("fragment")]
 FragOut frag(VertOut input) {
-	float4 colour = input.colour * textureAt(pushConstants.texture)
-																		 .Sample(Resources.LinearSampler, input.uv);
+	float4 texel = textureAt(pushConstants.texture).Sample(Resources.LinearSampler, input.uv);
+	if (pushConstants.remap != 0) {
+		const float span = max(pushConstants.rangeMax - pushConstants.rangeMin, 1e-6);
+		texel = float4(saturate((texel.rgb - pushConstants.rangeMin) / span), 1.0);
+	}
+	float4 colour = input.colour * texel;
 	colour.rgb = pow(colour.rgb, UI_GAMMA);
 
 	FragOut output;

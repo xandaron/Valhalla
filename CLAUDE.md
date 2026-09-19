@@ -103,6 +103,8 @@ A click spans three frames (move, press, release) so imgui's hover state is curr
 | `wait FRAMES` | let frames pass |
 | `screenshot PATH` | PNG of the presented frame, read back from the post-process image (HDR is PQ-decoded to sRGB) |
 | `capture PREFIX FRAMES` | save each of the next frames as `PREFIX_000.png`... while other commands run |
+| `images` | every pipeline image the debug tools know, as `name=WxHxLAYERS` |
+| `dump IMAGE PATH [layer]` | PNG of one pipeline image (`scene-colour`, `scene-depth`, `shadow-colour`, `shadow-depth`, `output`, `ui`), normalised to its own range; replies `ok min=.. max=..` |
 | `quit` | clean exit, same as Ctrl+Q |
 
 Screenshots come from the GPU, not the desktop, so occlusion and HDR capture quirks do not
@@ -183,6 +185,14 @@ the same in SDR and HDR. Imgui ends by moving the UI image to `GENERAL` for that
 PostProcess ends by moving ProcessedImage to `TRANSFER_SRC`. Present is a small command buffer,
 re-recorded every frame because it depends on `imageIndex`, that blits ProcessedImage to the
 swapchain image and transitions it for present.
+
+The Debug panel previews those pipeline images through `debugPreview`, and `dump` reads them back.
+`debugImageInfo` records, for each one, the layout it is in both where the Imgui pass samples it
+and where Present copies it. The preview barriers in `recordImguiCommands` and the dump barriers
+move only the selected layer out of that layout and back. Scene and shadow images are the current
+frame; Output is the previous frame, because PostProcess runs after Imgui. The UI image cannot be
+previewed, since the Imgui pass renders into it, but it can be dumped. Images carry a creation
+`serial` so the debug view notices a recreated image even if Vulkan reuses the handle.
 
 The post-process and UI images are sized to `outputCapacity`, not `swapchain.extent`: the largest
 of the swapchain and every connected monitor's video mode, grown only when the window outgrows

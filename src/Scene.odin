@@ -181,6 +181,93 @@ newScene :: proc(name, path: string) -> bool {
 	return true
 }
 
+changeModelAsset :: proc(scene: ^Scene, modelIdx: u32, assetPath: string) -> LoadError {
+	vertexStart := len(scene.vertices)
+	indexStart := len(scene.indices)
+	replacement := Model {
+		assetPath = strings.clone(assetPath),
+	}
+	if err := loadModel(scene, &replacement); err != .None {
+		resize(&scene.vertices, vertexStart)
+		resize(&scene.indices, indexStart)
+		deleteModel(&replacement)
+		return err
+	}
+
+	model := &scene.models[modelIdx]
+	oldVertices := modelVertexCount(model)
+	newVertices := modelVertexCount(&replacement)
+	for _ in model.instances {
+		scene.boneCount += len(replacement.skeleton) - len(model.skeleton)
+		scene.vertexCount = scene.vertexCount - oldVertices + newVertices
+	}
+
+	if len(model.meshes) > 0 {
+		vertexFirst, vertexEnd := max(u32), u32(0)
+		indexFirst, indexEnd := max(u32), u32(0)
+		for &mesh in model.meshes {
+			vertexFirst = min(vertexFirst, mesh.vertexOffset)
+			vertexEnd = max(vertexEnd, mesh.vertexOffset + mesh.vertexCount)
+			indexFirst = min(indexFirst, mesh.indexOffset)
+			indexEnd = max(indexEnd, mesh.indexOffset + mesh.indexCount)
+		}
+		remove_range(&scene.vertices, int(vertexFirst), int(vertexEnd))
+		remove_range(&scene.indices, int(indexFirst), int(indexEnd))
+
+		shift :: proc(meshes: []Mesh, vertexEnd, vertexCount, indexEnd, indexCount: u32) {
+			for &mesh in meshes {
+				if mesh.vertexOffset >= vertexEnd {
+					mesh.vertexOffset -= vertexCount
+				}
+				if mesh.indexOffset >= indexEnd {
+					mesh.indexOffset -= indexCount
+				}
+			}
+		}
+		for &other, otherIdx in scene.models {
+			if u32(otherIdx) != modelIdx {
+				shift(other.meshes, vertexEnd, vertexEnd - vertexFirst, indexEnd, indexEnd - indexFirst)
+			}
+		}
+		shift(replacement.meshes, vertexEnd, vertexEnd - vertexFirst, indexEnd, indexEnd - indexFirst)
+	}
+
+	model.meshes, replacement.meshes = replacement.meshes, model.meshes
+	model.skeleton, replacement.skeleton = replacement.skeleton, model.skeleton
+	model.animations, replacement.animations = replacement.animations, model.animations
+	model.assetPath, replacement.assetPath = replacement.assetPath, model.assetPath
+	deleteModel(&replacement)
+
+	for objectIdx in model.instances {
+		object := &scene.objects[objectIdx]
+		textureIdxs := make([][TextureIndex]u32, len(model.meshes))
+		for i in 0 ..< min(len(model.meshes), len(object.textureIdxs)) {
+			textureIdxs[i] = object.textureIdxs[i]
+		}
+		delete(object.textureIdxs)
+		object.textureIdxs = textureIdxs
+
+		delete(object.animation.state)
+		delete(object.animation.cache)
+		object.animation.state = make([]Mat4, len(model.skeleton))
+		object.animation.cache = make([]ObjectAnimationCache, len(model.skeleton))
+		if int(object.animation.idx) >= len(model.animations) {
+			object.animation.idx = -1
+		}
+		object.animation.timer = 0
+	}
+	return .None
+}
+
+@(private = "file")
+modelVertexCount :: proc(model: ^Model) -> u32 {
+	count: u32
+	for &mesh in model.meshes {
+		count += mesh.vertexCount
+	}
+	return count
+}
+
 addObject :: proc(scene: ^Scene, modelIdx: u32) {
 	append(
 		&scene.objects,

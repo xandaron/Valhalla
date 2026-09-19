@@ -96,7 +96,6 @@ frameLatencyLimit :: proc() -> u32 {
 @(private = "file")
 SHADOW_RESOLUTION: [2]u32 : {512, 512}
 
-@(private = "file")
 SHADOW_CUBE_FACES :: 6
 
 @(private = "file")
@@ -350,6 +349,9 @@ Imgui_PushConstants :: struct {
 	scale:     ShaderVec2,
 	translate: ShaderVec2,
 	texture:   u32,
+	rangeMin:  f32,
+	rangeMax:  f32,
+	remap:     u32,
 }
 
 #assert(size_of(HeapIndices) == 64)
@@ -360,7 +362,10 @@ Imgui_PushConstants :: struct {
 #assert(offset_of(Imgui_PushConstants, scale) == 64)
 #assert(offset_of(Imgui_PushConstants, translate) == 72)
 #assert(offset_of(Imgui_PushConstants, texture) == 80)
-#assert(size_of(Imgui_PushConstants) == 88)
+#assert(offset_of(Imgui_PushConstants, rangeMin) == 84)
+#assert(offset_of(Imgui_PushConstants, rangeMax) == 88)
+#assert(offset_of(Imgui_PushConstants, remap) == 92)
+#assert(size_of(Imgui_PushConstants) == 96)
 
 TransferFunction :: enum u32 {
 	Gamma = 0,
@@ -533,6 +538,8 @@ GraphicsData :: struct {
 	reloadBuffers:       bool,
 	dirtyCommands:       bit_set[CmdBufferIndex],
 	screenshot:          Screenshot,
+	debugView:           DebugView,
+	imageSerial:         u64,
 }
 
 @(private = "file")
@@ -560,6 +567,8 @@ Image :: struct {
 	format:         vk.Format,
 	heapSlot:       u32,
 	linearHeapSlot: u32,
+	extent:         vk.Extent2D,
+	serial:         u64,
 }
 
 InitGraphicsInfo :: struct {
@@ -698,6 +707,7 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 	if vk.DeviceWaitIdle(device) != .SUCCESS {
 		panic("Failed to wait for device idle!")
 	}
+	destroyDebugView(graphicsData)
 
 	cleanupImgui(graphicsData)
 
@@ -2884,6 +2894,8 @@ createImage :: proc(
 	queueFamilyIndices: [^]u32,
 	pNext: rawptr = nil,
 ) -> ImageError {
+	imageSerial += 1
+	image.serial = imageSerial
 	imageInfo: vk.ImageCreateInfo = {
 		sType                 = .IMAGE_CREATE_INFO,
 		pNext                 = pNext,
@@ -3329,6 +3341,68 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 	defer stagingWait(graphicsData)
 
 	for path in imagePaths {
+		image := loadTextureImage(graphicsData, path) or_return
+		append(&buffers.textures, image)
+	}
+
+	return nil
+}
+
+@(require_results)
+changeTextureImage :: proc(
+	using graphicsData: ^GraphicsData,
+	scene: ^Scene,
+	textureIdx: u32,
+	path: string,
+) -> Error {
+	image, err := loadTextureImage(graphicsData, path)
+	stagingWait(graphicsData)
+	if err != nil {
+		return err
+	}
+
+	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
+		logf(.Error, "Failed to wait for device idle! vkResult: %v", res)
+	}
+	old := &scene.buffers.textures[textureIdx]
+	releaseTextureSlot(graphicsData, image.heapSlot)
+	releaseTextureSlot(graphicsData, image.linearHeapSlot)
+	image.heapSlot = old.heapSlot
+	image.linearHeapSlot = old.linearHeapSlot
+	deleteImage(graphicsData, old)
+	old^ = image
+	for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		writeTextureDescriptor(graphicsData, u32(frame), old.heapSlot, &old.viewInfo)
+		writeTextureDescriptor(graphicsData, u32(frame), old.linearHeapSlot, &old.linearViewInfo)
+	}
+
+	texture := &scene.textures[textureIdx]
+	delete(texture.assetPath)
+	texture.assetPath = strings.clone(path)
+	return nil
+}
+
+texturePreview :: proc(
+	graphicsData: ^GraphicsData,
+	scene: ^Scene,
+	textureIdx: u32,
+) -> (
+	id: imgui.TextureID,
+	size: Vec2,
+	ok: bool,
+) {
+	if int(textureIdx) >= len(scene.buffers.textures) {
+		return
+	}
+	image := &scene.buffers.textures[textureIdx]
+	id = imgui.TextureID(textureSlotIndex(graphicsData, image.linearHeapSlot))
+	return id, {f32(image.extent.width), f32(image.extent.height)}, true
+}
+
+@(private = "file")
+@(require_results)
+loadTextureImage :: proc(using graphicsData: ^GraphicsData, path: string) -> (image: Image, err: Error) {
+	{
 		width, height: i32
 		pixels := img.load(
 			strings.clone_to_cstring(path, allocator = context.temp_allocator),
@@ -3339,7 +3413,7 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		)
 		if pixels == nil {
 			logf(.Error, "Failed to load texture: %v", path)
-			return ImageError.FailedToLoadImage
+			return image, ImageError.FailedToLoadImage
 		}
 		defer img.image_free(pixels)
 
@@ -3353,8 +3427,9 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 			pViewFormats    = &viewFormats[0],
 		}
 
-		image: Image = {
+		image = {
 			format = TEXTURE_COLOUR_FORMAT,
+			extent = {u32(width), u32(height)},
 		}
 		if err := createImage(
 			graphicsData,
@@ -3374,7 +3449,7 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 			&formatList,
 		); err != nil {
 			logf(.Error, "Failed to create image for %v! Error: %v", path, err)
-			return err
+			return image, err
 		}
 
 		viewErr: ImageError
@@ -3388,7 +3463,7 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		)
 		if viewErr != .None {
 			logf(.Error, "Failed to create image view for %v! Error: %v", path, viewErr)
-			return viewErr
+			return image, viewErr
 		}
 
 		image.linearView, image.linearViewInfo, viewErr = createImageView(
@@ -3401,18 +3476,18 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		)
 		if viewErr != .None {
 			logf(.Error, "Failed to create linear image view for %v! Error: %v", path, viewErr)
-			return viewErr
+			return image, viewErr
 		}
 
 		slot, ok := acquireTextureSlot(graphicsData)
 		if !ok {
-			return DescriptorHeapError.OutOfTextureSlots
+			return image, DescriptorHeapError.OutOfTextureSlots
 		}
 		image.heapSlot = slot
 
 		linearSlot, linearOk := acquireTextureSlot(graphicsData)
 		if !linearOk {
-			return DescriptorHeapError.OutOfTextureSlots
+			return image, DescriptorHeapError.OutOfTextureSlots
 		}
 		image.linearHeapSlot = linearSlot
 
@@ -3422,7 +3497,7 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 			buffer, oversized, stagingErr := stagingOversized(graphicsData, textureSize)
 			if stagingErr != .None {
 				logf(.Error, "Failed to stage texture %v! Error: %v", path, stagingErr)
-				return stagingErr
+				return image, stagingErr
 			}
 			srcBuffer = buffer
 			srcOffset = 0
@@ -3433,7 +3508,7 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 		cmdBuffer, cmdErr := stagingCommands(graphicsData)
 		if cmdErr != .None {
 			logf(.Error, "Failed to record texture upload for %v! Error: %v", path, cmdErr)
-			return cmdErr
+			return image, cmdErr
 		}
 
 		transitionImageLayout(
@@ -3463,11 +3538,9 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 			{.COLOR},
 			1,
 		)
-
-		append(&buffers.textures, image)
 	}
 
-	return nil
+	return image, nil
 }
 
 // ===[ Descriptor Heaps ]=====================================================
@@ -4200,7 +4273,7 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 		layerCount,
 		{._1},
 		.OPTIMAL,
-		{.COLOR_ATTACHMENT, .SAMPLED},
+		{.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC},
 		{.DEVICE_LOCAL},
 		.EXCLUSIVE,
 		0,
@@ -4232,7 +4305,7 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 		layerCount,
 		{._1},
 		.OPTIMAL,
-		{.DEPTH_STENCIL_ATTACHMENT},
+		{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED, .TRANSFER_SRC},
 		{.DEVICE_LOCAL},
 		.EXCLUSIVE,
 		0,
@@ -4557,7 +4630,7 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		1,
 		{._1},
 		.OPTIMAL,
-		{.COLOR_ATTACHMENT, .TRANSFER_SRC},
+		{.COLOR_ATTACHMENT, .TRANSFER_SRC, .SAMPLED},
 		{.DEVICE_LOCAL},
 		.EXCLUSIVE,
 		0,
@@ -4589,7 +4662,7 @@ createScenePipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		1,
 		{._1},
 		.OPTIMAL,
-		{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+		{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED, .TRANSFER_SRC},
 		{.DEVICE_LOCAL},
 		.EXCLUSIVE,
 		0,
@@ -5076,7 +5149,7 @@ createPostProcessPipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		1,
 		{._1},
 		.OPTIMAL,
-		{.TRANSFER_SRC, .STORAGE},
+		{.TRANSFER_SRC, .STORAGE, .SAMPLED},
 		{.DEVICE_LOCAL},
 		.EXCLUSIVE,
 		0,
@@ -5231,7 +5304,7 @@ createImguiPipelineImages :: proc(using graphicsData: ^GraphicsData) {
 		1,
 		{._1},
 		.OPTIMAL,
-		{.COLOR_ATTACHMENT, .STORAGE},
+		{.COLOR_ATTACHMENT, .STORAGE, .SAMPLED, .TRANSFER_SRC},
 		{.DEVICE_LOCAL},
 		.EXCLUSIVE,
 		0,
@@ -6798,6 +6871,10 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32) {
 		},
 	)
 
+	if debugView.previewing {
+		debugImageBarrier(graphicsData, cmdBuffer, debugView.kind, debugView.layer, .Acquire)
+	}
+
 	vk.CmdBeginRendering(
 		cmdBuffer,
 		&vk.RenderingInfo {
@@ -6829,6 +6906,10 @@ recordImguiCommands :: proc(using graphicsData: ^GraphicsData, index: u32) {
 	)
 	imguiRenderDrawData(graphicsData, cmdBuffer, index)
 	vk.CmdEndRendering(cmdBuffer)
+	if debugView.previewing {
+		debugImageBarrier(graphicsData, cmdBuffer, debugView.kind, debugView.layer, .Release)
+		debugView.previewing = false
+	}
 
 	vk.CmdPipelineBarrier2(
 		cmdBuffer,
@@ -7230,6 +7311,12 @@ Screenshot :: struct {
 	hdr:      bool,
 	recorded: bool,
 	saved:    bool,
+	dump:     bool,
+	kind:     DebugImage,
+	layer:    u32,
+	format:   vk.Format,
+	rangeMin: f32,
+	rangeMax: f32,
 }
 
 requestScreenshot :: proc(using graphicsData: ^GraphicsData, path: string) -> bool {
@@ -7238,7 +7325,30 @@ requestScreenshot :: proc(using graphicsData: ^GraphicsData, path: string) -> bo
 	}
 	screenshot.path = strings.clone(path)
 	screenshot.saved = false
+	screenshot.dump = false
 	return true
+}
+
+requestDebugDump :: proc(
+	using graphicsData: ^GraphicsData,
+	kind: DebugImage,
+	layer: u32,
+	path: string,
+) -> bool {
+	info := debugImageInfo(graphicsData, kind)
+	if screenshot.path != "" || info.layers == 0 || layer >= info.layers {
+		return false
+	}
+	screenshot.path = strings.clone(path)
+	screenshot.saved = false
+	screenshot.dump = true
+	screenshot.kind = kind
+	screenshot.layer = layer
+	return true
+}
+
+screenshotRange :: proc(using graphicsData: ^GraphicsData) -> (rangeMin, rangeMax: f32, dump: bool) {
+	return screenshot.rangeMin, screenshot.rangeMax, screenshot.dump
 }
 
 screenshotPending :: proc(using graphicsData: ^GraphicsData) -> bool {
@@ -7252,6 +7362,11 @@ screenshotSaved :: proc(using graphicsData: ^GraphicsData) -> bool {
 @(private = "file")
 recordScreenshotCopy :: proc(using graphicsData: ^GraphicsData, cmdBuffer: vk.CommandBuffer) {
 	if screenshot.path == "" || screenshot.recorded {
+		return
+	}
+
+	if screenshot.dump {
+		recordDebugDumpCopy(graphicsData, cmdBuffer)
 		return
 	}
 
@@ -7359,6 +7474,11 @@ recordScreenshotCopy :: proc(using graphicsData: ^GraphicsData, cmdBuffer: vk.Co
 
 @(private = "file")
 saveScreenshot :: proc(using graphicsData: ^GraphicsData) {
+	if screenshot.dump {
+		saveDebugDump(graphicsData)
+		return
+	}
+
 	pqDecode :: proc(value: f32) -> f32 {
 		M1 :: 0.1593017578125
 		M2 :: 78.84375
@@ -7407,6 +7527,449 @@ saveScreenshot :: proc(using graphicsData: ^GraphicsData) {
 	screenshot.recorded = false
 }
 
+// ===[ Debug Images ]=========================================================
+
+DebugImage :: enum {
+	SceneColour,
+	SceneDepth,
+	ShadowColour,
+	ShadowDepth,
+	Output,
+	Interface,
+}
+
+DEBUG_IMAGE_NAMES := [DebugImage]string {
+	.SceneColour  = "Scene colour",
+	.SceneDepth   = "Scene depth",
+	.ShadowColour = "Shadow colour",
+	.ShadowDepth  = "Shadow depth",
+	.Output       = "Output (previous frame)",
+	.Interface    = "UI",
+}
+
+DebugImageInfo :: struct {
+	image:       ^Image,
+	extent:      vk.Extent2D,
+	layers:      u32,
+	aspect:      vk.ImageAspectFlags,
+	layout:      vk.ImageLayout,
+	previewable: bool,
+	depth:       bool,
+}
+
+@(private = "file")
+DebugView :: struct {
+	view:       vk.ImageView,
+	viewInfo:   vk.ImageViewCreateInfo,
+	slot:       u32,
+	slotHeld:   bool,
+	serial:     u64,
+	kind:       DebugImage,
+	layer:      u32,
+	rangeMin:   f32,
+	rangeMax:   f32,
+	previewing: bool,
+}
+
+@(private = "file")
+DebugBarrier :: enum {
+	Acquire,
+	Release,
+}
+
+debugImageInfo :: proc(using graphicsData: ^GraphicsData, kind: DebugImage) -> (info: DebugImageInfo) {
+	renderExtent := vk.Extent2D{settings.renderSize.x, settings.renderSize.y}
+	shadowExtent := vk.Extent2D{SHADOW_RESOLUTION.x, SHADOW_RESOLUTION.y}
+	shadowLayers := u32(len(shadowColourViews)) * SHADOW_CUBE_FACES
+	switch kind {
+	case .SceneColour:
+		info = {&pipelines[.Scene].images[0], renderExtent, 1, {.COLOR}, .TRANSFER_SRC_OPTIMAL, true, false}
+	case .SceneDepth:
+		info = {&pipelines[.Scene].images[1], renderExtent, 1, {.DEPTH}, .SHADER_READ_ONLY_OPTIMAL, true, true}
+	case .ShadowColour:
+		info = {&pipelines[.Light].images[0], shadowExtent, shadowLayers, {.COLOR}, .SHADER_READ_ONLY_OPTIMAL, true, false}
+	case .ShadowDepth:
+		info = {&pipelines[.Light].images[1], shadowExtent, shadowLayers, {.DEPTH}, .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, true, true}
+	case .Output:
+		info = {&pipelines[.PostProcess].images[1], swapchain.extent, 1, {.COLOR}, .TRANSFER_SRC_OPTIMAL, true, false}
+	case .Interface:
+		info = {&pipelines[.Imgui].images[0], swapchain.extent, 1, {.COLOR}, .GENERAL, false, false}
+	}
+	if info.image.vkImage == 0 {
+		info.layers = 0
+	}
+	return
+}
+
+@(private = "file")
+debugBarrierAspect :: proc(info: DebugImageInfo) -> vk.ImageAspectFlags {
+	#partial switch info.image.format {
+	case .D16_UNORM_S8_UINT, .D24_UNORM_S8_UINT, .D32_SFLOAT_S8_UINT:
+		return {.DEPTH, .STENCIL}
+	}
+	return info.aspect
+}
+
+@(private = "file")
+debugLayoutBarrier :: proc(
+	cmdBuffer: vk.CommandBuffer,
+	info: DebugImageInfo,
+	layer: u32,
+	oldLayout, newLayout: vk.ImageLayout,
+	srcStage: vk.PipelineStageFlags2,
+	srcAccess: vk.AccessFlags2,
+	dstStage: vk.PipelineStageFlags2,
+	dstAccess: vk.AccessFlags2,
+) {
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 0,
+			pMemoryBarriers = nil,
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 1,
+			pImageMemoryBarriers = &vk.ImageMemoryBarrier2 {
+				sType = .IMAGE_MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = srcStage,
+				srcAccessMask = srcAccess,
+				dstStageMask = dstStage,
+				dstAccessMask = dstAccess,
+				oldLayout = oldLayout,
+				newLayout = newLayout,
+				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+				image = info.image.vkImage,
+				subresourceRange = vk.ImageSubresourceRange {
+					aspectMask = debugBarrierAspect(info),
+					baseMipLevel = 0,
+					levelCount = 1,
+					baseArrayLayer = layer,
+					layerCount = 1,
+				},
+			},
+		},
+	)
+}
+
+@(private = "file")
+debugImageBarrier :: proc(
+	using graphicsData: ^GraphicsData,
+	cmdBuffer: vk.CommandBuffer,
+	kind: DebugImage,
+	layer: u32,
+	direction: DebugBarrier,
+) {
+	info := debugImageInfo(graphicsData, kind)
+	if info.layers == 0 {
+		return
+	}
+	switch direction {
+	case .Acquire:
+		debugLayoutBarrier(
+			cmdBuffer,
+			info,
+			layer,
+			info.layout,
+			.SHADER_READ_ONLY_OPTIMAL,
+			{.ALL_COMMANDS},
+			{.MEMORY_WRITE},
+			{.FRAGMENT_SHADER},
+			{.SHADER_SAMPLED_READ},
+		)
+	case .Release:
+		debugLayoutBarrier(
+			cmdBuffer,
+			info,
+			layer,
+			.SHADER_READ_ONLY_OPTIMAL,
+			info.layout,
+			{.FRAGMENT_SHADER},
+			{},
+			{.ALL_COMMANDS},
+			{.MEMORY_READ, .MEMORY_WRITE},
+		)
+	}
+}
+
+debugPreview :: proc(
+	using graphicsData: ^GraphicsData,
+	kind: DebugImage,
+	layer: u32,
+	rangeMin, rangeMax: f32,
+) -> (
+	id: imgui.TextureID,
+	size: Vec2,
+	uvMax: Vec2,
+	ok: bool,
+) {
+	info := debugImageInfo(graphicsData, kind)
+	if !info.previewable || info.layers == 0 || layer >= info.layers {
+		return
+	}
+
+	if debugView.view == 0 ||
+	   debugView.serial != info.image.serial ||
+	   debugView.kind != kind ||
+	   debugView.layer != layer {
+		if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
+			logf(.Error, "Failed to wait for device idle! vkResult: %v", res)
+			return
+		}
+		if debugView.view != 0 {
+			vk.DestroyImageView(device, debugView.view, nil)
+			debugView.view = 0
+		}
+		if !debugView.slotHeld {
+			debugView.slot, debugView.slotHeld = acquireTextureSlot(graphicsData)
+			if !debugView.slotHeld {
+				return
+			}
+		}
+
+		swizzle: vk.ComponentMapping
+		if info.depth {
+			swizzle = {r = .R, g = .R, b = .R, a = .ONE}
+		}
+		debugView.viewInfo = {
+			sType = .IMAGE_VIEW_CREATE_INFO,
+			pNext = nil,
+			flags = {},
+			image = info.image.vkImage,
+			viewType = .D2,
+			format = info.image.format,
+			components = swizzle,
+			subresourceRange = {
+				aspectMask = info.aspect,
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = layer,
+				layerCount = 1,
+			},
+		}
+		if res := vk.CreateImageView(device, &debugView.viewInfo, nil, &debugView.view); res != .SUCCESS {
+			logf(.Error, "Failed to create debug image view! vkResult: %v", res)
+			debugView.view = 0
+			return
+		}
+		for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+			writeTextureDescriptor(graphicsData, u32(frame), debugView.slot, &debugView.viewInfo)
+		}
+		debugView.serial = info.image.serial
+		debugView.kind = kind
+		debugView.layer = layer
+	}
+
+	debugView.rangeMin = rangeMin
+	debugView.rangeMax = rangeMax
+	debugView.previewing = true
+
+	uvMax = {1, 1}
+	if kind == .Output || kind == .Interface {
+		uvMax = {
+			f32(swapchain.extent.width) / f32(outputCapacity.width),
+			f32(swapchain.extent.height) / f32(outputCapacity.height),
+		}
+	}
+	id = imgui.TextureID(textureSlotIndex(graphicsData, debugView.slot))
+	return id, {f32(info.extent.width), f32(info.extent.height)}, uvMax, true
+}
+
+@(private = "file")
+destroyDebugView :: proc(using graphicsData: ^GraphicsData) {
+	if debugView.view != 0 {
+		vk.DestroyImageView(device, debugView.view, nil)
+	}
+	if debugView.slotHeld {
+		releaseTextureSlot(graphicsData, debugView.slot)
+	}
+	debugView = {}
+}
+
+@(private = "file")
+debugBytesPerPixel :: proc(format: vk.Format) -> int {
+	#partial switch format {
+	case .R16G16B16A16_SFLOAT:
+		return 8
+	case .D16_UNORM:
+		return 2
+	}
+	return 4
+}
+
+@(private = "file")
+recordDebugDumpCopy :: proc(using graphicsData: ^GraphicsData, cmdBuffer: vk.CommandBuffer) {
+	info := debugImageInfo(graphicsData, screenshot.kind)
+	if info.layers == 0 || screenshot.layer >= info.layers {
+		delete(screenshot.path)
+		screenshot.path = ""
+		return
+	}
+
+	screenshot.extent = info.extent
+	screenshot.format = info.image.format
+	size := int(info.extent.width) * int(info.extent.height) * debugBytesPerPixel(info.image.format)
+	if err := createBuffer(
+		graphicsData,
+		size,
+		{.TRANSFER_DST},
+		{.HOST_VISIBLE, .HOST_COHERENT},
+		&screenshot.buffer,
+	); err != nil {
+		logf(.Error, "Failed to create debug dump buffer! Error: %v", err)
+		delete(screenshot.path)
+		screenshot.path = ""
+		return
+	}
+
+	debugLayoutBarrier(
+		cmdBuffer,
+		info,
+		screenshot.layer,
+		info.layout,
+		.TRANSFER_SRC_OPTIMAL,
+		{.ALL_COMMANDS},
+		{.MEMORY_WRITE},
+		{.COPY},
+		{.TRANSFER_READ},
+	)
+
+	vk.CmdCopyImageToBuffer2(
+		cmdBuffer,
+		&vk.CopyImageToBufferInfo2 {
+			sType = .COPY_IMAGE_TO_BUFFER_INFO_2,
+			pNext = nil,
+			srcImage = info.image.vkImage,
+			srcImageLayout = .TRANSFER_SRC_OPTIMAL,
+			dstBuffer = screenshot.buffer.buffer,
+			regionCount = 1,
+			pRegions = &vk.BufferImageCopy2 {
+				sType = .BUFFER_IMAGE_COPY_2,
+				pNext = nil,
+				bufferOffset = 0,
+				bufferRowLength = 0,
+				bufferImageHeight = 0,
+				imageSubresource = {
+					aspectMask = info.aspect,
+					mipLevel = 0,
+					baseArrayLayer = screenshot.layer,
+					layerCount = 1,
+				},
+				imageOffset = {0, 0, 0},
+				imageExtent = {info.extent.width, info.extent.height, 1},
+			},
+		},
+	)
+
+	debugLayoutBarrier(
+		cmdBuffer,
+		info,
+		screenshot.layer,
+		.TRANSFER_SRC_OPTIMAL,
+		info.layout,
+		{.COPY},
+		{},
+		{.ALL_COMMANDS},
+		{.MEMORY_READ, .MEMORY_WRITE},
+	)
+
+	vk.CmdPipelineBarrier2(
+		cmdBuffer,
+		&vk.DependencyInfo {
+			sType = .DEPENDENCY_INFO,
+			pNext = nil,
+			dependencyFlags = nil,
+			memoryBarrierCount = 1,
+			pMemoryBarriers = &vk.MemoryBarrier2 {
+				sType = .MEMORY_BARRIER_2,
+				pNext = nil,
+				srcStageMask = {.COPY},
+				srcAccessMask = {.TRANSFER_WRITE},
+				dstStageMask = {.HOST},
+				dstAccessMask = {.HOST_READ},
+			},
+			bufferMemoryBarrierCount = 0,
+			pBufferMemoryBarriers = nil,
+			imageMemoryBarrierCount = 0,
+			pImageMemoryBarriers = nil,
+		},
+	)
+
+	screenshot.recorded = true
+}
+
+@(private = "file")
+saveDebugDump :: proc(using graphicsData: ^GraphicsData) {
+	width := int(screenshot.extent.width)
+	height := int(screenshot.extent.height)
+	count := width * height
+	values := make([]Vec3, count, context.temp_allocator)
+	data := screenshot.buffer.mapped
+	#partial switch screenshot.format {
+	case .R16G16B16A16_SFLOAT:
+		source := ([^]u16)(data)[:count * 4]
+		for i in 0 ..< count {
+			for channel in 0 ..< 3 {
+				values[i][channel] = f32(transmute(f16)source[i * 4 + channel])
+			}
+		}
+	case .D16_UNORM:
+		source := ([^]u16)(data)[:count]
+		for i in 0 ..< count {
+			values[i] = f32(source[i]) / 65535
+		}
+	case .D24_UNORM_S8_UINT, .X8_D24_UNORM_PACK32:
+		source := ([^]u32)(data)[:count]
+		for i in 0 ..< count {
+			values[i] = f32(source[i] & 0xFFFFFF) / 16777215
+		}
+	case:
+		source := ([^]f32)(data)[:count]
+		for i in 0 ..< count {
+			values[i] = source[i]
+		}
+	}
+
+	low, high := max(f32), min(f32)
+	for value in values {
+		for channel in 0 ..< 3 {
+			if value[channel] == value[channel] && abs(value[channel]) <= max(f32) {
+				low = min(low, value[channel])
+				high = max(high, value[channel])
+			}
+		}
+	}
+	if low > high {
+		low, high = 0, 1
+	}
+	screenshot.rangeMin = low
+	screenshot.rangeMax = high
+	span := high - low if high > low else 1
+
+	pixels := make([]u8, count * 4, context.temp_allocator)
+	for value, i in values {
+		for channel in 0 ..< 3 {
+			pixels[i * 4 + channel] = u8(clamp((value[channel] - low) / span, 0, 1) * 255 + 0.5)
+		}
+		pixels[i * 4 + 3] = 255
+	}
+
+	path := strings.clone_to_cstring(screenshot.path, context.temp_allocator)
+	screenshot.saved = img.write_png(path, i32(width), i32(height), 4, raw_data(pixels), i32(width * 4)) != 0
+	if !screenshot.saved {
+		logf(.Error, "Failed to write debug dump to \"%v\".", screenshot.path)
+	}
+
+	deleteBuffer(graphicsData, &screenshot.buffer)
+	delete(screenshot.path)
+	screenshot.path = ""
+	screenshot.recorded = false
+}
+
 // ===[ Dear ImGui ]===========================================================
 
 @(private = "file")
@@ -7433,6 +7996,7 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 
 	imguiContext = imgui.CreateContext(nil)
 	imgui.StyleColorsClassic(nil)
+	imgui.GetStyle().Colors[imgui.GuiCol.PopupBg].w = 1
 	imgui.GetStyle().Colors[imgui.GuiCol.WindowBg].w = 1
 
 	imguiPlatform.iniPath = strings.clone_to_cstring(projectPath(CONFIG_PATH(), "imgui.ini"))
@@ -8243,6 +8807,7 @@ imguiRenderDrawData :: proc(
 			-1 - drawData.DisplayPos.y * scale.y,
 		},
 		texture   = 0,
+		rangeMax  = 1,
 	}
 
 	imguiSetupRenderState(graphicsData, cmdBuffer, frame, &pushConstants, framebufferSize)
@@ -8294,11 +8859,19 @@ imguiRenderDrawData :: proc(
 			)
 
 			pushConstants.texture = u32(imgui.DrawCmd_GetTexID(&command))
+			pushConstants.rangeMin = 0
+			pushConstants.rangeMax = 1
+			pushConstants.remap = 0
+			if debugView.slotHeld && pushConstants.texture == textureSlotIndex(graphicsData, debugView.slot) {
+				pushConstants.rangeMin = debugView.rangeMin
+				pushConstants.rangeMax = debugView.rangeMax
+				pushConstants.remap = 1
+			}
 			imguiPushConstants(
 				cmdBuffer,
 				&pushConstants,
 				offset_of(Imgui_PushConstants, texture),
-				size_of(pushConstants.texture),
+				size_of(Imgui_PushConstants) - offset_of(Imgui_PushConstants, texture),
 			)
 
 			vk.CmdDrawIndexed(
