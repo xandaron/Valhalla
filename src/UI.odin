@@ -60,15 +60,24 @@ GizmoHandle :: enum {
 	PlaneXY,
 }
 
+GizmoMode :: enum {
+	Translate,
+	Rotate,
+}
+
 Gizmo :: struct {
-	hot:         bool,
-	hovered:     GizmoHandle,
-	active:      GizmoHandle,
-	item:        InspectorItem,
-	grab:        Vec3,
-	startWorld:  Vec3,
-	startLocal:  Vec3,
-	toLocal:     Mat3,
+	mode:          GizmoMode,
+	hot:           bool,
+	hovered:       GizmoHandle,
+	active:        GizmoHandle,
+	item:          InspectorItem,
+	grab:          Vec3,
+	startWorld:    Vec3,
+	startLocal:    Vec3,
+	toLocal:       Mat3,
+	startRotation: Quat,
+	startAngle:    f32,
+	rotateAxis:    Vec3,
 }
 
 TextField :: struct {
@@ -359,7 +368,7 @@ drawImgui :: proc(graphicsData: ^GraphicsData) {
 
 	drawMainMenu(graphicsData)
 	drawDockSpace()
-	drawTranslateGizmo(graphicsData)
+	drawGizmo(graphicsData)
 
 	drawObjectCatalog(graphicsData)
 	drawLightsPanel(graphicsData)
@@ -566,6 +575,17 @@ GIZMO_COLOURS := [3]u32{0xFF3C3CDC, 0xFF3CC83C, 0xFFDC7832}
 @(private = "file")
 GIZMO_HOT_COLOUR :: 0xFF28DCF0
 
+setGizmoMode :: proc(mode: GizmoMode) {
+	gizmo := &globals.uiData.gizmo
+	if gizmo.mode == mode {
+		return
+	}
+	gizmo.mode = mode
+	gizmo.active = .None
+	gizmo.hovered = .None
+	gizmo.hot = false
+}
+
 @(private = "file")
 gizmoTarget :: proc(scene: ^Scene, item: InspectorItem) -> (world: Vec3, local: ^Vec3, toLocal: Mat3, ok: bool) {
 	switch item.kind {
@@ -585,6 +605,57 @@ gizmoTarget :: proc(scene: ^Scene, item: InspectorItem) -> (world: Vec3, local: 
 		return light.position, &light.position, Mat3(1), true
 	}
 	return
+}
+
+@(private = "file")
+gizmoRotationTarget :: proc(
+	scene: ^Scene,
+	item: InspectorItem,
+) -> (
+	world: Vec3,
+	local: ^Quat,
+	toParent: Mat3,
+	ok: bool,
+) {
+	#partial switch item.kind {
+	case .Object:
+		if int(item.index) >= len(scene.objects) {
+			return
+		}
+		object := &scene.objects[item.index]
+		world = (objectTransform(scene, object) * Vec4{0, 0, 0, 1}).xyz
+		toParent = Mat3(inverse(objectParentTransform(scene, object)))
+		return world, &object.rotation, toParent, true
+	}
+	return
+}
+
+@(private = "file")
+gizmoRingAngle :: proc(
+	index: int,
+	origin: Vec3,
+	rayOrigin, rayDirection: Vec3,
+) -> (
+	result: f32,
+	ok: bool,
+) {
+	normal := GIZMO_AXES[index]
+	denominator := dot(normal, rayDirection)
+	if abs(denominator) < 1e-5 {
+		return
+	}
+	s := dot(normal, origin - rayOrigin) / denominator
+	if s < 0 {
+		return
+	}
+
+	offset := rayOrigin + rayDirection * s - origin
+	x := dot(offset, GIZMO_AXES[(index + 1) % 3])
+	y := dot(offset, GIZMO_AXES[(index + 2) % 3])
+	if x * x + y * y < 1e-12 {
+		return
+	}
+	return atan2(y, x), true
 }
 
 @(private = "file")
@@ -618,7 +689,23 @@ gizmoGrab :: proc(handle: GizmoHandle, origin: Vec3, rayOrigin, rayDirection: Ve
 }
 
 @(private = "file")
-drawTranslateGizmo :: proc(graphicsData: ^GraphicsData) {
+gizmoProject :: proc(
+	graphicsData: ^GraphicsData,
+	viewProjection: Mat4,
+	point: Vec3,
+) -> (
+	screen: Vec2,
+	visible: bool,
+) {
+	clip := viewProjection * Vec4{point.x, point.y, point.z, 1}
+	if clip.w <= 1e-4 {
+		return
+	}
+	return renderNDCToCursor(graphicsData, clip.xy / clip.w), true
+}
+
+@(private = "file")
+drawGizmo :: proc(graphicsData: ^GraphicsData) {
 	gizmo := &globals.uiData.gizmo
 	gizmo.hot = false
 	gizmo.hovered = .None
@@ -633,6 +720,15 @@ drawTranslateGizmo :: proc(graphicsData: ^GraphicsData) {
 	}
 
 	scene := &globals.scenes[globals.activeScene]
+	if gizmo.mode == .Rotate && drawRotateGizmo(graphicsData, scene, selected) {
+		return
+	}
+	drawTranslateGizmo(graphicsData, scene, selected)
+}
+
+@(private = "file")
+drawTranslateGizmo :: proc(graphicsData: ^GraphicsData, scene: ^Scene, selected: InspectorItem) {
+	gizmo := &globals.uiData.gizmo
 	world, local, toLocal, ok := gizmoTarget(scene, selected)
 	if !ok {
 		gizmo.active = .None
@@ -641,13 +737,7 @@ drawTranslateGizmo :: proc(graphicsData: ^GraphicsData) {
 
 	camera := scene.cameras[scene.activeCamera]
 	viewProjection := projection(camera) * view(camera)
-	project :: proc(graphicsData: ^GraphicsData, viewProjection: Mat4, point: Vec3) -> (screen: Vec2, visible: bool) {
-		clip := viewProjection * Vec4{point.x, point.y, point.z, 1}
-		if clip.w <= 1e-4 {
-			return
-		}
-		return renderNDCToCursor(graphicsData, clip.xy / clip.w), true
-	}
+	project :: gizmoProject
 
 	origin := gizmo.active != .None ? gizmo.startWorld : world
 	centre, visible := project(graphicsData, viewProjection, world)
@@ -771,6 +861,129 @@ drawTranslateGizmo :: proc(graphicsData: ^GraphicsData) {
 		imgui.DrawList_AddTriangleFilled(drawList, axisEnds[i], headBase + side * 6, headBase - side * 6, colour)
 	}
 	imgui.DrawList_AddCircleFilled(drawList, centre, 4, 0xFFFFFFFF)
+}
+
+@(private = "file")
+GIZMO_ARC_SEGMENTS :: 16
+
+@(private = "file")
+drawRotateGizmo :: proc(
+	graphicsData: ^GraphicsData,
+	scene: ^Scene,
+	selected: InspectorItem,
+) -> bool {
+	gizmo := &globals.uiData.gizmo
+	world, local, toParent, ok := gizmoRotationTarget(scene, selected)
+	if !ok {
+		return false
+	}
+	if gizmo.active > .AxisZ {
+		gizmo.active = .None
+	}
+
+	camera := scene.cameras[scene.activeCamera]
+	viewProjection := projection(camera) * view(camera)
+	centre, visible := gizmoProject(graphicsData, viewProjection, world)
+	if !visible {
+		gizmo.active = .None
+		return true
+	}
+	size := length(world - camera.eye) * 0.15
+
+	toCamera := camera.eye - world
+	arcs: [3][GIZMO_ARC_SEGMENTS + 1]Vec2
+	arcVisible: [3][GIZMO_ARC_SEGMENTS + 1]bool
+	for i in 0 ..< 3 {
+		u := GIZMO_AXES[(i + 1) % 3]
+		v := GIZMO_AXES[(i + 2) % 3]
+		quadrant: f32 = 0
+		if dot(toCamera, u) < 0 {
+			quadrant = dot(toCamera, v) < 0 ? 2 : 1
+		} else if dot(toCamera, v) < 0 {
+			quadrant = 3
+		}
+		for s in 0 ..= GIZMO_ARC_SEGMENTS {
+			t := (quadrant + f32(s) / GIZMO_ARC_SEGMENTS) * (PI / 2)
+			point := world + (u * cos(t) + v * sin(t)) * size
+			arcs[i][s], arcVisible[i][s] = gizmoProject(graphicsData, viewProjection, point)
+		}
+	}
+
+	io := imgui.GetIO()
+	mouse := Vec2{io.MousePos.x, io.MousePos.y}
+	if gizmo.active == .None && !io.WantCaptureMouse {
+		segmentDistance :: proc(point, a, b: Vec2) -> f32 {
+			ab := b - a
+			t := clamp(dot(point - a, ab) / max(dot(ab, ab), 1e-6), 0, 1)
+			return length(point - (a + ab * t))
+		}
+
+		nearest: f32 = 7
+		for i in 0 ..< 3 {
+			for s in 0 ..< GIZMO_ARC_SEGMENTS {
+				if !arcVisible[i][s] || !arcVisible[i][s + 1] {
+					continue
+				}
+				away := segmentDistance(mouse, arcs[i][s], arcs[i][s + 1])
+				if away < nearest {
+					nearest = away
+					gizmo.hovered = GizmoHandle(int(GizmoHandle.AxisX) + i)
+				}
+			}
+		}
+
+		if gizmo.hovered != .None && imgui.IsMouseClicked(.Left) {
+			index := int(gizmo.hovered) - int(GizmoHandle.AxisX)
+			if rayOrigin, rayDirection, rayOk := cursorRay(mouse); rayOk {
+				if start, startOk := gizmoRingAngle(index, world, rayOrigin, rayDirection); startOk {
+					axis := toParent * GIZMO_AXES[index]
+					if length2(axis) < 1e-12 {
+						axis = GIZMO_AXES[index]
+					}
+					gizmo.active = gizmo.hovered
+					gizmo.item = selected
+					gizmo.startWorld = world
+					gizmo.startRotation = local^
+					gizmo.startAngle = start
+					gizmo.rotateAxis = normalize(axis)
+					gizmo.toLocal = toParent
+				}
+			}
+		}
+	}
+
+	if gizmo.active != .None {
+		if !imgui.IsMouseDown(.Left) {
+			gizmo.active = .None
+		} else if rayOrigin, rayDirection, rayOk := cursorRay(mouse); rayOk {
+			index := int(gizmo.active) - int(GizmoHandle.AxisX)
+			if current, currentOk := gizmoRingAngle(
+				index,
+				gizmo.startWorld,
+				rayOrigin,
+				rayDirection,
+			); currentOk {
+				local^ = quatFromAxisAngle(current - gizmo.startAngle, gizmo.rotateAxis) * gizmo.startRotation
+			}
+		}
+	}
+	gizmo.hot = gizmo.hovered != .None || gizmo.active != .None
+
+	drawList := imgui.GetBackgroundDrawList()
+	highlight := gizmo.active != .None ? gizmo.active : gizmo.hovered
+	for i in 0 ..< 3 {
+		handle := GizmoHandle(int(GizmoHandle.AxisX) + i)
+		hot := handle == highlight
+		colour := hot ? u32(GIZMO_HOT_COLOUR) : GIZMO_COLOURS[i]
+		for s in 0 ..< GIZMO_ARC_SEGMENTS {
+			if !arcVisible[i][s] || !arcVisible[i][s + 1] {
+				continue
+			}
+			imgui.DrawList_AddLine(drawList, arcs[i][s], arcs[i][s + 1], colour, hot ? 3 : 2)
+		}
+	}
+	imgui.DrawList_AddCircleFilled(drawList, centre, 4, 0xFFFFFFFF)
+	return true
 }
 
 @(private = "file")

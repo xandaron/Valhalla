@@ -205,6 +205,14 @@ handleInput :: proc(event: InputEvent) {
 		switch e.key {
 		case glfw.KEY_P:
 			globals.paused = !globals.paused
+		case glfw.KEY_R:
+			if e.mods & glfw.MOD_CONTROL != 0 {
+				setGizmoMode(.Rotate)
+			}
+		case glfw.KEY_D:
+			if e.mods & glfw.MOD_CONTROL != 0 {
+				setGizmoMode(.Translate)
+			}
 		}
 	}
 }

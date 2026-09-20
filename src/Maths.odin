@@ -39,6 +39,7 @@ tan :: math.tan
 asin :: math.asin
 acos :: math.acos
 atan :: math.atan
+atan2 :: math.atan2
 
 normalize :: linalg.normalize
 cross :: linalg.cross
