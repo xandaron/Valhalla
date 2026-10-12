@@ -5,6 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Valhalla is a 3D graphics engine written in Odin against Vulkan 1.4, intended to grow into a full
 game. Graphics is one component of that game, not the whole project.
 
+**Valhalla is a package, not an executable.** `src/` (package `Valhalla`) is responsible only for
+graphics, window management and input. Everything else — project and settings files, scene
+(de)serialisation, scene editing logic, animation playback, the imgui editor, the external API, camera
+control and the frame loop — lives in `demo/src` (package `Demo`), which imports Valhalla and is the
+program. Do not add application logic to `src/`.
+
 ## House rules
 
 ### The engine is cross platform
@@ -65,9 +71,9 @@ add new ones there rather than leaving TODO comments scattered in the source.
 ## Commands
 
 ```sh
-odin build src --debug --linker:radlink -out:bin/valhalla.exe     # build
-./bin/valhalla.exe ./demo/demo.project   # run (argument is the project file)
-./bin/valhalla.exe ./demo/demo.project ./scenes/bench.scene   # optional scene override
+odin build demo/src --debug --linker:radlink -out:bin/demo.exe     # build (build.bat does the same)
+./bin/demo.exe   # run from the repo root; loads demo/demo.project
+./bin/demo.exe ./scenes/bench.scene   # optional scene override
 ```
 
 There is no test suite, linter or build script. `odin build` is the only check; treat a clean
@@ -89,7 +95,7 @@ The app is a GUI program, so a change is not verified until it has been run. Two
 ### The external API
 
 `-external[:port]` (default 47470) makes the app listen on `127.0.0.1` for newline-terminated
-text commands, one reply line each (`ok ...` or `err ...`). It lives in `src/External.odin`.
+text commands, one reply line each (`ok ...` or `err ...`). It lives in `demo/src/External.odin`.
 The window is shown without taking focus in this mode. Input is injected through `handleInput`,
 the same path GLFW's callbacks use, so it exercises imgui and picking exactly as real input does.
 A click spans three frames (move, press, release) so imgui's hover state is current when it lands.
@@ -276,15 +282,29 @@ still pending is a validation error, and it only shows when uploads land on cons
 resource. `beginSingleTimeCommands`/`endSingleTimeCommands` still exist but are only for
 one-off layout transitions; they block, so do not use them for uploads.
 
-**Other files.** `Main.odin` owns the `globals` struct and the frame loop. `External.odin` is the
-external API above; it is the one component the user chose to give its own file. `Files.odin` handles
-scene/model/texture serialisation (assimp). `Shaders.odin` compiles `.slang` sources at runtime through the `slang/`
+**Host boundary.** Valhalla calls back into the application through `Callbacks`, passed in
+`InitGraphicsInfo`: `frame` (window refresh, framebuffer resize and the platform modal-loop timer,
+which is why `Graphics_*.odin` need it), `input` (every `InputEvent`, after imgui has seen it) and
+`ui` (called between `imgui.NewFrame` and `EndFrame`). `handleInput` is public so the external API
+can inject events down the same path as GLFW. `InitGraphicsInfo.configPath` is where the pipeline
+cache and `imgui.ini` go. `initGraphics` fills a caller-owned `GraphicsData`, because the GLFW
+callbacks hold a pointer to it. Scene *types* (`Scene`, `Object`, `Model`, `Camera`, ...) stay in
+Valhalla because the renderer consumes them; operating on them does not.
+
+**Other Valhalla files.** `Shaders.odin` compiles `.slang` sources at runtime through the `slang/`
 bindings, which wrap Slang's COM-lite interfaces as plain Odin procs (`slang.load_module`,
-`slang.release`, ...) — there is no C shim and no vtable calls at the call site;
-`IO.odin` hot-reloads them through `updatePipelineShaders`, which dirties only the affected pass.
-`UI.odin` is the imgui editor. `Debug.odin` has the log wrappers and the Vulkan debug-utils
-helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived objects in
-`nameCoreObjects`.
+`slang.release`, ...) — there is no C shim and no vtable calls at the call site; the caller hands the
+bytes to `initGraphics` or `updatePipelineShaders`, which dirties only the affected pass.
+`IO.odin` holds the input event types and the GLFW callbacks. `Debug.odin` has the log wrappers and
+the Vulkan debug-utils helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived
+objects in `nameCoreObjects`.
+
+**Demo files.** `Main.odin` owns `globals` and the frame loop. `External.odin` is the external API
+above; it is the one component the user chose to give its own file. `Files.odin` handles
+project/settings/scene/model/texture serialisation (assimp). `Scene.odin` creates and edits scenes,
+`Animation.odin` plays animations, `IO.odin` holds picking and the application's input handling,
+`UI.odin` is the imgui editor. `Types.odin` aliases Valhalla's names so demo code reads unqualified;
+add an alias there rather than qualifying at call sites.
 
 ## Odin notes
 
@@ -297,7 +317,7 @@ helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived o
 
 ## Conventions
 
-- A **project file** is the runtime argument (`./demo/demo.project`), not a directory. The app
+- The **project file** is `demo/demo.project` (`PROJECT_FILE` in `Main.odin`), not a directory. The app
   chdirs to the directory holding it, so every path inside the file stays relative to the file.
   `loadProject` reads it into `globals.project` before anything else runs.
 - `SCENE_PATH()`, `RESOURCE_PATH()`, `SHADERS_PATH()` and `ASSETS_PATH()` are **procedures now,
@@ -313,7 +333,7 @@ helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived o
 - Machine state lives in the project's `configPath` (`CONFIG_PATH()`), which is gitignored and
   created at startup if missing: `imgui.ini`, `pipeline_cache.bin` and `user.settings`. Nothing
   per-machine goes in the project directory itself.
-- `user.settings` (`UserSettings` in `Files.odin`: `RenderSettings`, window geometry, camera
+- `user.settings` (`UserSettings` in `demo/src/Files.odin`: `RenderSettings`, window geometry, camera
   speeds) is the **one sanctioned default**. When it is missing or from another format version,
   the engine uses `defaultUserSettings()`, because the engine writes that file itself — it is
   not authored project data. It is loaded after `loadProject` and saved at shutdown, so it too

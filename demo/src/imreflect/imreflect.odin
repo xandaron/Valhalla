@@ -8,7 +8,7 @@ import "core:strconv"
 import "core:strings"
 import "core:math/linalg"
 
-import imgui "../imgui"
+import imgui "../../../imgui"
 
 Draw_Flag :: enum {
 	Read_Only,

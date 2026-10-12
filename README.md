@@ -14,7 +14,8 @@ Valhalla is a 3D graphics rendering demo showcasing modern graphics techniques a
 
 ## Project Structure
 
-- `src/` &mdash; Core graphics engine implementation
+- `src/` &mdash; The Valhalla package: graphics, window management and input
+- `demo/src/` &mdash; The demo executable: project and scene files, editor UI, external API, frame loop
 - `demo/` &mdash; The project directory passed to the executable at runtime
   - `demo/shaders/` &mdash; Slang shaders, compiled at startup
   - `demo/assets/` &mdash; Models and textures
@@ -40,8 +41,8 @@ Clone the repository and build the demo program:
 ```sh
 git clone https://github.com/xandaron/valhalla.git
 cd valhalla
-odin build src -out:bin/valhalla.exe
-./bin/valhalla.exe ./demo/demo.project
+odin build demo/src -out:bin/demo.exe
+./bin/demo.exe
 ```
 
 The argument is the project directory, and the app runs with it as its working directory.
@@ -119,7 +120,7 @@ click) until it ends.
 
 ### 5. Shader loading and hot reload
 
-Shaders are compiled from ten hardcoded `compileShader` calls in `Main.odin`, and nothing calls
+Shaders are compiled from ten hardcoded `compileShader` calls in `demo/src/Main.odin`, and nothing calls
 `updatePipelineShaders` any more, although it still rebuilds any of the six pipelines and dirties
 only the affected pass. This undertaking covers a shader manifest that maps source, entry point
 and stage to each pipeline; reload driven by that manifest, which must leave a working pipeline
@@ -140,7 +141,7 @@ format has a single definition.
 
 ```sh
 ./tools/projectgen/projectgen.exe ./demo -name:demo -startup:./scenes/environment.scene
-./bin/valhalla.exe ./demo/demo.project
+./bin/demo.exe
 ```
 
 - [ ] A migrator that upgrades outdated project, scene, component and settings files. Until it

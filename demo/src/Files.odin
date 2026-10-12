@@ -1,10 +1,10 @@
-package Valhalla
+package Demo
 
 import "core:os"
 import "core:strings"
 
-import ai "../assimp"
-import refdisk "../ref-disk"
+import ai "assimp"
+import refdisk "ref-disk"
 
 SaveError :: enum {
 	None,
@@ -90,12 +90,6 @@ deleteProject :: proc(project: ^ProjectData) {
 USER_SETTINGS_FORMAT_VERSION :: u32(1)
 
 USER_SETTINGS_FILE :: "user.settings"
-
-WindowSettings :: struct {
-	placed:        bool,
-	x, y:          i32,
-	width, height: i32,
-}
 
 CameraSettings :: struct {
 	moveSpeed:        f32 `imrefl:"label=Move speed,min=0,speed=0.01"`,

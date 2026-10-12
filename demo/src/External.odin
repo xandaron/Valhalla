@@ -1,4 +1,4 @@
-package Valhalla
+package Demo
 
 import "core:encoding/json"
 import "core:fmt"

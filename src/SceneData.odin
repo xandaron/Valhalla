@@ -201,22 +201,12 @@ view :: #force_inline proc(camera: Camera) -> Mat4 {
 	return lookAt(camera.eye, camera.center, camera.up)
 }
 
-projection :: proc(camera: Camera) -> Mat4 {
+projection :: proc(camera: Camera, aspect: f32) -> Mat4 {
 	switch camera.mode {
 	case .PERSPECTIVE:
-		return perspective(
-			radians(camera.fov),
-			getRenderAspectRatio(&globals.graphicsData),
-			camera.near,
-			camera.far,
-		)
+		return perspective(radians(camera.fov), aspect, camera.near, camera.far)
 	case .ORTHOGRAPHIC:
-		return orthographic(
-			radians(camera.fov),
-			getRenderAspectRatio(&globals.graphicsData),
-			camera.near,
-			camera.far,
-		)
+		return orthographic(radians(camera.fov), aspect, camera.near, camera.far)
 	}
 	panic("Unreachable!")
 }

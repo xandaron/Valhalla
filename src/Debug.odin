@@ -29,7 +29,7 @@ logf :: proc(level: logging.Level, fmt_str: string, args: ..any, location := #ca
 }
 
 glfwErrorCallback :: proc "c" (code: i32, desc: cstring) {
-	context = globals.runtimeContext
+	context = runtimeContext
 	logf(.Error, "GLFW Error: Code %d, Description: %s", code, string(desc))
 }
 
@@ -39,7 +39,7 @@ vkDebugCallback :: proc "system" (
 	pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
 	pUserData: rawptr,
 ) -> b32 {
-	context = globals.runtimeContext
+	context = runtimeContext
 	logf(
 		vkDecodeSeverity(messageSeverity),
 		"[Vulkan - %s]:\n%s",

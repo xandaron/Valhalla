@@ -5,7 +5,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-import refdisk "../../ref-disk"
+import refdisk "../../src/ref-disk"
 import V "../../src"
 
 Options :: struct {

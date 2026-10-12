@@ -8,8 +8,8 @@ modalLoopTimerFired :: proc "c" (userData: rawptr, timer: ^NS.Timer) {
 	if !pollingEvents {
 		return
 	}
-	context = globals.runtimeContext
-	tickFrame()
+	context = runtimeContext
+	requestFrame()
 }
 
 @(private)

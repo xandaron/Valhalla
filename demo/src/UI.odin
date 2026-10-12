@@ -1,8 +1,8 @@
-package Valhalla
+package Demo
 
-import "../imgui"
-import ImRefl "../imreflect"
-import tinyfd "../tinyfiledialogs"
+import "../../imgui"
+import ImRefl "imreflect"
+import tinyfd "tinyfiledialogs"
 import "core:c"
 import "core:fmt"
 import "core:os"
@@ -269,7 +269,7 @@ openScene :: proc(graphicsData: ^GraphicsData, path: string) {
 	sceneIdx := len(globals.scenes) - 1
 	if err := loadScene(&globals.scenes[sceneIdx]); err != .None {
 		logf(.Error, "Failed to open scene \"%s\": %v", path, err)
-		deleteScene(&globals.scenes[sceneIdx])
+		deleteScene(&globals.graphicsData, &globals.scenes[sceneIdx])
 		unordered_remove(&globals.scenes, sceneIdx)
 		return
 	}
@@ -473,7 +473,7 @@ drawMainMenu :: proc(graphicsData: ^GraphicsData) {
 
 		if imgui.MenuItem("Close", enabled = len(globals.scenes) > 1) {
 			saveScene(scene)
-			deleteScene(scene)
+			deleteScene(&globals.graphicsData, scene)
 			unordered_remove(&globals.scenes, globals.activeScene)
 			switchScene(graphicsData, 0)
 			scene = &globals.scenes[0]
@@ -736,7 +736,7 @@ drawTranslateGizmo :: proc(graphicsData: ^GraphicsData, scene: ^Scene, selected:
 	}
 
 	camera := scene.cameras[scene.activeCamera]
-	viewProjection := projection(camera) * view(camera)
+	viewProjection := projection(camera, getRenderAspectRatio(&globals.graphicsData)) * view(camera)
 	project :: gizmoProject
 
 	origin := gizmo.active != .None ? gizmo.startWorld : world
@@ -882,7 +882,7 @@ drawRotateGizmo :: proc(
 	}
 
 	camera := scene.cameras[scene.activeCamera]
-	viewProjection := projection(camera) * view(camera)
+	viewProjection := projection(camera, getRenderAspectRatio(&globals.graphicsData)) * view(camera)
 	centre, visible := gizmoProject(graphicsData, viewProjection, world)
 	if !visible {
 		gizmo.active = .None

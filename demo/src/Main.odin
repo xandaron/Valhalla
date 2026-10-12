@@ -1,7 +1,7 @@
-package Valhalla
+package Demo
 
 import "base:runtime"
-import "core:log"
+import clog "core:log"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
@@ -27,7 +27,7 @@ mouseMode := false
 mousePos: Vec2 = {0, 0}
 mouseDelta: Vec3 = {0, 0, 0}
 
-globals: struct {
+Globals :: struct {
 	runtimeContext: runtime.Context,
 	projectDir:     string,
 	projectFile:    string,
@@ -47,19 +47,20 @@ globals: struct {
 	paused:         bool,
 }
 
-main :: proc() {
-	context.logger = log.create_console_logger()
-	defer log.destroy_console_logger(context.logger)
+globals: Globals
 
-	if len(os.args) < 2 {
-		logf(.Error, "Usage: %v <path_to_project_file> [scene] [-external[:port]]", os.args[0])
-		os.exit(1)
-	} else if !os.exists(os.args[1]) {
-		logf(.Error, "%v: project file not found!", os.args[1])
+PROJECT_FILE :: "demo/demo.project"
+
+main :: proc() {
+	context.logger = clog.create_console_logger()
+	defer clog.destroy_console_logger(context.logger)
+
+	if !os.exists(PROJECT_FILE) {
+		logf(.Error, "%v: project file not found! Run from the repository root.", PROJECT_FILE)
 		os.exit(1)
 	}
 
-	globals.projectFile, _ = filepath.abs(os.args[1], context.allocator)
+	globals.projectFile, _ = filepath.abs(PROJECT_FILE, context.allocator)
 	globals.projectDir = filepath.dir(globals.projectFile)
 
 	os.set_working_directory(globals.projectDir)
@@ -67,7 +68,7 @@ main :: proc() {
 	projectErr: LoadError
 	startupSceneOverride := ""
 	externalPort := -1
-	for arg in os.args[2:] {
+	for arg in os.args[1:] {
 		if strings.has_prefix(arg, "-external") {
 			externalPort = EXTERNAL_DEFAULT_PORT
 			if _, _, value := strings.partition(arg, ":"); value != "" {
@@ -159,22 +160,29 @@ main :: proc() {
 	defer delete(imguiVert)
 	defer delete(imguiFrag)
 
-	globals.graphicsData, err = initGraphics(
-	InitGraphicsInfo {
-		appVersion        = APP_VERSION,
-		windowTitle       = APP_NAME,
-		window            = globals.settings.window,
-		settings          = globals.settings.render,
-		gradeForOutput    = !settingsLoaded,
-		focusOnShow       = externalPort < 0,
-		transformShader   = transformComp,
-		lightShaders      = {lightVert, lightFrag},
-		sceneShaders      = {sceneVert, sceneFrag},
-		gizmoShaders      = {gizmoVert, gizmoFrag},
-		postProcessShader = postProcessComp,
-		imguiShaders      = {imguiVert, imguiFrag},
-	},
+	err = initGraphics(
+		&globals.graphicsData,
+		InitGraphicsInfo {
+			appVersion = APP_VERSION,
+			windowTitle = APP_NAME,
+			window = globals.settings.window,
+			settings = globals.settings.render,
+			gradeForOutput = !settingsLoaded,
+			focusOnShow = externalPort < 0,
+			configPath = CONFIG_PATH(),
+			callbacks = {frame = frameCallback, input = onInput, ui = drawImgui},
+			transformShader = transformComp,
+			lightShaders = {lightVert, lightFrag},
+			sceneShaders = {sceneVert, sceneFrag},
+			gizmoShaders = {gizmoVert, gizmoFrag},
+			postProcessShader = postProcessComp,
+			imguiShaders = {imguiVert, imguiFrag},
+		},
 	)
+	if err != nil {
+		logf(.Error, "Failed to initialise graphics: %v", err)
+		os.exit(1)
+	}
 	defer cleanupGraphics(&globals.graphicsData)
 	defer {
 		globals.settings.render = globals.graphicsData.settings
@@ -196,7 +204,7 @@ main :: proc() {
 	assert(loadScene(&globals.scenes[0]) == nil)
 	defer {
 		for &scene in globals.scenes {
-			deleteScene(&scene)
+			deleteScene(&globals.graphicsData, &scene)
 		}
 		delete(globals.scenes)
 	}
@@ -216,6 +224,10 @@ main :: proc() {
 
 @(private = "file")
 ticking := false
+
+frameCallback :: proc() {
+	tickFrame()
+}
 
 tickFrame :: proc() -> bool {
 	if ticking {
@@ -306,7 +318,7 @@ update :: proc(delta: f32) {
 		&globals.graphicsData,
 		scene,
 		view(scene.cameras[scene.activeCamera]),
-		projection(scene.cameras[scene.activeCamera]),
+		projection(scene.cameras[scene.activeCamera], getRenderAspectRatio(&globals.graphicsData)),
 		delta,
 	)
 }
@@ -323,4 +335,3 @@ calcFrameRate :: proc() {
 		fpsTimer = time.now()
 	}
 }
-

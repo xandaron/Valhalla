@@ -10,7 +10,7 @@ import "core:strings"
 
 import stbi "vendor:stb/image"
 
-import refdisk "../../ref-disk"
+import refdisk "../../src/ref-disk"
 import V "../../src"
 
 // ===[ Options ]==============================================================

@@ -57,6 +57,12 @@ MAX_FRAMES_IN_FLIGHT: u32 : 2
 
 RENDER_SIZE: [2]u32 : {1920, 1080}
 
+WindowSettings :: struct {
+	placed:        bool,
+	x, y:          i32,
+	width, height: i32,
+}
+
 RenderSettings :: struct {
 	contrast:         f32        `imrefl:"label=Contrast,speed=0.01"`,
 	brightness:       f32        `imrefl:"label=Brightness,speed=0.01"`,
@@ -289,10 +295,6 @@ HeapIndices :: struct {
 	anisotropicSampler: u32,
 }
 
-ShaderVec2 :: struct #align (8) {
-	x, y: f32,
-}
-
 Transform_PushConstants :: struct {
 	resources:       HeapIndices,
 	instance:        u32,
@@ -346,8 +348,8 @@ PostProcess_PushConstants :: struct {
 @(private = "file")
 Imgui_PushConstants :: struct {
 	resources: HeapIndices,
-	scale:     ShaderVec2,
-	translate: ShaderVec2,
+	scale:     Vec2,
+	translate: Vec2,
 	texture:   u32,
 	rangeMin:  f32,
 	rangeMax:  f32,
@@ -578,6 +580,8 @@ InitGraphicsInfo :: struct {
 	settings:          RenderSettings,
 	gradeForOutput:    bool,
 	focusOnShow:       bool,
+	configPath:        string,
+	callbacks:         Callbacks,
 
 	// Shaders
 	transformShader:   []byte,
@@ -591,18 +595,23 @@ InitGraphicsInfo :: struct {
 // ===[ Lifecycle ]============================================================
 
 @(require_results)
-initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData, err: Error) {
+initGraphics :: proc(graphicsData: ^GraphicsData, initInfo: InitGraphicsInfo) -> Error {
 	initInfo := initInfo
 	using graphicsData
 
+	runtimeContext = context
+	activeGraphics = graphicsData
+	callbacks = initInfo.callbacks
+	configPath = strings.clone(initInfo.configPath)
+
 	if !glfw.Init() {
 		log(.Fatal, "Failed to initialize GLFW!")
-		return graphicsData, .GLFWError
+		return .GLFWError
 	}
 
 	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
 
-	createInstance(&graphicsData, initInfo.appVersion) or_return
+	createInstance(graphicsData, initInfo.appVersion) or_return
 
 	if res := vk.CreateDebugUtilsMessengerEXT(
 		instance,
@@ -613,9 +622,9 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 		logf(.Error, "Failed to create vulkan debug callback! vkResult: %v", res)
 	}
 
-	initWindow(&graphicsData, initInfo.windowTitle, initInfo.window, initInfo.focusOnShow) or_return
-	pickPhysicalDevice(&graphicsData) or_return
-	createLogicalDevice(&graphicsData) or_return
+	initWindow(graphicsData, initInfo.windowTitle, initInfo.window, initInfo.focusOnShow) or_return
+	pickPhysicalDevice(graphicsData) or_return
+	createLogicalDevice(graphicsData) or_return
 
 	memoryAllocatorInit(
 		&graphicsData.memoryAllocator,
@@ -625,82 +634,82 @@ initGraphics :: proc(initInfo: InitGraphicsInfo) -> (graphicsData: GraphicsData,
 	)
 
 	graphicsData.settings = initInfo.settings
-	createSwapchain(&graphicsData)
+	createSwapchain(graphicsData)
 	if !graphicsData.hdrSupported {
 		log(.Info, "Surface offers no HDR10 format; HDR is unavailable.")
 	} else {
 		logf(.Info, "HDR10 available, currently %v.", "on" if graphicsData.swapchain.hdr else "off")
 	}
-	createCommandBuffers(&graphicsData) or_return
-	stagingInit(&graphicsData) or_return
-	createDescriptorHeaps(&graphicsData) or_return
+	createCommandBuffers(graphicsData) or_return
+	stagingInit(graphicsData) or_return
+	createDescriptorHeaps(graphicsData) or_return
 
 	bufferSize := size_of(UniformBuffer)
 	for index in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		if err := createBuffer(
-			&graphicsData,
+			graphicsData,
 			bufferSize,
 			{.STORAGE_BUFFER},
 			{.HOST_VISIBLE, .HOST_COHERENT},
 			&uniformBuffers[index],
 		); err != nil {
 			log(.Fatal, "Failed to create uniform buffer!")
-			return graphicsData, err
+			return err
 		}
 	}
 
 	depthFormat = findSupportedDepthFormat(
-		&graphicsData,
+		graphicsData,
 		{.D16_UNORM, .D32_SFLOAT, .D32_SFLOAT_S8_UINT, .D24_UNORM_S8_UINT},
 		.OPTIMAL,
 		{.DEPTH_STENCIL_ATTACHMENT},
 	)
 	if depthFormat == .UNDEFINED {
 		log(.Fatal, "Failed to find a supported depth format!")
-		return graphicsData, .DepthFormatError
+		return .DepthFormatError
 	}
 
-	createSyncObjects(&graphicsData) or_return
-	createSamplers(&graphicsData) or_return
+	createSyncObjects(graphicsData) or_return
+	createSamplers(graphicsData) or_return
 
-	createPipelineCache(&graphicsData)
+	createPipelineCache(graphicsData)
 
-	createTransformPipeline(&graphicsData, initInfo.transformShader)
+	createTransformPipeline(graphicsData, initInfo.transformShader)
 
 	pipelines[.Light].images = make([]Image, 2)
 	pipelines[.Light].images[0].format = .R16G16B16A16_SFLOAT
 	pipelines[.Light].images[1].format = depthFormat
-	createLightPipeline(&graphicsData, initInfo.lightShaders[:])
+	createLightPipeline(graphicsData, initInfo.lightShaders[:])
 
 	pipelines[.Scene].images = make([]Image, 2)
 	pipelines[.Scene].images[0].format = .R16G16B16A16_SFLOAT
 	pipelines[.Scene].images[1].format = depthFormat
-	createScenePipelineImages(&graphicsData)
-	createScenePipeline(&graphicsData, initInfo.sceneShaders[:])
-	createGizmoPipeline(&graphicsData, initInfo.gizmoShaders[:])
+	createScenePipelineImages(graphicsData)
+	createScenePipeline(graphicsData, initInfo.sceneShaders[:])
+	createGizmoPipeline(graphicsData, initInfo.gizmoShaders[:])
 
-	outputCapacity = initialOutputCapacity(&graphicsData)
+	outputCapacity = initialOutputCapacity(graphicsData)
 
 	pipelines[.PostProcess].images = make([]Image, 2)
 	pipelines[.PostProcess].images[0].format = .R16G16B16A16_SFLOAT
 	pipelines[.PostProcess].images[1].format = .R16G16B16A16_SFLOAT
-	createPostProcessPipelineImages(&graphicsData)
-	createPostProcessPipeline(&graphicsData, initInfo.postProcessShader)
+	createPostProcessPipelineImages(graphicsData)
+	createPostProcessPipeline(graphicsData, initInfo.postProcessShader)
 
 	pipelines[.Imgui].images = make([]Image, 1)
 	pipelines[.Imgui].images[0].format = .R16G16B16A16_SFLOAT
-	createImguiPipelineImages(&graphicsData)
-	createImguiPipeline(&graphicsData, initInfo.imguiShaders[:])
-	initImgui(&graphicsData)
+	createImguiPipelineImages(graphicsData)
+	createImguiPipeline(graphicsData, initInfo.imguiShaders[:])
+	initImgui(graphicsData)
 
-	nameCoreObjects(&graphicsData)
+	nameCoreObjects(graphicsData)
 
 	currentFrame = 0
 	if initInfo.gradeForOutput {
-		applyHDRGrading(&graphicsData)
+		applyHDRGrading(graphicsData)
 	}
 
-	return graphicsData, nil
+	return nil
 }
 
 cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
@@ -799,6 +808,8 @@ cleanupGraphics :: proc(using graphicsData: ^GraphicsData) {
 
 	glfw.DestroyWindow(window)
 	glfw.Terminate()
+
+	delete(configPath)
 }
 
 @(require_results)
@@ -4155,7 +4166,7 @@ Pipeline :: struct {
 
 @(private = "file")
 PIPELINE_CACHE_PATH :: proc() -> string {
-	return projectPath(CONFIG_PATH(), "pipeline_cache.bin")
+	return strings.concatenate({configPath, "pipeline_cache.bin"}, context.temp_allocator)
 }
 
 @(private = "file")
@@ -7131,7 +7142,9 @@ drawFrame :: proc(using graphicsData: ^GraphicsData) -> (err: DrawError) {
 
 	imguiPlatformNewFrame(graphicsData)
 	imgui.NewFrame()
-	drawImgui(graphicsData)
+	if callbacks.ui != nil {
+		callbacks.ui(graphicsData)
+	}
 	imgui.EndFrame()
 
 	stagedBefore := staging.submitted
@@ -7989,7 +8002,7 @@ saveDebugDump :: proc(using graphicsData: ^GraphicsData) {
 
 @(private = "file")
 imguiAlloc :: proc "c" (size: c.size_t, user_data: rawptr) -> rawptr {
-	context = globals.runtimeContext
+	context = runtimeContext
 	ptr, err := mem.alloc(int(size), allocator = (^mem.Allocator)(user_data)^)
 	if err != nil do return nil
 	return ptr
@@ -7997,13 +8010,13 @@ imguiAlloc :: proc "c" (size: c.size_t, user_data: rawptr) -> rawptr {
 
 @(private = "file")
 imguiFree :: proc "c" (ptr: rawptr, user_data: rawptr) {
-	context = globals.runtimeContext
+	context = runtimeContext
 	mem.free(ptr, allocator = (^mem.Allocator)(user_data)^)
 }
 
 @(private = "file")
 initImgui :: proc(using graphicsData: ^GraphicsData) {
-	imgui.SetAllocatorFunctions(imguiAlloc, imguiFree, &globals.runtimeContext.allocator)
+	imgui.SetAllocatorFunctions(imguiAlloc, imguiFree, &runtimeContext.allocator)
 
 	if !imgui.CHECKVERSION() {
 		log(.Fatal, "Wrong imgui version!")
@@ -8014,7 +8027,7 @@ initImgui :: proc(using graphicsData: ^GraphicsData) {
 	imgui.GetStyle().Colors[imgui.GuiCol.PopupBg].w = 1
 	imgui.GetStyle().Colors[imgui.GuiCol.WindowBg].w = 1
 
-	imguiPlatform.iniPath = strings.clone_to_cstring(projectPath(CONFIG_PATH(), "imgui.ini"))
+	imguiPlatform.iniPath = strings.clone_to_cstring(strings.concatenate({configPath, "imgui.ini"}, context.temp_allocator))
 	imgui.GetIO().IniFilename = imguiPlatform.iniPath
 	imgui.GetIO().ConfigFlags += {.DockingEnable}
 
@@ -8149,12 +8162,10 @@ imguiPlatformUpdateCursor :: proc(using graphicsData: ^GraphicsData) {
 	}
 }
 
-@(private)
 imguiWantsMouse :: proc(using graphicsData: ^GraphicsData) -> bool {
 	return imguiContext != nil && imgui.GetIO().WantCaptureMouse
 }
 
-@(private)
 imguiWantsKeyboard :: proc(using graphicsData: ^GraphicsData) -> bool {
 	return imguiContext != nil && imgui.GetIO().WantCaptureKeyboard
 }

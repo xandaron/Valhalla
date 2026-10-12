@@ -23,8 +23,8 @@ modalLoopWindowProc :: proc "system" (
 		win32.KillTimer(hwnd, MODAL_LOOP_TIMER)
 	case win32.WM_TIMER:
 		if wparam == MODAL_LOOP_TIMER {
-			context = globals.runtimeContext
-			tickFrame()
+			context = runtimeContext
+			requestFrame()
 			return 0
 		}
 	}
