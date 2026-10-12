@@ -288,8 +288,25 @@ which is why `Graphics_*.odin` need it), `input` (every `InputEvent`, after imgu
 `ui` (called between `imgui.NewFrame` and `EndFrame`). `handleInput` is public so the external API
 can inject events down the same path as GLFW. `InitGraphicsInfo.configPath` is where the pipeline
 cache and `imgui.ini` go. `initGraphics` fills a caller-owned `GraphicsData`, because the GLFW
-callbacks hold a pointer to it. Scene *types* (`Scene`, `Object`, `Model`, `Camera`, ...) stay in
-Valhalla because the renderer consumes them; operating on them does not.
+callbacks hold a pointer to it.
+
+**Scene types.** `Scene`, `Model`, `Texture`, `Object` and `PointLight` are parametric: each takes a
+`$Base` struct that it embeds as `using _: Base`, and `Scene` also takes the element types, which
+must be specialisations of Valhalla's (`type_is_specialization_of`). Valhalla's half holds only what
+the renderer reads — transforms, meshes, skeletons, instances, texture indices, light colour and
+power, buffers. Names, paths, flags, the model catalogue and cameras are application data and live
+in the demo. `demo/src/Scene.odin` defines each concrete type with its base written inline —
+`Scene :: Valhalla.Scene(struct {...}, Model, Texture, Object, PointLight)` — so go-to-definition
+lands on the fields; there are no named base structs and `Types.odin` does not alias these types. Keep a base's fields in their old order at the front: refdisk is
+positional, so `PointLight` and `Camera` still serialise byte-for-byte as before.
+
+Valhalla frees only its own half. The demo's `deleteScene`, `deleteModel` and `deleteTexture` free
+the base fields and then call Valhalla's, which is why `Types.odin` does not alias those three.
+
+The renderer knows nothing about cameras: `updateSceneData` takes a view-projection matrix and the
+eye position, which the light gizmo billboards need. `Camera.odin` holds `Camera($Base)` with
+`view`, `projection` and `viewProjection`, a convenience implementation that no rendering code
+depends on; the user chose to give it its own file.
 
 **Other Valhalla files.** `Shaders.odin` compiles `.slang` sources at runtime through the `slang/`
 bindings, which wrap Slang's COM-lite interfaces as plain Odin procs (`slang.load_module`,
@@ -309,6 +326,9 @@ add an alias there rather than qualifying at call sites.
 ## Odin notes
 
 - `#+feature using-stmt` is per-file and must be the first line of any file using `using`.
+  A parametric procedure is checked where it is instantiated, against the *instantiating* file's
+  features, so a generic proc in `Graphics.odin` cannot take `using graphicsData` — the demo files
+  that instantiate it do not enable the feature. Those procs qualify `graphicsData.` explicitly.
 - `@(private = "file")` is the default for anything not needed outside its file. Because the
   renderer is one file, most of it is file-private; keep it that way.
 - Vulkan bindings are `vendor:vulkan`, which already loads function pointers via

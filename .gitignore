@@ -12,7 +12,7 @@ config/*
 
 // Generated Files
 demo/components/*
-demo/assets/* this needs to be unlocked and the generated stuff needs to move into a subdir so i can do the demo with proper assets
+demo/assets/*
 
 // Misc
 docs/

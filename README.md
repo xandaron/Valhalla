@@ -140,7 +140,7 @@ project is `tools/projectgen`'s job. Both the engine and the tools share `Projec
 format has a single definition.
 
 ```sh
-./tools/projectgen/projectgen.exe ./demo -name:demo -startup:./scenes/environment.scene
+./tools/projectgen/projectgen.exe ./demo -name:demo -startup:./scenes/creature.scene
 ./bin/demo.exe
 ```
 

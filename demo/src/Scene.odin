@@ -1,6 +1,89 @@
 package Demo
 
 import "core:strings"
+import "core:fmt"
+
+import Valhalla "../../src"
+
+Model :: Valhalla.Model(struct {
+	path:      string `imrefl:"ignore"`,
+	assetPath: string `imrefl:"ignore"`,
+	name:      string `imrefl:"ignore"`,
+})
+
+Texture :: Valhalla.Texture(struct {
+	path:      string `imrefl:"ignore"`,
+	assetPath: string `imrefl:"ignore"`,
+	name:      string `imrefl:"ignore"`,
+})
+
+ObjectFlag :: enum u64 {
+	Selectable = 0,
+}
+ObjectFlags :: bit_set[ObjectFlag;u64]
+
+Object :: Valhalla.Object(struct {
+	name:  string `imrefl:"ignore"`,
+	flags: ObjectFlags,
+})
+
+PointLight :: Valhalla.PointLight(struct {
+	name: string `imrefl:"ignore"`,
+})
+
+CameraMode :: Valhalla.CameraMode
+Camera :: Valhalla.Camera(struct {
+	name: string `imrefl:"label=Name"`,
+})
+
+Scene :: Valhalla.Scene(struct {
+	path:           string,
+	name:           string,
+	cameras:        [dynamic]Camera,
+	activeCamera:   u32,
+	modelCatalogue: map[string]u32 `imrefl:"ignore"`,
+}, Model, Texture, Object, PointLight)
+
+deleteScene :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
+	delete(scene.name)
+	delete(scene.path)
+	delete(scene.modelCatalogue)
+
+	for &camera in scene.cameras {
+		delete(camera.name)
+	}
+	delete(scene.cameras)
+
+	for &model in scene.models {
+		delete(model.name)
+		delete(model.path)
+		delete(model.assetPath)
+	}
+	for &texture in scene.textures {
+		deleteTexture(&texture)
+	}
+	for &object in scene.objects {
+		delete(object.name)
+	}
+	for &light in scene.lights {
+		delete(light.name)
+	}
+
+	Valhalla.deleteScene(graphicsData, scene)
+}
+
+deleteModel :: proc(model: ^Model) {
+	delete(model.name)
+	delete(model.path)
+	delete(model.assetPath)
+	Valhalla.deleteModel(model)
+}
+
+deleteTexture :: proc(texture: ^Texture) {
+	delete(texture.name)
+	delete(texture.path)
+	delete(texture.assetPath)
+}
 
 newScene :: proc(name, path: string) -> bool {
 	graphicsData := &globals.graphicsData
@@ -37,6 +120,7 @@ newScene :: proc(name, path: string) -> bool {
 		logf(.Error, "Failed to load the cube model: %v", err)
 		return false
 	}
+	catalogueModel(&scene, 0)
 
 	texturePaths := [?]string {
 		globals.project.defaultAlbedo,
@@ -119,6 +203,28 @@ newScene :: proc(name, path: string) -> bool {
 	created = true
 	return true
 }
+
+catalogueModel :: proc(scene: ^Scene, modelIdx: u32) {
+	model := &scene.models[modelIdx]
+	if existing, found := scene.modelCatalogue[model.name]; found {
+		logf(
+			.Warning,
+			"Model \"%s\" (%s) shares its name with model %v; only the first is in the catalogue.",
+			model.name,
+			model.path,
+			existing,
+		)
+		return
+	}
+	scene.modelCatalogue[model.name] = modelIdx
+}
+
+getModel :: proc(scene: ^Scene, name: string, loc := #caller_location) -> ^Model {
+	modelIdx, found := scene.modelCatalogue[name]
+	assert(found, fmt.tprintf("Model: \"%s\" not found!", name), loc)
+	return &scene.models[modelIdx]
+}
+
 changeModelAsset :: proc(scene: ^Scene, modelIdx: u32, assetPath: string) -> LoadError {
 	vertexStart := len(scene.vertices)
 	indexStart := len(scene.indices)

@@ -18,8 +18,6 @@ TextureIndex :: Valhalla.TextureIndex
 Bone :: Valhalla.Bone
 Bindpoint :: Valhalla.Bindpoint
 Mesh :: Valhalla.Mesh
-Model :: Valhalla.Model
-Texture :: Valhalla.Texture
 
 Animation :: Valhalla.Animation
 AnimationNode :: Valhalla.AnimationNode
@@ -31,14 +29,8 @@ ObjectAnimationEnd :: Valhalla.ObjectAnimationEnd
 AnimationBehavior :: Valhalla.AnimationBehavior
 AnimationTransition :: Valhalla.AnimationTransition
 
-Scene :: Valhalla.Scene
-Object :: Valhalla.Object
-ObjectFlag :: Valhalla.ObjectFlag
-ObjectFlags :: Valhalla.ObjectFlags
 Attachment :: Valhalla.Attachment
-Camera :: Valhalla.Camera
 CameraMode :: Valhalla.CameraMode
-PointLight :: Valhalla.PointLight
 
 RenderSettings :: Valhalla.RenderSettings
 InputEvent :: Valhalla.InputEvent
@@ -47,7 +39,6 @@ GraphicsData :: Valhalla.GraphicsData
 PI :: Valhalla.PI
 cos :: Valhalla.cos
 cross :: Valhalla.cross
-deleteScene :: Valhalla.deleteScene
 dot :: Valhalla.dot
 getRenderAspectRatio :: Valhalla.getRenderAspectRatio
 imguiWantsKeyboard :: Valhalla.imguiWantsKeyboard
@@ -61,6 +52,7 @@ renderNDCToCursor :: Valhalla.renderNDCToCursor
 sin :: Valhalla.sin
 updateSceneData :: Valhalla.updateSceneData
 view :: Valhalla.view
+viewProjection :: Valhalla.viewProjection
 CursorEnterEvent :: Valhalla.CursorEnterEvent
 KeyEvent :: Valhalla.KeyEvent
 handleInput :: Valhalla.handleInput
@@ -99,7 +91,6 @@ atan2 :: Valhalla.atan2
 cursorToRenderNDC :: Valhalla.cursorToRenderNDC
 debugImageInfo :: Valhalla.debugImageInfo
 defaultRenderSettings :: Valhalla.defaultRenderSettings
-deleteModel :: Valhalla.deleteModel
 floor :: Valhalla.floor
 inverse :: Valhalla.inverse
 objectParentTransform :: Valhalla.objectParentTransform
@@ -119,7 +110,6 @@ slerp :: Valhalla.slerp
 texturePreview :: Valhalla.texturePreview
 addImages :: Valhalla.addImages
 debugPreview :: Valhalla.debugPreview
-deleteTexture :: Valhalla.deleteTexture
 hdrEnabled :: Valhalla.hdrEnabled
 setHDREnabled :: Valhalla.setHDREnabled
 DEBUG_IMAGE_NAMES := Valhalla.DEBUG_IMAGE_NAMES

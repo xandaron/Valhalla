@@ -24,6 +24,7 @@ Options :: struct {
 	bench:         bool,
 	environment:   bool,
 	stress:        bool,
+	creature:      bool,
 	textureSize:   int,
 	flipNormalY:   bool,
 	stressLights:  int,
@@ -36,6 +37,7 @@ DEFAULT_OPTIONS :: Options {
 	bench         = true,
 	environment   = true,
 	stress        = true,
+	creature      = true,
 	textureSize   = 512,
 	flipNormalY   = false,
 	stressLights  = 32,
@@ -45,7 +47,7 @@ DEFAULT_OPTIONS :: Options {
 usage :: proc() {
 	fmt.println("scenegen [project directory] [options]")
 	fmt.println("  project directory   defaults to ./demo, same argument the engine takes")
-	fmt.println("  -scene:<which>      bench, environment, stress or all (default all)")
+	fmt.println("  -scene:<which>      bench, environment, stress, creature or all (default all)")
 	fmt.println("  -size:<pixels>      texture edge length, power of two (default 512)")
 	fmt.println("  -flip-normal-y      write normal maps with the green channel inverted")
 	fmt.println("  -lights:<count>     stress scene light count (default 32)")
@@ -85,8 +87,9 @@ parseOptions :: proc() -> (opts: Options, ok: bool) {
 			opts.bench = which == "bench" || which == "all"
 			opts.environment = which == "environment" || which == "all"
 			opts.stress = which == "stress" || which == "all"
-			if !(opts.bench || opts.environment || opts.stress) {
-				fmt.eprintfln("Unknown scene %q, expected bench, environment, stress or all.", arg)
+			opts.creature = which == "creature" || which == "all"
+			if !(opts.bench || opts.environment || opts.stress || opts.creature) {
+				fmt.eprintfln("Unknown scene %q, expected bench, environment, stress, creature or all.", arg)
 				return opts, false
 			}
 		case strings.has_prefix(arg, "-size:"):
@@ -630,6 +633,33 @@ makeSphere :: proc(rings, segments: int, radius, uvTiles: f32) -> Mesh {
 				math.sin(phi) * math.sin(theta),
 			}
 			addVertex(&mesh, normal * radius, normal, {u * uvTiles, v * uvTiles})
+		}
+	}
+	for ring in 0 ..< u32(rings) {
+		for segment in 0 ..< u32(segments) {
+			i00 := ring * stride + segment
+			addQuad(&mesh, i00, i00 + 1, i00 + stride + 1, i00 + stride)
+		}
+	}
+	return mesh
+}
+
+makeEllipsoid :: proc(rings, segments: int, radii: V.Vec3, uvTiles: f32) -> Mesh {
+	mesh: Mesh
+	stride := u32(segments + 1)
+	for ring in 0 ..= rings {
+		v := f32(ring) / f32(rings)
+		phi := v * math.PI
+		for segment in 0 ..= segments {
+			u := f32(segment) / f32(segments)
+			theta := u * 2 * math.PI
+			direction := V.Vec3 {
+				math.sin(phi) * math.cos(theta),
+				math.cos(phi),
+				math.sin(phi) * math.sin(theta),
+			}
+			normal := linalg.normalize(direction / radii)
+			addVertex(&mesh, direction * radii, normal, {u * uvTiles, v * uvTiles})
 		}
 	}
 	for ring in 0 ..< u32(rings) {
@@ -1223,6 +1253,19 @@ modelExtension :: proc(model: Model) -> string {
 	return MODEL_ASSETS[model].rigged ? "gltf" : "obj"
 }
 
+CreaturePart :: enum u32 {
+	Body = 0,
+	Limb,
+}
+
+CREATURE_PART_ASSETS := [CreaturePart]struct {
+	name: string,
+	file: string,
+} {
+	.Body = {"Body", "creature_body"},
+	.Limb = {"Limb", "creature_limb"},
+}
+
 StressModel :: enum u32 {
 	DenseSphere = 0,
 	TiledPlane,
@@ -1340,6 +1383,35 @@ generateMeshes :: proc(opts: Options) -> bool {
 	defer riggedMeshDelete(&rig)
 	if !writeGLTF(dir, MODEL_ASSETS[.Rig].file, MODEL_ASSETS[.Rig].name, &rig) {
 		return false
+	}
+	return true
+}
+
+generateCreatureParts :: proc(opts: Options) -> bool {
+	dir := fmt.tprintf("%s/%s", opts.projectDir, opts.generatedRel)
+
+	meshes := [CreaturePart]Mesh {
+		.Body = makeSphere(32, 64, 0.5, 1),
+		.Limb = makeEllipsoid(32, 64, {0.3, 0.5, 0.3}, 1),
+	}
+	for part in CreaturePart {
+		mesh := meshes[part]
+		defer meshDelete(&mesh)
+		entry := CREATURE_PART_ASSETS[part]
+		path := fmt.tprintf("%s%s.obj", dir, entry.file)
+		if !writeOBJ(path, entry.name, &mesh) {
+			return false
+		}
+		fmt.printfln("  %s  (%v vertices, %v triangles)", path, len(mesh.positions), len(mesh.indices) / 3)
+		if !writeModelDescriptor(
+			Asset {
+				name = entry.name,
+				descriptorPath = fmt.tprintf("%s/%s%s.model", opts.projectDir, opts.componentsRel, entry.file),
+				assetPath = fmt.tprintf("%s%s.obj", opts.generatedRel, entry.file),
+			},
+		) {
+			return false
+		}
 	}
 	return true
 }
@@ -1626,6 +1698,32 @@ buildEnvironmentScene :: proc(opts: Options) -> bool {
 	return saveSceneFile(opts, "environment", "Courtyard", 0.12, &builder)
 }
 
+buildCreatureScene :: proc(opts: Options) -> bool {
+	builder: Builder
+	for part in CreaturePart {
+		append(&builder.models, fmt.tprintf("%s%s.model", opts.componentsRel, CREATURE_PART_ASSETS[part].file))
+	}
+	ground := u32(len(builder.models))
+	append(&builder.models, fmt.tprintf("%s%s.model", opts.componentsRel, MODEL_ASSETS[.Plane].file))
+
+	textures := [?]Tex{.Checker, .FlatNormal, .PlasterAlbedo, .PlasterNormal}
+	for tex in textures {
+		append(&builder.textures, fmt.tprintf("%s%s.texture", opts.componentsRel, TEXTURE_ASSETS[tex].file))
+	}
+	CHECKER :: 0
+	FLAT_NORMAL :: 1
+
+	addObject(&builder, "Ground", ground, {0, 0, 0}, {1, 1, 1}, CHECKER, FLAT_NORMAL)
+
+	addLight(&builder, "Key", {-3, 4, -3}, {1.0, 0.92, 0.82}, 1800)
+	addLight(&builder, "Fill", {3, 3, -2}, {0.75, 0.85, 1.0}, 900)
+	addLight(&builder, "Rim", {0, 3.5, 3}, {1, 1, 1}, 700)
+
+	addCamera(&builder, "Builder", {0, 2.2, -5}, {0, 1, 0})
+
+	return saveSceneFile(opts, "creature", "Creature Builder", 0.08, &builder)
+}
+
 generateStressAssets :: proc(opts: Options) -> bool {
 	dir := fmt.tprintf("%s/%s", opts.projectDir, opts.generatedRel)
 
@@ -1883,6 +1981,9 @@ main :: proc() {
 	fmt.printfln("Meshes:")
 	if !generateMeshes(opts) do os.exit(1)
 
+	fmt.printfln("Creature parts:")
+	if !generateCreatureParts(opts) do os.exit(1)
+
 	fmt.printfln("Textures (%vx%v):", opts.textureSize, opts.textureSize)
 	if !generateTextures(opts) do os.exit(1)
 
@@ -1898,6 +1999,7 @@ main :: proc() {
 	if opts.bench && !buildBenchScene(opts) do os.exit(1)
 	if opts.environment && !buildEnvironmentScene(opts) do os.exit(1)
 	if opts.stress && !buildStressScene(opts) do os.exit(1)
+	if opts.creature && !buildCreatureScene(opts) do os.exit(1)
 
 	free_all(context.temp_allocator)
 	fmt.println("Done.")

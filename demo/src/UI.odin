@@ -509,6 +509,8 @@ drawMainMenu :: proc(graphicsData: ^GraphicsData) {
 							logf(.Error, "Failed to load model: %v", err)
 							delete(scene.models[len(scene.models) - 1].path)
 							unordered_remove(&scene.models, len(scene.models) - 1)
+						} else {
+							catalogueModel(scene, u32(len(scene.models) - 1))
 						}
 					}
 				}
@@ -1429,6 +1431,9 @@ drawTexturesPanel :: proc(graphicsData: ^GraphicsData) {
 			path := strings.clone(asset, context.temp_allocator)
 			if err := changeTextureImage(graphicsData, scene, u32(textureIdx), path); err != nil {
 				logf(.Error, "Failed to load texture asset \"%s\": %v", path, err)
+			} else {
+				delete(texture.assetPath)
+				texture.assetPath = strings.clone(path)
 			}
 		}
 
@@ -1786,6 +1791,7 @@ drawPopups :: proc(graphicsData: ^GraphicsData) {
 				model.rotation = IQUAT
 				model.scale = {1, 1, 1}
 				loadModel(scene, model)
+				catalogueModel(scene, u32(len(scene.models) - 1))
 
 				saveModelComponent(model)
 				clearComponentData(createComponentInfo)

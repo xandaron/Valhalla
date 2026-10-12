@@ -405,7 +405,6 @@ LightData :: struct #align (16) {
 
 @(private = "file")
 UniformBuffer :: struct #align (16) {
-	projection:     Mat4,
 	viewProjection: Mat4,
 	cameraPosition: Vec3,
 	lightCount:     u32,
@@ -3353,12 +3352,12 @@ TEXTURE_SLOT_IS_LINEAR := [TextureIndex]bool {
 }
 
 @(require_results)
-loadImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: []string) -> Error {
+loadImages :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L), imagePaths: []string) -> Error {
 	return addImages(graphicsData, scene, imagePaths)
 }
 
 @(require_results)
-addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: []string) -> Error {
+addImages :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L), imagePaths: []string) -> Error {
 	buffers := &scene.buffers
 	if buffers.textures == nil {
 		buffers.textures = make([dynamic]Image)
@@ -3376,8 +3375,8 @@ addImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, imagePaths: 
 
 @(require_results)
 changeTextureImage :: proc(
-	using graphicsData: ^GraphicsData,
-	scene: ^Scene,
+	graphicsData: ^GraphicsData,
+	scene: ^Scene($SB, $M, $T, $O, $L),
 	textureIdx: u32,
 	path: string,
 ) -> Error {
@@ -3387,7 +3386,7 @@ changeTextureImage :: proc(
 		return err
 	}
 
-	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
+	if res := vk.DeviceWaitIdle(graphicsData.device); res != .SUCCESS {
 		logf(.Error, "Failed to wait for device idle! vkResult: %v", res)
 	}
 	old := &scene.buffers.textures[textureIdx]
@@ -3402,15 +3401,12 @@ changeTextureImage :: proc(
 		writeTextureDescriptor(graphicsData, u32(frame), old.linearHeapSlot, &old.linearViewInfo)
 	}
 
-	texture := &scene.textures[textureIdx]
-	delete(texture.assetPath)
-	texture.assetPath = strings.clone(path)
 	return nil
 }
 
 texturePreview :: proc(
 	graphicsData: ^GraphicsData,
-	scene: ^Scene,
+	scene: ^Scene($SB, $M, $T, $O, $L),
 	textureIdx: u32,
 ) -> (
 	id: imgui.TextureID,
@@ -3572,7 +3568,7 @@ loadTextureImage :: proc(using graphicsData: ^GraphicsData, path: string) -> (im
 // ===[ Descriptor Heaps ]=====================================================
 
 @(private = "file")
-updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
+updateDescriptorSets :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	buffers := &scene.buffers
 
 	textureBufferLen := 0
@@ -3593,7 +3589,7 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			graphicsData,
 			frame,
 			.Uniform,
-			uniformBuffers[frame].buffer,
+			graphicsData.uniformBuffers[frame].buffer,
 			size_of(UniformBuffer),
 			.STORAGE_BUFFER,
 		)
@@ -3661,7 +3657,7 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			graphicsData,
 			frame,
 			.ShadowMap,
-			&pipelines[.Light].images[0].viewInfo,
+			&graphicsData.pipelines[.Light].images[0].viewInfo,
 			.SHADER_READ_ONLY_OPTIMAL,
 			.SAMPLED_IMAGE,
 		)
@@ -3669,7 +3665,7 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			graphicsData,
 			frame,
 			.SceneDepth,
-			&pipelines[.Scene].images[1].viewInfo,
+			&graphicsData.pipelines[.Scene].images[1].viewInfo,
 			.SHADER_READ_ONLY_OPTIMAL,
 			.SAMPLED_IMAGE,
 		)
@@ -3677,7 +3673,7 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			graphicsData,
 			frame,
 			.RenderedImage,
-			&pipelines[.PostProcess].images[0].viewInfo,
+			&graphicsData.pipelines[.PostProcess].images[0].viewInfo,
 			.GENERAL,
 			.STORAGE_IMAGE,
 		)
@@ -3685,7 +3681,7 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			graphicsData,
 			frame,
 			.ProcessedImage,
-			&pipelines[.PostProcess].images[1].viewInfo,
+			&graphicsData.pipelines[.PostProcess].images[1].viewInfo,
 			.GENERAL,
 			.STORAGE_IMAGE,
 		)
@@ -3693,7 +3689,7 @@ updateDescriptorSets :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 			graphicsData,
 			frame,
 			.UiImage,
-			&pipelines[.Imgui].images[0].viewInfo,
+			&graphicsData.pipelines[.Imgui].images[0].viewInfo,
 			.GENERAL,
 			.STORAGE_IMAGE,
 		)
@@ -4285,13 +4281,13 @@ destroyShadowFaceViews :: proc(using graphicsData: ^GraphicsData) {
 	shadowDepthViews = nil
 }
 
-createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
+createLightPipelineImages :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	err: Error
 
 	layerCount := u32(len(scene.lights)) * 6
 	err = createImage(
 		graphicsData,
-		&pipelines[.Light].images[0],
+		&graphicsData.pipelines[.Light].images[0],
 		{.CUBE_COMPATIBLE},
 		.D2,
 		SHADOW_RESOLUTION.x,
@@ -4309,11 +4305,11 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 		log(.Fatal, "Failed to create shadow map colour image!")
 	}
 
-	pipelines[.Light].images[0].view, pipelines[.Light].images[0].viewInfo, err = createImageView(
+	graphicsData.pipelines[.Light].images[0].view, graphicsData.pipelines[.Light].images[0].viewInfo, err = createImageView(
 		graphicsData,
-		pipelines[.Light].images[0].vkImage,
+		graphicsData.pipelines[.Light].images[0].vkImage,
 		.CUBE_ARRAY,
-		pipelines[.Light].images[0].format,
+		graphicsData.pipelines[.Light].images[0].format,
 		{.COLOR},
 		layerCount,
 	)
@@ -4323,7 +4319,7 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 
 	err = createImage(
 		graphicsData,
-		&pipelines[.Light].images[1],
+		&graphicsData.pipelines[.Light].images[1],
 		{.CUBE_COMPATIBLE},
 		.D2,
 		SHADOW_RESOLUTION.x,
@@ -4341,11 +4337,11 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 		log(.Fatal, "Failed to create shadow map depth image!")
 	}
 
-	pipelines[.Light].images[1].view, pipelines[.Light].images[1].viewInfo, err = createImageView(
+	graphicsData.pipelines[.Light].images[1].view, graphicsData.pipelines[.Light].images[1].viewInfo, err = createImageView(
 		graphicsData,
-		pipelines[.Light].images[1].vkImage,
+		graphicsData.pipelines[.Light].images[1].vkImage,
 		.CUBE_ARRAY,
-		pipelines[.Light].images[1].format,
+		graphicsData.pipelines[.Light].images[1].format,
 		{.DEPTH},
 		layerCount,
 	)
@@ -4353,25 +4349,25 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 		log(.Fatal, "Failed to create shadow map depth image view!")
 	}
 
-	if multiviewProperties.maxMultiviewViewCount < SHADOW_CUBE_FACES {
+	if graphicsData.multiviewProperties.maxMultiviewViewCount < SHADOW_CUBE_FACES {
 		logf(
 			.Fatal,
 			"Shadow mapping needs %v multiview views, device supports %v.",
 			SHADOW_CUBE_FACES,
-			multiviewProperties.maxMultiviewViewCount,
+			graphicsData.multiviewProperties.maxMultiviewViewCount,
 		)
 	}
 
 	lightCount := len(scene.lights)
-	shadowColourViews = make([]vk.ImageView, lightCount)
-	shadowDepthViews = make([]vk.ImageView, lightCount)
+	graphicsData.shadowColourViews = make([]vk.ImageView, lightCount)
+	graphicsData.shadowDepthViews = make([]vk.ImageView, lightCount)
 	for light in 0 ..< lightCount {
 		base := u32(light) * SHADOW_CUBE_FACES
-		shadowColourViews[light], _, err = createImageView(
+		graphicsData.shadowColourViews[light], _, err = createImageView(
 			graphicsData,
-			pipelines[.Light].images[0].vkImage,
+			graphicsData.pipelines[.Light].images[0].vkImage,
 			.D2_ARRAY,
-			pipelines[.Light].images[0].format,
+			graphicsData.pipelines[.Light].images[0].format,
 			{.COLOR},
 			SHADOW_CUBE_FACES,
 			base,
@@ -4379,11 +4375,11 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 		if err != nil {
 			log(.Fatal, "Failed to create shadow map colour face view!")
 		}
-		shadowDepthViews[light], _, err = createImageView(
+		graphicsData.shadowDepthViews[light], _, err = createImageView(
 			graphicsData,
-			pipelines[.Light].images[1].vkImage,
+			graphicsData.pipelines[.Light].images[1].vkImage,
 			.D2_ARRAY,
-			pipelines[.Light].images[1].format,
+			graphicsData.pipelines[.Light].images[1].format,
 			{.DEPTH},
 			SHADOW_CUBE_FACES,
 			base,
@@ -4394,7 +4390,7 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 	}
 
 	cmdBuffer: vk.CommandBuffer
-	cmdBuffer, err = beginSingleTimeCommands(graphicsData, graphicsCommandPool)
+	cmdBuffer, err = beginSingleTimeCommands(graphicsData, graphicsData.graphicsCommandPool)
 	if err != nil {
 		log(.Fatal, "Failed to start commands! %v", err)
 	}
@@ -4411,7 +4407,7 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 			newLayout = .SHADER_READ_ONLY_OPTIMAL,
 			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Light].images[0].vkImage,
+			image = graphicsData.pipelines[.Light].images[0].vkImage,
 			subresourceRange = vk.ImageSubresourceRange {
 				aspectMask = {.COLOR},
 				baseMipLevel = 0,
@@ -4431,7 +4427,7 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 			newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Light].images[1].vkImage,
+			image = graphicsData.pipelines[.Light].images[1].vkImage,
 			subresourceRange = vk.ImageSubresourceRange {
 				aspectMask = {.DEPTH},
 				baseMipLevel = 0,
@@ -4456,7 +4452,7 @@ createLightPipelineImages :: proc(using graphicsData: ^GraphicsData, scene: ^Sce
 		},
 	)
 
-	err = endSingleTimeCommands(graphicsData, cmdBuffer, graphicsCommandPool)
+	err = endSingleTimeCommands(graphicsData, cmdBuffer, graphicsData.graphicsCommandPool)
 	if err != nil {
 		log(.Fatal, "Failed to submit commands! %v", err)
 	}
@@ -5825,11 +5821,11 @@ createSyncObjects :: proc(using graphicsData: ^GraphicsData) -> SyncError {
 
 // ===[ Scene and Frame Data ]=================================================
 
-updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
+updateSceneBuffers :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	err: Error
 
 	buffers := &scene.buffers
-	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
+	if res := vk.DeviceWaitIdle(graphicsData.device); res != .SUCCESS {
 		panic("Failed to wait for device idle!")
 	}
 
@@ -5947,8 +5943,8 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 	updateTextureIndexBuffer(graphicsData, scene)
 
 	destroyShadowFaceViews(graphicsData)
-	deleteImage(graphicsData, &pipelines[.Light].images[0])
-	deleteImage(graphicsData, &pipelines[.Light].images[1])
+	deleteImage(graphicsData, &graphicsData.pipelines[.Light].images[0])
+	deleteImage(graphicsData, &graphicsData.pipelines[.Light].images[1])
 	createLightPipelineImages(graphicsData, scene)
 
 	updateDescriptorSets(graphicsData, scene)
@@ -5957,7 +5953,7 @@ updateSceneBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 }
 
 @(private = "file")
-updateLightBuffer :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, delta: f32) {
+updateLightBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L), delta: f32) {
 	buffers := &scene.buffers
 	lightData := make([]LightData, len(scene.lights), allocator = context.temp_allocator)
 	for &light, i in scene.lights {
@@ -5970,7 +5966,7 @@ updateLightBuffer :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, delt
 	}
 
 	mem.copy(
-		buffers.lightBuffers[currentFrame].mapped,
+		buffers.lightBuffers[graphicsData.currentFrame].mapped,
 		raw_data(lightData),
 		size_of(LightData) * len(scene.lights),
 	)
@@ -5978,22 +5974,22 @@ updateLightBuffer :: proc(using graphicsData: ^GraphicsData, scene: ^Scene, delt
 
 @(private = "file")
 updateUniformBuffer :: proc(
-	using graphicsData: ^GraphicsData,
-	scene: ^Scene,
-	view, projection: Mat4,
+	graphicsData: ^GraphicsData,
+	scene: ^Scene($SB, $M, $T, $O, $L),
+	viewProjection: Mat4,
+	cameraPosition: Vec3,
 ) {
-	viewProjection: UniformBuffer = {
-		projection     = projection,
-		viewProjection = projection * view,
+	uniforms := UniformBuffer {
+		viewProjection = viewProjection,
 		lightCount     = u32(len(scene.lights)),
 		ambientLight   = scene.ambientLight,
-		cameraPosition = scene.cameras[scene.activeCamera].eye,
+		cameraPosition = cameraPosition,
 	}
-	mem.copy(uniformBuffers[currentFrame].mapped, &viewProjection, size_of(UniformBuffer))
+	mem.copy(graphicsData.uniformBuffers[graphicsData.currentFrame].mapped, &uniforms, size_of(UniformBuffer))
 }
 
 @(private = "file")
-updateInstanceBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene, delta: f32) {
+updateInstanceBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L), delta: f32) {
 	boneTransforms := make([]Mat4, scene.boneCount, allocator = context.temp_allocator)
 	instanceData := make([]InstanceInfo, len(scene.objects), allocator = context.temp_allocator)
 
@@ -6039,7 +6035,7 @@ updateInstanceBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene, delta: 
 }
 
 @(private = "file")
-updateTextureIndexBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
+updateTextureIndexBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	textureIndicesLength := 0
 	for &model in scene.models {
 		textureIndicesLength += len(model.instances) * len(model.meshes)
@@ -6077,8 +6073,9 @@ updateTextureIndexBuffer :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
 
 updateSceneData :: proc(
 	graphicsData: ^GraphicsData,
-	scene: ^Scene,
-	view, projection: Mat4,
+	scene: ^Scene($SB, $M, $T, $O, $L),
+	viewProjection: Mat4,
+	cameraPosition: Vec3,
 	delta: f32,
 ) {
 	if graphicsData.reloadBuffers {
@@ -6088,7 +6085,7 @@ updateSceneData :: proc(
 		updateCommandBuffers(graphicsData, scene)
 	}
 
-	updateUniformBuffer(graphicsData, scene, view, projection)
+	updateUniformBuffer(graphicsData, scene, viewProjection, cameraPosition)
 	updateLightBuffer(graphicsData, scene, delta)
 	updateInstanceBuffer(graphicsData, scene, delta)
 }
@@ -6104,20 +6101,20 @@ markCommandsDirty :: proc(graphicsData: ^GraphicsData, passes: bit_set[CmdBuffer
 }
 
 @(private = "file")
-updateCommandBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
-	if dirtyCommands == nil {
+updateCommandBuffers :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L)) {
+	if graphicsData.dirtyCommands == nil {
 		return
 	}
-	defer dirtyCommands = nil
+	defer graphicsData.dirtyCommands = nil
 
-	if res := vk.DeviceWaitIdle(device); res != .SUCCESS {
+	if res := vk.DeviceWaitIdle(graphicsData.device); res != .SUCCESS {
 		logf(.Error, "Failed to wait for device idle! vkResult: %v", res)
 		panic("Idk why this would ever fail.")
 	}
 
 	for bufferIndex in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		for pass in dirtyCommands {
-			vk.ResetCommandBuffer(commandBuffers[pass][bufferIndex], nil)
+		for pass in graphicsData.dirtyCommands {
+			vk.ResetCommandBuffer(graphicsData.commandBuffers[pass][bufferIndex], nil)
 
 			switch pass {
 			case .Transform:
@@ -6136,14 +6133,14 @@ updateCommandBuffers :: proc(using graphicsData: ^GraphicsData, scene: ^Scene) {
 }
 
 @(private = "file")
-recordTransformCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene: ^Scene) {
+recordTransformCommands :: proc(graphicsData: ^GraphicsData, index: u32, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
 		flags            = {},
 		pInheritanceInfo = nil,
 	}
-	cmdBuffer := commandBuffers[.Transform][index]
+	cmdBuffer := graphicsData.commandBuffers[.Transform][index]
 	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
 	}
@@ -6151,10 +6148,10 @@ recordTransformCommands :: proc(using graphicsData: ^GraphicsData, index: u32, s
 	vkBeginLabel(cmdBuffer, "Transform", {0.4, 0.8, 0.4, 1})
 
 	bindDescriptorHeaps(graphicsData, cmdBuffer, index)
-	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, pipelines[.Transform].handle)
+	vk.CmdBindPipeline(cmdBuffer, .COMPUTE, graphicsData.pipelines[.Transform].handle)
 
 	pushConstants: Transform_PushConstants = {
-		resources = heapIndices,
+		resources = graphicsData.heapIndices,
 		instance        = 0,
 		instanceCount   = 0,
 		vertexCount     = 0,
@@ -6201,7 +6198,7 @@ recordTransformCommands :: proc(using graphicsData: ^GraphicsData, index: u32, s
 }
 
 @(private = "file")
-recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene: ^Scene) {
+recordLightCommands :: proc(graphicsData: ^GraphicsData, index: u32, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	lightCount := u32(len(scene.lights))
 	lightImageCount := lightCount * SHADOW_CUBE_FACES
 
@@ -6212,7 +6209,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		pInheritanceInfo = nil,
 	}
 
-	cmdBuffer := commandBuffers[.Light][index]
+	cmdBuffer := graphicsData.commandBuffers[.Light][index]
 	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
 	}
@@ -6244,7 +6241,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 					newLayout = .COLOR_ATTACHMENT_OPTIMAL,
 					srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 					dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-					image = pipelines[.Light].images[0].vkImage,
+					image = graphicsData.pipelines[.Light].images[0].vkImage,
 					subresourceRange = vk.ImageSubresourceRange {
 						aspectMask = {.COLOR},
 						baseMipLevel = 0,
@@ -6265,7 +6262,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 	)
 
 	pushConstants: Light_PushConstants = {
-		resources = heapIndices,
+		resources = graphicsData.heapIndices,
 		lightIndex   = 0,
 		vertexOffset = 0,
 		vertexCount  = 0,
@@ -6289,7 +6286,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 					pColorAttachments = &vk.RenderingAttachmentInfo {
 						sType = .RENDERING_ATTACHMENT_INFO,
 						pNext = nil,
-						imageView = shadowColourViews[lightIndex],
+						imageView = graphicsData.shadowColourViews[lightIndex],
 						imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
 						resolveMode = nil,
 						resolveImageView = 0,
@@ -6301,7 +6298,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 					pDepthAttachment = &vk.RenderingAttachmentInfo {
 						sType = .RENDERING_ATTACHMENT_INFO,
 						pNext = nil,
-						imageView = shadowDepthViews[lightIndex],
+						imageView = graphicsData.shadowDepthViews[lightIndex],
 						imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 						resolveMode = nil,
 						resolveImageView = 0,
@@ -6314,7 +6311,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			},
 		)
 
-		vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Light].handle)
+		vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, graphicsData.pipelines[.Light].handle)
 
 		pushConstants.lightIndex = lightIndex
 		vk.CmdPushDataEXT(
@@ -6381,7 +6378,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 				newLayout = .SHADER_READ_ONLY_OPTIMAL,
 				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				image = pipelines[.Light].images[0].vkImage,
+				image = graphicsData.pipelines[.Light].images[0].vkImage,
 				subresourceRange = vk.ImageSubresourceRange {
 					aspectMask = {.COLOR},
 					baseMipLevel = 0,
@@ -6401,7 +6398,7 @@ recordLightCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 }
 
 @(private = "file")
-recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene: ^Scene) {
+recordSceneCommands :: proc(graphicsData: ^GraphicsData, index: u32, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	beginInfo: vk.CommandBufferBeginInfo = {
 		sType            = .COMMAND_BUFFER_BEGIN_INFO,
 		pNext            = nil,
@@ -6409,14 +6406,14 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		pInheritanceInfo = nil,
 	}
 
-	cmdBuffer := commandBuffers[.Scene][index]
+	cmdBuffer := graphicsData.commandBuffers[.Scene][index]
 	if res := vk.BeginCommandBuffer(cmdBuffer, &beginInfo); res != .SUCCESS {
 		logf(.Fatal, "Failed to being recording command buffer! vkResult: %v", res)
 	}
 
 	vkBeginLabel(cmdBuffer, "Scene", {0.4, 0.6, 0.9, 1})
 
-	setViewportAndScissor(cmdBuffer, settings.renderSize)
+	setViewportAndScissor(cmdBuffer, graphicsData.settings.renderSize)
 
 	entryBarriers := [?]vk.ImageMemoryBarrier2 {
 		{
@@ -6430,7 +6427,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			newLayout = .COLOR_ATTACHMENT_OPTIMAL,
 			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[0].vkImage,
+			image = graphicsData.pipelines[.Scene].images[0].vkImage,
 			subresourceRange = vk.ImageSubresourceRange {
 				aspectMask = {.COLOR},
 				baseMipLevel = 0,
@@ -6450,7 +6447,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[1].vkImage,
+			image = graphicsData.pipelines[.Scene].images[1].vkImage,
 			subresourceRange = vk.ImageSubresourceRange {
 				aspectMask = {.DEPTH},
 				baseMipLevel = 0,
@@ -6482,14 +6479,14 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			sType = .RENDERING_INFO,
 			pNext = nil,
 			flags = nil,
-			renderArea = vk.Rect2D{offset = {0, 0}, extent = {settings.renderSize.x, settings.renderSize.y}},
+			renderArea = vk.Rect2D{offset = {0, 0}, extent = {graphicsData.settings.renderSize.x, graphicsData.settings.renderSize.y}},
 			layerCount = 1,
 			viewMask = 0,
 			colorAttachmentCount = 1,
 			pColorAttachments = &vk.RenderingAttachmentInfo {
 				sType = .RENDERING_ATTACHMENT_INFO,
 				pNext = nil,
-				imageView = pipelines[.Scene].images[0].view,
+				imageView = graphicsData.pipelines[.Scene].images[0].view,
 				imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
 				resolveMode = nil,
 				resolveImageView = 0,
@@ -6501,7 +6498,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			pDepthAttachment = &vk.RenderingAttachmentInfo {
 				sType = .RENDERING_ATTACHMENT_INFO,
 				pNext = nil,
-				imageView = pipelines[.Scene].images[1].view,
+				imageView = graphicsData.pipelines[.Scene].images[1].view,
 				imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 				resolveMode = nil,
 				resolveImageView = 0,
@@ -6515,7 +6512,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 	)
 
 	bindDescriptorHeaps(graphicsData, cmdBuffer, index)
-	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Scene].handle)
+	vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, graphicsData.pipelines[.Scene].handle)
 
 	vk.CmdBindIndexBuffer2(
 		cmdBuffer,
@@ -6526,7 +6523,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 	)
 
 	pushConstants: Scene_PushConstants = {
-		resources = heapIndices,
+		resources = graphicsData.heapIndices,
 		vertexOffset   = 0,
 		vertexCount    = 0,
 		instanceOffset = 0,
@@ -6557,12 +6554,12 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 		}
 	}
 
-	if settings.showLightGizmos && len(scene.lights) > 0 {
-		vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, pipelines[.Gizmo].handle)
+	if graphicsData.settings.showLightGizmos && len(scene.lights) > 0 {
+		vk.CmdBindPipeline(cmdBuffer, .GRAPHICS, graphicsData.pipelines[.Gizmo].handle)
 
 		gizmoConstants: Gizmo_PushConstants = {
-			resources = heapIndices,
-			radius    = settings.lightGizmoRadius,
+			resources = graphicsData.heapIndices,
+			radius    = graphicsData.settings.lightGizmoRadius,
 		}
 		vk.CmdPushDataEXT(
 			cmdBuffer,
@@ -6591,7 +6588,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			newLayout = .TRANSFER_SRC_OPTIMAL,
 			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[0].vkImage,
+			image = graphicsData.pipelines[.Scene].images[0].vkImage,
 			subresourceRange = vk.ImageSubresourceRange {
 				aspectMask = {.COLOR},
 				baseMipLevel = 0,
@@ -6611,7 +6608,7 @@ recordSceneCommands :: proc(using graphicsData: ^GraphicsData, index: u32, scene
 			newLayout = .SHADER_READ_ONLY_OPTIMAL,
 			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
 			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = pipelines[.Scene].images[1].vkImage,
+			image = graphicsData.pipelines[.Scene].images[1].vkImage,
 			subresourceRange = vk.ImageSubresourceRange {
 				aspectMask = {.DEPTH},
 				baseMipLevel = 0,

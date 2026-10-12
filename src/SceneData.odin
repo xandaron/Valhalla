@@ -1,8 +1,9 @@
 package Valhalla
 
-Object :: struct {
-	name:        string `imrefl:"ignore"`,
-	flags:       ObjectFlags,
+import "base:intrinsics"
+
+Object :: struct($Base: typeid) where intrinsics.type_is_struct(Base) {
+	using _:     Base `imrefl:"flatten"`,
 	position:    Vec3 `imrefl:"label=Position,speed=0.1"`,
 	rotation:    Quat `imrefl:"label=Rotation,euler"`,
 	scale:       Vec3 `imrefl:"label=Scale,speed=0.1"`,
@@ -13,13 +14,7 @@ Object :: struct {
 	attachment:  Attachment `imrefl:"ignore"`,
 }
 
-ObjectFlag :: enum u64 {
-	Selectable = 0,
-}
-ObjectFlags :: bit_set[ObjectFlag;u64]
-
-deleteGameObject :: proc(object: ^Object) {
-	delete(object.name)
+deleteGameObject :: proc(object: ^Object($B)) {
 	delete(object.textureIdxs)
 	deleteObjectAnimation(&object.animation)
 }
@@ -29,7 +24,7 @@ Attachment :: struct {
 	bindpointIdx: u32,
 }
 
-changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
+changeModel :: proc(scene: ^Scene($SB, $M, $T, $O, $L), objectIdx: u32, modelIdx: u32) {
 	object := &scene.objects[objectIdx]
 	model := &scene.models[object.modelIdx]
 
@@ -39,7 +34,7 @@ changeModel :: proc(scene: ^Scene, objectIdx: u32, modelIdx: u32) {
 	object.instanceIdx = addInstance(scene, &scene.models[modelIdx], objectIdx)
 }
 
-objectTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
+objectTransform :: proc(scene: ^Scene($SB, $M, $T, $O, $L), object: ^O) -> Mat4 {
 	model := &scene.models[object.modelIdx]
 	local := transform(
 		object.position + model.position,
@@ -53,7 +48,7 @@ objectTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
 	return objectParentTransform(scene, object) * local
 }
 
-objectParentTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
+objectParentTransform :: proc(scene: ^Scene($SB, $M, $T, $O, $L), object: ^O) -> Mat4 {
 	if object.attachment.targetIdx < 0 {
 		return IMAT4
 	}
@@ -75,22 +70,12 @@ objectParentTransform :: proc(scene: ^Scene, object: ^Object) -> Mat4 {
 	return targetTransform * target.animation.state[bindpoint.boneIdx]
 }
 
-Texture :: struct {
-	path:      string `imrefl:"ignore"`,
-	assetPath: string `imrefl:"ignore"`,
-	name:      string `imrefl:"ignore"`,
+Texture :: struct($Base: typeid) where intrinsics.type_is_struct(Base) {
+	using _: Base `imrefl:"flatten"`,
 }
 
-deleteTexture :: proc(texture: ^Texture) {
-	delete(texture.name)
-	delete(texture.path)
-	delete(texture.assetPath)
-}
-
-Model :: struct {
-	path:       string `imrefl:"ignore"`,
-	assetPath:  string `imrefl:"ignore"`,
-	name:       string `imrefl:"ignore"`,
+Model :: struct($Base: typeid) where intrinsics.type_is_struct(Base) {
+	using _:    Base `imrefl:"flatten"`,
 	position:   Vec3 `imrefl:"label=Position,speed=0.1"`,
 	rotation:   Quat `imrefl:"label=Rotation,euler"`,
 	scale:      Vec3 `imrefl:"label=Scale,speed=0.1"`,
@@ -101,11 +86,7 @@ Model :: struct {
 	instances:  [dynamic]u32 `imrefl:"read-only"`,
 }
 
-deleteModel :: proc(model: ^Model) {
-	delete(model.name)
-	delete(model.path)
-	delete(model.assetPath)
-
+deleteModel :: proc(model: ^Model($B)) {
 	for &mesh in model.meshes {
 		deleteMesh(&mesh)
 	}
@@ -141,7 +122,7 @@ deleteMesh :: proc(mesh: ^Mesh) {
 	delete(mesh.name)
 }
 
-addInstance :: proc(scene: ^Scene, model: ^Model, objectIdx: u32) -> u32 {
+addInstance :: proc(scene: ^Scene($SB, $M, $T, $O, $L), model: ^M, objectIdx: u32) -> u32 {
 	append(&model.instances, objectIdx)
 
 	scene.boneCount += len(model.skeleton)
@@ -151,7 +132,7 @@ addInstance :: proc(scene: ^Scene, model: ^Model, objectIdx: u32) -> u32 {
 	return u32(len(model.instances) - 1)
 }
 
-removeInstance :: proc(scene: ^Scene, model: ^Model, instanceIdx: u32) {
+removeInstance :: proc(scene: ^Scene($SB, $M, $T, $O, $L), model: ^M, instanceIdx: u32) {
 	unordered_remove(&model.instances, instanceIdx)
 	if u32(len(model.instances)) > instanceIdx {
 		scene.objects[model.instances[instanceIdx]].instanceIdx = instanceIdx
@@ -177,47 +158,9 @@ deleteBindpoint :: proc(bindpoint: ^Bindpoint) {
 	delete(bindpoint.name)
 }
 
-Camera :: struct {
-	name:   string `imrefl:"label=Name"`,
-	mode:   CameraMode `imrefl:"label=Mode"`,
-	eye:    Vec3 `imrefl:"label=Eye,speed=0.1"`,
-	center: Vec3 `imrefl:"label=Center,speed=0.1"`,
-	up:     Vec3 `imrefl:"label=Up,speed=0.1,normalized"`,
-	fov:    f32 `imrefl:"label=FOV,min=1,max=179,speed=0.1"`,
-	near:   f32 `imrefl:"label=Near plane,min=0.001,max=1000,speed=0.1"`,
-	far:    f32 `imrefl:"label=Far plane,min=0.002,max=10000,speed=0.1"`,
-}
-
-deleteCamera :: proc(camera: ^Camera) {
-	delete(camera.name)
-}
-
-CameraMode :: enum {
-	PERSPECTIVE,
-	ORTHOGRAPHIC,
-}
-
-view :: #force_inline proc(camera: Camera) -> Mat4 {
-	return lookAt(camera.eye, camera.center, camera.up)
-}
-
-projection :: proc(camera: Camera, aspect: f32) -> Mat4 {
-	switch camera.mode {
-	case .PERSPECTIVE:
-		return perspective(radians(camera.fov), aspect, camera.near, camera.far)
-	case .ORTHOGRAPHIC:
-		return orthographic(radians(camera.fov), aspect, camera.near, camera.far)
-	}
-	panic("Unreachable!")
-}
-
-PointLight :: struct {
-	name:     string `imrefl:"ignore"`,
+PointLight :: struct($Base: typeid) where intrinsics.type_is_struct(Base) {
+	using _:  Base `imrefl:"flatten"`,
 	position: Vec3 `imrefl:"label=Position,speed=0.1"`,
 	colour:   Vec3 `imrefl:"label=Colour,colour"`,
 	lumens:   f32 `imrefl:"label=Lumens,min=0,max=100000,speed=10"`,
-}
-
-deletePointLight :: proc(light: ^PointLight) {
-	delete(light.name)
 }

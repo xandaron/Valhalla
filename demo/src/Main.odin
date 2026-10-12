@@ -314,11 +314,12 @@ tickFrame :: proc() -> bool {
 update :: proc(delta: f32) {
 	scene := &globals.scenes[globals.activeScene]
 	updateAnimations(scene, delta)
+	camera := scene.cameras[scene.activeCamera]
 	updateSceneData(
 		&globals.graphicsData,
 		scene,
-		view(scene.cameras[scene.activeCamera]),
-		projection(scene.cameras[scene.activeCamera], getRenderAspectRatio(&globals.graphicsData)),
+		viewProjection(camera, getRenderAspectRatio(&globals.graphicsData)),
+		camera.eye,
 		delta,
 	)
 }

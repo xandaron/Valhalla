@@ -1,38 +1,36 @@
 package Valhalla
 
-Scene :: struct {
-	path:         string,
-	name:         string,
+import "base:intrinsics"
+
+Scene :: struct($Base, $ModelType, $TextureType, $ObjectType, $PointLightType: typeid) where
+	intrinsics.type_is_struct(Base) &&
+	intrinsics.type_is_specialization_of(ModelType, Model) &&
+	intrinsics.type_is_specialization_of(TextureType, Texture) &&
+	intrinsics.type_is_specialization_of(ObjectType, Object) &&
+	intrinsics.type_is_specialization_of(PointLightType, PointLight) {
+	using _:      Base `imrefl:"flatten"`,
 
 	ambientLight: f32 `imrefl:"label=Ambient light,min=0,max=10,speed=0.01"`,
 	clearColour:  Vec4 `imrefl:"label=Clear colour,colour"`,
 
-	models:       [dynamic]Model,
-	textures:     [dynamic]Texture,
-	objects:      [dynamic]Object,
-	lights:       [dynamic]PointLight,
-	cameras:      [dynamic]Camera,
-	activeCamera: u32,
+	boneCount:    int,
+	models:       [dynamic]ModelType,
+	textures:     [dynamic]TextureType,
+	objects:      [dynamic]ObjectType,
+	lights:       [dynamic]PointLightType,
 	vertexCount:  u32,
 	vertices:     [dynamic]Vertex `imrefl:"ignore"`,
 	indices:      [dynamic]u32 `imrefl:"ignore"`,
-	boneCount:    int,
 
 	buffers:      SceneBuffers `imrefl:"ignore"`,
 }
 
-deleteScene :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
-	delete(scene.name)
-	delete(scene.path)
-
+deleteScene :: proc(graphicsData: ^GraphicsData, scene: ^Scene($SB, $M, $T, $O, $L)) {
 	for &model in scene.models {
 		deleteModel(&model)
 	}
 	delete(scene.models)
 
-	for &texture in scene.textures {
-		deleteTexture(&texture)
-	}
 	delete(scene.textures)
 
 	for &object in scene.objects {
@@ -40,15 +38,7 @@ deleteScene :: proc(graphicsData: ^GraphicsData, scene: ^Scene) {
 	}
 	delete(scene.objects)
 
-	for &light in scene.lights {
-		deletePointLight(&light)
-	}
 	delete(scene.lights)
-
-	for &camera in scene.cameras {
-		deleteCamera(&camera)
-	}
-	delete(scene.cameras)
 
 	delete(scene.vertices)
 	delete(scene.indices)

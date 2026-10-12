@@ -279,6 +279,7 @@ loadScene :: proc(scene: ^Scene) -> LoadError {
 			logf(.Error, "Failed to load model data \"%s\": %v", model.path, lerr)
 			return .Asset
 		}
+		catalogueModel(scene, u32(i))
 	}
 
 	texPaths := make([]string, len(sceneData.textures))
