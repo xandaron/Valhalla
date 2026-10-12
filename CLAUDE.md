@@ -297,11 +297,11 @@ the renderer reads — transforms, meshes, skeletons, instances, texture indices
 power, buffers. Names, paths, flags, the model catalogue and cameras are application data and live
 in the demo. `demo/src/Scene.odin` defines each concrete type with its base written inline —
 `Scene :: Valhalla.Scene(struct {...}, Model, Texture, Object, PointLight)` — so go-to-definition
-lands on the fields; there are no named base structs and `Types.odin` does not alias these types. Keep a base's fields in their old order at the front: refdisk is
+lands on the fields; there are no named base structs and `Aliases.odin` does not alias these types. Keep a base's fields in their old order at the front: refdisk is
 positional, so `PointLight` and `Camera` still serialise byte-for-byte as before.
 
 Valhalla frees only its own half. The demo's `deleteScene`, `deleteModel` and `deleteTexture` free
-the base fields and then call Valhalla's, which is why `Types.odin` does not alias those three.
+the base fields and then call Valhalla's, which is why `Aliases.odin` does not alias those three.
 
 The renderer knows nothing about cameras: `updateSceneData` takes a view-projection matrix and the
 eye position, which the light gizmo billboards need. `Camera.odin` holds `Camera($Base)` with
@@ -312,7 +312,7 @@ depends on; the user chose to give it its own file.
 bindings, which wrap Slang's COM-lite interfaces as plain Odin procs (`slang.load_module`,
 `slang.release`, ...) — there is no C shim and no vtable calls at the call site; the caller hands the
 bytes to `initGraphics` or `updatePipelineShaders`, which dirties only the affected pass.
-`IO.odin` holds the input event types and the GLFW callbacks. `Debug.odin` has the log wrappers and
+`IO.odin` holds the input event types and the GLFW callbacks. `Debug.odin` has the logging aliases and
 the Vulkan debug-utils helpers (`vkNameObject`, `vkBeginLabel`, `vkEndLabel`) — name new long-lived
 objects in `nameCoreObjects`.
 
@@ -320,8 +320,9 @@ objects in `nameCoreObjects`.
 above; it is the one component the user chose to give its own file. `Files.odin` handles
 project/settings/scene/model/texture serialisation (assimp). `Scene.odin` creates and edits scenes,
 `Animation.odin` plays animations, `IO.odin` holds picking and the application's input handling,
-`UI.odin` is the imgui editor. `Types.odin` aliases Valhalla's names so demo code reads unqualified;
-add an alias there rather than qualifying at call sites.
+`UI.odin` is the imgui editor. `Aliases.odin` aliases Valhalla's names so demo code reads
+unqualified, grouped under banners that mirror the Valhalla area each name comes from; add an alias
+to the matching section rather than qualifying at call sites.
 
 ## Odin notes
 
@@ -333,7 +334,11 @@ add an alias there rather than qualifying at call sites.
   renderer is one file, most of it is file-private; keep it that way.
 - Vulkan bindings are `vendor:vulkan`, which already loads function pointers via
   `vk.load_proc_addresses` — volk and similar loaders are unnecessary.
-- `logf`/`log` in `Debug.odin` wrap `core:log` and panic on `.Fatal`.
+- Valhalla logs through `core:log` only; `Debug.odin` aliases its `log` and `logf`. Where output
+  goes and what `.Fatal` does are the host's choice: it sets `context.logger` before `initGraphics`,
+  which captures the context for the GLFW and Vulkan callbacks. Valhalla's `.Fatal` calls assume
+  the logger panics — the demo's `createLogger` in `demo/src/Debug.odin` wraps a console logger and
+  panics on `.Fatal`, so a host using Valhalla must do the same.
 
 ## Conventions
 

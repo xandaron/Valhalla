@@ -1,8 +1,6 @@
 package Demo
 
 import "base:runtime"
-import clog "core:log"
-import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strconv"
@@ -52,8 +50,12 @@ globals: Globals
 PROJECT_FILE :: "demo.project"
 
 main :: proc() {
-	context.logger = clog.create_console_logger()
-	defer clog.destroy_console_logger(context.logger)
+	when ODIN_DEBUG {
+		context.allocator = createTrackingAllocator()
+		defer destroyTrackingAllocator(context.allocator)
+	}
+	context.logger = createLogger()
+	defer destroyLogger(context.logger)
 
 	if !os.exists(PROJECT_FILE) {
 		logf(.Error, "%v: project file not found! Run from the repository root.", PROJECT_FILE)
@@ -61,6 +63,7 @@ main :: proc() {
 	}
 
 	globals.projectFile, _ = filepath.abs(PROJECT_FILE, context.allocator)
+	defer delete(globals.projectFile)
 	globals.projectDir = filepath.dir(globals.projectFile)
 
 	os.set_working_directory(globals.projectDir)
@@ -115,30 +118,9 @@ main :: proc() {
 	settingsLoaded: bool
 	globals.settings, settingsLoaded = loadUserSettings()
 
-	when ODIN_DEBUG {
-		tracker: mem.Tracking_Allocator
-		mem.tracking_allocator_init(&tracker, context.allocator)
-		context.allocator = mem.tracking_allocator(&tracker)
-
-		defer {
-			if len(tracker.allocation_map) > 0 {
-				logf(.Debug, "=== %v allocations not freed: ===", len(tracker.allocation_map))
-				for _, entry in tracker.allocation_map {
-					logf(.Debug, "- %v bytes @ %v", entry.size, entry.location)
-				}
-			}
-			if len(tracker.bad_free_array) > 0 {
-				logf(.Debug, "=== %v incorrect frees: ===", len(tracker.bad_free_array))
-				for entry in tracker.bad_free_array {
-					logf(.Debug, "- %p @ %v", entry.memory, entry.location)
-				}
-			}
-			mem.tracking_allocator_destroy(&tracker)
-		}
-	}
 	globals.runtimeContext = context
 
-	err: Error
+	err: GraphicsError
 	transformComp, _ := compileShader(projectPath(SHADERS_PATH(), "Transform.slang"), "comp", .COMPUTE)
 	lightVert, _ := compileShader(projectPath(SHADERS_PATH(), "Light.slang"), "vert", .VERTEX)
 	lightFrag, _ := compileShader(projectPath(SHADERS_PATH(), "Light.slang"), "frag", .FRAGMENT)
