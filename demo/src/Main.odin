@@ -49,7 +49,7 @@ Globals :: struct {
 
 globals: Globals
 
-PROJECT_FILE :: "demo/demo.project"
+PROJECT_FILE :: "demo.project"
 
 main :: proc() {
 	context.logger = clog.create_console_logger()

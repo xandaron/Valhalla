@@ -12,9 +12,8 @@ config/*
 
 // Generated Files
 demo/components/*
-demo/assets/*
+demo/assets/* this needs to be unlocked and the generated stuff needs to move into a subdir so i can do the demo with proper assets
 
 // Misc
 docs/
 dump/
-/toolstools/projectgen/projectgen.exe
