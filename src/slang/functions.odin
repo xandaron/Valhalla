@@ -1,13 +1,32 @@
 package slang
 
 when ODIN_OS == .Windows {
-	when !#exists("slang.lib") {
-		#panic("Could not find slang.lib - copy Slang's prebuilt slang.lib into the slang/ package directory (see README.md).")
+	PATH :: #config(SLANG_LIB_DIR, "")
+	when PATH != "" {
+		foreign import lib {
+			PATH + "/slang-compiler.lib",
+			PATH + "/compiler-core.lib",
+			PATH + "/core.lib",
+			PATH + "/slang-glslang.lib",
+			PATH + "/glslang.lib",
+			PATH + "/SPIRV.lib",
+			PATH + "/SPIRV-Tools-opt.lib",
+			PATH + "/SPIRV-Tools-link.lib",
+			PATH + "/SPIRV-Tools.lib",
+			PATH + "/miniz.lib",
+			PATH + "/lz4.lib",
+			PATH + "/cmark-gfm.lib",
+		}
 	}
-	foreign import lib {
-		"slang.lib",
+	else {
+		foreign import lib {
+			"./slang.lib",
+			"./slang-compiler.lib",
+			"./slang-rt.lib",
+		}
 	}
-} else {
+}
+else {
 	foreign import lib {
 		"system:slang",
 	}

@@ -4,18 +4,20 @@ package ImGui
 @(private)
 ARCH :: "x64" when ODIN_ARCH == .amd64 else "arm64"
 
+IMGUI_LIB_DIR :: #config(IMGUI_LIB_DIR, ".")
+
 @(private)
 IMGUI_LIB :: (
-	     "imgui_windows_" + ARCH + ".lib" when ODIN_OS == .Windows
-	else "imgui_linux_" + ARCH + ".a"     when ODIN_OS == .Linux
-	else "imgui_darwin_" + ARCH + ".a"    when ODIN_OS == .Darwin
-	else "wasm/c_imgui.o"                 when ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32
+	     IMGUI_LIB_DIR + "/imgui_windows_" + ARCH + ".lib" when ODIN_OS == .Windows
+	else IMGUI_LIB_DIR + "/imgui_linux_" + ARCH + ".a"     when ODIN_OS == .Linux
+	else IMGUI_LIB_DIR + "/imgui_darwin_" + ARCH + ".a"    when ODIN_OS == .Darwin
+	else IMGUI_LIB_DIR + "/wasm/c_imgui.o"                 when ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32
 	else ""
 )
 
 when IMGUI_LIB != "" {
 	when !#exists(IMGUI_LIB) {
-		#panic("Could not find the compiled ImGui library")
+		#panic("Could not find the compiled ImGui library in IMGUI_LIB_DIR, a path relative to the imgui package.")
 	}
 }
 

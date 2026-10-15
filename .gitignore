@@ -1,9 +1,10 @@
 // User files
 bin/
+libs/
 logs/
 projs/
 imgui.ini
-pipeline_cache.bin
+*.pipeline_cache
 config/*
 *.exe
 *.pdb
