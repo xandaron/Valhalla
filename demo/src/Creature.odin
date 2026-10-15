@@ -1,5 +1,0 @@
-package Demo
-
-Creature :: struct {
-	
-}
