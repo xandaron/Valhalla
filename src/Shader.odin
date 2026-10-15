@@ -95,7 +95,7 @@ Compute_Shader :: struct {
 	group_size: [3]u32,
 }
 
-@(private = "file")
+@(private)
 Push_Leaf_Kind :: enum u8 {
 	Float,
 	Signed,
@@ -103,25 +103,18 @@ Push_Leaf_Kind :: enum u8 {
 	Bool,
 	Pointer,
 	Other,
-	Resource,
+	Image,
+	Buffer,
+	Sampler,
 }
 
 @(private = "file")
 Push_Leaf :: struct {
-	offset:   int,
-	width:    int,
-	kind:     Push_Leaf_Kind,
-	name:     string,
-	group:    int,
-	resource: Push_Resource_Kind,
-}
-
-@(private)
-Push_Resource_Kind :: enum u8 {
-	None,
-	Image,
-	Buffer,
-	Sampler,
+	offset: int,
+	width:  int,
+	kind:   Push_Leaf_Kind,
+	name:   string,
+	group:  int,
 }
 
 @(private)
@@ -132,7 +125,7 @@ Push_Copy :: struct {
 @(private)
 Push_Slot :: struct {
 	from, to, width: int,
-	kind:            Push_Resource_Kind,
+	kind:            Push_Leaf_Kind,
 	name:            string,
 }
 
@@ -140,7 +133,6 @@ Push_Slot :: struct {
 Push_Plan :: struct {
 	copies: []Push_Copy,
 	slots:  []Push_Slot,
-	names:  [dynamic]string,
 }
 
 Shader_Resource :: union {
@@ -714,28 +706,16 @@ reset_shader_bindings :: proc(shader: ^Shader) {
 
 @(require_results)
 bind_shader_image_input :: proc(shader: ^Shader, image: Image) -> (index: u32, err: Error) {
-	if image.heap_index == 0 {
-		log.error("The image has no descriptor: it must be sampled or storage capable, single-aspect, and made by Valhalla")
-		return 0, .Resource_Not_In_Heap
-	}
 	return add_binding(shader, {resource = image})
 }
 
 @(require_results)
 bind_shader_buffer_input :: proc(shader: ^Shader, buffer: Buffer) -> (index: u32, err: Error) {
-	if buffer.heap_index == 0 {
-		log.error("The buffer has no descriptor: it must be made by Valhalla with .Storage usage")
-		return 0, .Resource_Not_In_Heap
-	}
 	return add_binding(shader, {resource = buffer})
 }
 
 @(require_results)
 bind_shader_sampler_input :: proc(shader: ^Shader, sampler: Sampler) -> (index: u32, err: Error) {
-	if sampler.heap_index == 0 {
-		log.error("The sampler has no descriptor: it must be made by make_sampler")
-		return 0, .Resource_Not_In_Heap
-	}
 	return add_binding(shader, {resource = sampler})
 }
 
@@ -748,26 +728,14 @@ bind_shader_input :: proc {
 @(require_results)
 bind_shader_image_output :: proc(shader: ^Shader, image: Image) -> (written: Image, index: u32, err: Error) {
 	assert(.STORAGE in image.usage, "bind_shader_output writes through a storage descriptor; render targets use bind_shader_colour or bind_shader_depth")
-	if image.heap_index == 0 {
-		log.error("The image has no descriptor: it must be storage capable, single-aspect, and made by Valhalla")
-		return {}, 0, .Resource_Not_In_Heap
-	}
 	index = add_binding(shader, {resource = image, written = true}) or_return
-	written = image
-	written.version += 1
-	return
+	return next_version(image), index, nil
 }
 
 @(require_results)
 bind_shader_buffer_output :: proc(shader: ^Shader, buffer: Buffer) -> (written: Buffer, index: u32, err: Error) {
-	if buffer.heap_index == 0 {
-		log.error("The buffer has no descriptor: it must be made by Valhalla with .Storage usage")
-		return {}, 0, .Resource_Not_In_Heap
-	}
 	index = add_binding(shader, {resource = buffer, written = true}) or_return
-	written = buffer
-	written.version += 1
-	return
+	return next_version(buffer), index, nil
 }
 
 bind_shader_output :: proc {
@@ -775,7 +743,7 @@ bind_shader_output :: proc {
 	bind_shader_buffer_output,
 }
 
-bind_shader_colour :: proc(shader: ^Shader, image: Image) -> (written: Image) {
+bind_shader_colour :: proc(shader: ^Shader, image: Image) -> Image {
 	graphics, is_graphics := shader.variant.(Graphics_Shader)
 	assert(is_graphics, "only graphics shaders have colour attachments")
 	recording := &shader.recording
@@ -784,12 +752,10 @@ bind_shader_colour :: proc(shader: ^Shader, image: Image) -> (written: Image) {
 	assert(image.format == graphics.config.colour_formats[slot], "a colour attachment's format must match the shader's colour format in that slot")
 	assert(.COLOR_ATTACHMENT in image.usage, "the image cannot be a colour attachment")
 	append(&recording.colour_attachments, image)
-	written = image
-	written.version += 1
-	return
+	return next_version(image)
 }
 
-bind_shader_depth :: proc(shader: ^Shader, image: Image) -> (written: Image) {
+bind_shader_depth :: proc(shader: ^Shader, image: Image) -> Image {
 	graphics, is_graphics := shader.variant.(Graphics_Shader)
 	assert(is_graphics, "only graphics shaders have a depth attachment")
 	recording := &shader.recording
@@ -801,9 +767,7 @@ bind_shader_depth :: proc(shader: ^Shader, image: Image) -> (written: Image) {
 	)
 	assert(.DEPTH_STENCIL_ATTACHMENT in image.usage, "the image cannot be a depth attachment")
 	recording.depth_attachment = image
-	written = image
-	written.version += 1
-	return
+	return next_version(image)
 }
 
 bind_shader_index_buffer :: proc(shader: ^Shader, buffer: Buffer, index_type := Index_Type.U32) {
@@ -1178,6 +1142,23 @@ default_draw_state :: proc() -> (state: Draw_State) {
 @(private = "file")
 @(require_results)
 add_binding :: proc(shader: ^Shader, binding: Shader_Binding) -> (index: u32, err: Error) {
+	switch resource in binding.resource {
+	case Image:
+		if resource.heap_index == 0 {
+			log.error("The image has no descriptor: it must be sampled or storage capable, single-aspect, and made by Valhalla")
+			return 0, .Resource_Not_In_Heap
+		}
+	case Buffer:
+		if resource.heap_index == 0 {
+			log.error("The buffer has no descriptor: it must be made by Valhalla with .Storage usage")
+			return 0, .Resource_Not_In_Heap
+		}
+	case Sampler:
+		if resource.heap_index == 0 {
+			log.error("The sampler has no descriptor: it must be made by make_sampler")
+			return 0, .Resource_Not_In_Heap
+		}
+	}
 	recording := &shader.recording
 	if len(recording.bindings) >= SHADER_BINDING_CAPACITY {
 		log.errorf("A shader can bind at most %v resources", SHADER_BINDING_CAPACITY)
@@ -1596,13 +1577,13 @@ flatten_spirv :: proc(
 flatten_odin :: proc(info: ^runtime.Type_Info, offset: int, name: string, leaves: ^[dynamic]Push_Leaf) {
 	switch info.id {
 	case Image:
-		append(leaves, Push_Leaf{offset = offset, kind = .Resource, name = name, resource = .Image})
+		append(leaves, Push_Leaf{offset = offset, kind = .Image, name = name})
 		return
 	case Buffer:
-		append(leaves, Push_Leaf{offset = offset, kind = .Resource, name = name, resource = .Buffer})
+		append(leaves, Push_Leaf{offset = offset, kind = .Buffer, name = name})
 		return
 	case Sampler:
-		append(leaves, Push_Leaf{offset = offset, kind = .Resource, name = name, resource = .Sampler})
+		append(leaves, Push_Leaf{offset = offset, kind = .Sampler, name = name})
 		return
 	}
 	base := runtime.type_info_base(info)
@@ -1626,17 +1607,11 @@ flatten_odin :: proc(info: ^runtime.Type_Info, offset: int, name: string, leaves
 			append(leaves, Push_Leaf{offset = offset, width = base.size, kind = .Unsigned, name = name})
 		}
 	case runtime.Type_Info_Array:
-		for index in 0 ..< variant.count {
-			flatten_odin(variant.elem, offset + index * variant.elem_size, fmt.tprintf("%v[%v]", name, index), leaves)
-		}
+		flatten_odin_elements(variant.elem, variant.count, variant.elem_size, offset, name, leaves)
 	case runtime.Type_Info_Enumerated_Array:
-		for index in 0 ..< variant.count {
-			flatten_odin(variant.elem, offset + index * variant.elem_size, fmt.tprintf("%v[%v]", name, index), leaves)
-		}
+		flatten_odin_elements(variant.elem, variant.count, variant.elem_size, offset, name, leaves)
 	case runtime.Type_Info_Simd_Vector:
-		for index in 0 ..< variant.count {
-			flatten_odin(variant.elem, offset + index * variant.elem_size, fmt.tprintf("%v[%v]", name, index), leaves)
-		}
+		flatten_odin_elements(variant.elem, variant.count, variant.elem_size, offset, name, leaves)
 	case runtime.Type_Info_Matrix:
 		for c in 0 ..< variant.column_count {
 			for r in 0 ..< variant.row_count {
@@ -1655,6 +1630,13 @@ flatten_odin :: proc(info: ^runtime.Type_Info, offset: int, name: string, leaves
 }
 
 @(private = "file")
+flatten_odin_elements :: proc(elem: ^runtime.Type_Info, count, elem_size, offset: int, name: string, leaves: ^[dynamic]Push_Leaf) {
+	for index in 0 ..< count {
+		flatten_odin(elem, offset + index * elem_size, fmt.tprintf("%v[%v]", name, index), leaves)
+	}
+}
+
+@(private = "file")
 leaf_type :: proc(leaf: Push_Leaf) -> string {
 	switch leaf.kind {
 	case .Float:
@@ -1667,8 +1649,8 @@ leaf_type :: proc(leaf: Push_Leaf) -> string {
 		return fmt.tprintf("%v-byte bool", leaf.width)
 	case .Pointer:
 		return "8-byte pointer"
-	case .Resource:
-		return fmt.tprintf("%v", leaf.resource)
+	case .Image, .Buffer, .Sampler:
+		return fmt.tprintf("%v", leaf.kind)
 	case .Other:
 	}
 	return fmt.tprintf("%v-byte value", leaf.width)
@@ -1753,7 +1735,7 @@ make_push_plan :: proc(push_type: typeid, push_size: int, shader_leaves: []Push_
 			mismatch(T, nil, odin_leaf)
 		}
 		first := gpu_leaves[next]
-		if odin_leaf.kind == .Resource {
+		if odin_leaf.kind == .Image || odin_leaf.kind == .Buffer || odin_leaf.kind == .Sampler {
 			count := 0
 			for next < len(gpu_leaves) && gpu_leaves[next].group == first.group {
 				leaf := gpu_leaves[next]
@@ -1766,8 +1748,7 @@ make_push_plan :: proc(push_type: typeid, push_size: int, shader_leaves: []Push_
 			if count > 2 {
 				mismatch(T, first, odin_leaf)
 			}
-			append(&plan.names, strings.clone(odin_leaf.name))
-			append(&slots, Push_Slot{from = odin_leaf.offset, to = first.offset, width = 4 * count, kind = odin_leaf.resource, name = plan.names[len(plan.names) - 1]})
+			append(&slots, Push_Slot{from = odin_leaf.offset, to = first.offset, width = 4 * count, kind = odin_leaf.kind, name = strings.clone(odin_leaf.name)})
 			continue
 		}
 		if !leaves_match(first, odin_leaf) {
@@ -1793,12 +1774,11 @@ make_push_plan :: proc(push_type: typeid, push_size: int, shader_leaves: []Push_
 
 @(private)
 delete_push_plan :: proc(plan: ^Push_Plan) {
+	for slot in plan.slots {
+		delete(slot.name)
+	}
 	delete(plan.copies)
 	delete(plan.slots)
-	for name in plan.names {
-		delete(name)
-	}
-	delete(plan.names)
 	plan^ = {}
 }
 
@@ -1817,7 +1797,7 @@ pack_push_data :: proc(shader: Shader, reads: ^[dynamic]Shader_Resource) {
 	}
 	for slot in plan.slots {
 		index: u32
-		switch slot.kind {
+		#partial switch slot.kind {
 		case .Image:
 			image := (^Image)(&source[slot.from])^
 			if image.handle == 0 {
@@ -1845,7 +1825,6 @@ pack_push_data :: proc(shader: Shader, reads: ^[dynamic]Shader_Resource) {
 		case .Sampler:
 			sampler := (^Sampler)(&source[slot.from])^
 			index = sampler.heap_index if sampler.heap_index != 0 else null_sampler_index()
-		case .None:
 		}
 		(^u32)(&data[slot.to])^ = index
 		if slot.width == 8 {
@@ -1855,7 +1834,7 @@ pack_push_data :: proc(shader: Shader, reads: ^[dynamic]Shader_Resource) {
 }
 
 @(private = "file")
-written_binding :: proc(recording: Shader_Recording, heap_index: u32, kind: Push_Resource_Kind) -> bool {
+written_binding :: proc(recording: Shader_Recording, heap_index: u32, kind: Push_Leaf_Kind) -> bool {
 	for binding in recording.bindings {
 		if !binding.written {
 			continue

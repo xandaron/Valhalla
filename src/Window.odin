@@ -43,9 +43,9 @@ Window_Data :: struct {
 
 @(private = "file")
 position_on_monitor :: proc(position: [2]i32) -> bool {
-	for monitor in glfw.GetMonitors() {
-		x, y, width, height := glfw.GetMonitorWorkarea(monitor)
-		if position.x >= x && position.y >= y && position.x < x + width && position.y < y + height {
+	for monitor in monitors() {
+		origin, size := monitor_work_area(monitor)
+		if position.x >= origin.x && position.y >= origin.y && position.x < origin.x + size.x && position.y < origin.y + size.y {
 			return true
 		}
 	}
@@ -77,14 +77,13 @@ make_window :: proc(
 		return {}, .Window_Creation_Failed
 	}
 
-	if position, placed := position.?;
-	   placed && glfw.GetPlatform() != glfw.PLATFORM_WAYLAND && position_on_monitor(position) {
-		glfw.SetWindowPos(handle, position.x, position.y)
-	}
 	data := new(Window_Data)
 	data.window = {
 		handle = handle,
 		data   = data,
+	}
+	if position, placed := position.?; placed && position_on_monitor(position) {
+		set_window_position(&data.window, position)
 	}
 	glfw.SetWindowUserPointer(handle, data)
 	install_window_callbacks(handle)
@@ -321,17 +320,17 @@ nearest_monitor :: proc(window: ^Window) -> (monitor: Monitor, found: bool) {
 	if fullscreen, is_fullscreen := window_monitor(window); is_fullscreen {
 		return fullscreen, true
 	}
-	if glfw.GetPlatform() == glfw.PLATFORM_WAYLAND {
+	position, err := window_position(window)
+	if err != nil {
 		return primary_monitor()
 	}
-	x, y := glfw.GetWindowPos(window.handle)
 	size := window_size(window)
 	best: i64 = -1
 	for candidate in monitors() {
 		mode := video_mode(candidate)
 		origin := monitor_position(candidate)
-		overlap_x := max(min(x + size.x, origin.x + mode.size.x) - max(x, origin.x), 0)
-		overlap_y := max(min(y + size.y, origin.y + mode.size.y) - max(y, origin.y), 0)
+		overlap_x := max(min(position.x + size.x, origin.x + mode.size.x) - max(position.x, origin.x), 0)
+		overlap_y := max(min(position.y + size.y, origin.y + mode.size.y) - max(position.y, origin.y), 0)
 		if area := i64(overlap_x) * i64(overlap_y); area > best {
 			best = area
 			monitor = candidate
@@ -353,10 +352,7 @@ set_window_fullscreen :: proc(window: ^Window, monitor: Monitor, mode: Maybe(Vid
 	if glfw.GetWindowMonitor(window.handle) == nil {
 		data := window.data
 		data.windowed_size = window_size(window)
-		data.windowed_position = {}
-		if glfw.GetPlatform() != glfw.PLATFORM_WAYLAND {
-			data.windowed_position.x, data.windowed_position.y = glfw.GetWindowPos(window.handle)
-		}
+		data.windowed_position, _ = window_position(window)
 	}
 	chosen := mode.? or_else video_mode(monitor)
 	glfw.SetWindowMonitor(window.handle, monitor.handle, 0, 0, chosen.size.x, chosen.size.y, chosen.refresh_rate)

@@ -7,7 +7,6 @@ import vk "vendor:vulkan"
 Heap_Error :: enum {
 	None,
 	Heap_Too_Small,
-	Heap_Creation_Failed,
 	Heap_Full,
 	Descriptor_Write_Failed,
 }
@@ -29,26 +28,28 @@ MAX_HEAP_SAMPLERS :: 256
 
 @(private = "file")
 Heap_Storage :: struct {
-	handle:     vk.Buffer,
-	allocation: Allocation,
-	address:    vk.DeviceAddress,
-	size:       vk.DeviceSize,
+	buffer:  Host_Buffer,
+	address: vk.DeviceAddress,
+	size:    vk.DeviceSize,
+}
+
+@(private = "file")
+Slot_Pool :: struct {
+	first: u32,
+	free:  [dynamic]u32,
 }
 
 @(private = "file")
 Descriptor_Heap :: struct {
 	resource:     Heap_Storage,
 	sampler:      Heap_Storage,
-	buffer_first:  u32,
-	image_first:   u32,
-	sampler_first: u32,
-	free_buffers:  [dynamic]u32,
-	free_images:   [dynamic]u32,
-	free_samplers: [dynamic]u32,
-	null_buffer:   Buffer,
-	null_image:    Image,
-	null_view:     vk.ImageViewCreateInfo,
-	null_sampler:  Sampler,
+	buffers:      Slot_Pool,
+	images:       Slot_Pool,
+	samplers:     Slot_Pool,
+	null_buffer:  Buffer,
+	null_image:   Image,
+	null_view:    vk.ImageViewCreateInfo,
+	null_sampler: Sampler,
 }
 
 @(private = "file")
@@ -56,17 +57,17 @@ heap: Descriptor_Heap
 
 @(private)
 null_buffer_index :: proc() -> u32 {
-	return heap.buffer_first
+	return heap.buffers.first
 }
 
 @(private)
 null_image_index :: proc() -> u32 {
-	return heap.image_first
+	return heap.images.first
 }
 
 @(private)
 null_sampler_index :: proc() -> u32 {
-	return heap.sampler_first
+	return heap.samplers.first
 }
 
 @(private)
@@ -91,11 +92,8 @@ acquire_buffer_slot :: proc(buffer: ^Buffer) -> Error {
 	if .STORAGE_BUFFER not_in buffer.usage {
 		return nil
 	}
-	if len(heap.free_buffers) == 0 {
-		log.errorf("The descriptor heap is out of buffer slots (%v)", MAX_HEAP_BUFFERS)
-		return .Heap_Full
-	}
-	index := heap.buffer_first + pop(&heap.free_buffers)
+	slot := take_slot(&heap.buffers, "buffer") or_return
+	index := heap.buffers.first + slot
 	range: vk.DeviceAddressRangeEXT = {
 		address = buffer.address,
 		size    = buffer.size,
@@ -106,7 +104,7 @@ acquire_buffer_slot :: proc(buffer: ^Buffer) -> Error {
 		data = {pAddressRange = &range},
 	}
 	if !write_resource_descriptor(&info, index, device.heap_properties.bufferDescriptorSize) {
-		append(&heap.free_buffers, index - heap.buffer_first)
+		append(&heap.buffers.free, slot)
 		return .Descriptor_Write_Failed
 	}
 	buffer.heap_index = index
@@ -115,9 +113,7 @@ acquire_buffer_slot :: proc(buffer: ^Buffer) -> Error {
 
 @(private)
 release_buffer_slot :: proc(buffer: ^Buffer) {
-	if buffer.heap_index > heap.buffer_first {
-		append(&heap.free_buffers, buffer.heap_index - heap.buffer_first)
-	}
+	give_back_slot(&heap.buffers, buffer.heap_index)
 	buffer.heap_index = 0
 }
 
@@ -127,38 +123,12 @@ acquire_image_slots :: proc(image: ^Image, view_info: ^vk.ImageViewCreateInfo) -
 	if image.usage & {.SAMPLED, .STORAGE} == {} || image.aspect == {.DEPTH, .STENCIL} {
 		return nil
 	}
-	if len(heap.free_images) == 0 {
-		log.errorf("The descriptor heap is out of image slots (%v)", MAX_HEAP_IMAGES)
-		return .Heap_Full
-	}
-	pair := pop(&heap.free_images)
-	index := heap.image_first + 2 * pair
-	image_size := device.heap_properties.imageDescriptorSize
-
+	pair := take_slot(&heap.images, "image") or_return
+	index := heap.images.first + 2 * pair
 	sampled_view := view_info if .SAMPLED in image.usage else &heap.null_view
-	sampled_image: vk.ImageDescriptorInfoEXT = {
-		sType  = .IMAGE_DESCRIPTOR_INFO_EXT,
-		pView  = sampled_view,
-		layout = .GENERAL,
-	}
-	sampled: vk.ResourceDescriptorInfoEXT = {
-		sType = .RESOURCE_DESCRIPTOR_INFO_EXT,
-		type = .SAMPLED_IMAGE,
-		data = {pImage = &sampled_image},
-	}
 	storage_view := view_info if .STORAGE in image.usage else &heap.null_view
-	storage_image: vk.ImageDescriptorInfoEXT = {
-		sType  = .IMAGE_DESCRIPTOR_INFO_EXT,
-		pView  = storage_view,
-		layout = .GENERAL,
-	}
-	storage: vk.ResourceDescriptorInfoEXT = {
-		sType = .RESOURCE_DESCRIPTOR_INFO_EXT,
-		type = .STORAGE_IMAGE,
-		data = {pImage = &storage_image},
-	}
-	if !write_resource_descriptor(&sampled, index, image_size) || !write_resource_descriptor(&storage, index + 1, image_size) {
-		append(&heap.free_images, pair)
+	if !write_image_descriptor(sampled_view, .SAMPLED_IMAGE, index) || !write_image_descriptor(storage_view, .STORAGE_IMAGE, index + 1) {
+		append(&heap.images.free, pair)
 		return .Descriptor_Write_Failed
 	}
 	image.heap_index = index
@@ -167,8 +137,8 @@ acquire_image_slots :: proc(image: ^Image, view_info: ^vk.ImageViewCreateInfo) -
 
 @(private)
 release_image_slots :: proc(image: ^Image) {
-	if image.heap_index > heap.image_first {
-		append(&heap.free_images, (image.heap_index - heap.image_first) / 2)
+	if image.heap_index > heap.images.first {
+		append(&heap.images.free, (image.heap_index - heap.images.first) / 2)
 	}
 	image.heap_index = 0
 }
@@ -176,19 +146,12 @@ release_image_slots :: proc(image: ^Image) {
 @(private)
 @(require_results)
 acquire_sampler_slot :: proc(sampler: ^Sampler, info: ^vk.SamplerCreateInfo) -> Error {
-	if len(heap.free_samplers) == 0 {
-		log.errorf("The descriptor heap is out of sampler slots (%v)", MAX_HEAP_SAMPLERS)
-		return .Heap_Full
-	}
-	index := heap.sampler_first + pop(&heap.free_samplers)
-	descriptor_size := device.heap_properties.samplerDescriptorSize
-	destination: vk.HostAddressRangeEXT = {
-		address = &heap.sampler.allocation.mapped[vk.DeviceSize(index) * descriptor_size],
-		size    = int(descriptor_size),
-	}
+	slot := take_slot(&heap.samplers, "sampler") or_return
+	index := heap.samplers.first + slot
+	destination := heap_destination(heap.sampler, index, device.heap_properties.samplerDescriptorSize)
 	if res := vk.WriteSamplerDescriptorsEXT(device.handle, 1, info, &destination); res != .SUCCESS {
 		log.errorf("Failed to write a sampler descriptor: %v", res)
-		append(&heap.free_samplers, index - heap.sampler_first)
+		append(&heap.samplers.free, slot)
 		return .Descriptor_Write_Failed
 	}
 	sampler.heap_index = index
@@ -197,18 +160,28 @@ acquire_sampler_slot :: proc(sampler: ^Sampler, info: ^vk.SamplerCreateInfo) -> 
 
 @(private)
 release_sampler_slot :: proc(sampler: ^Sampler) {
-	if sampler.heap_index > heap.sampler_first {
-		append(&heap.free_samplers, sampler.heap_index - heap.sampler_first)
-	}
+	give_back_slot(&heap.samplers, sampler.heap_index)
 	sampler.heap_index = 0
 }
 
 @(private = "file")
-write_resource_descriptor :: proc(info: ^vk.ResourceDescriptorInfoEXT, index: u32, descriptor_size: vk.DeviceSize) -> bool {
-	destination: vk.HostAddressRangeEXT = {
-		address = &heap.resource.allocation.mapped[vk.DeviceSize(index) * descriptor_size],
-		size    = int(descriptor_size),
+write_image_descriptor :: proc(view: ^vk.ImageViewCreateInfo, type: vk.DescriptorType, index: u32) -> bool {
+	image_info: vk.ImageDescriptorInfoEXT = {
+		sType  = .IMAGE_DESCRIPTOR_INFO_EXT,
+		pView  = view,
+		layout = .GENERAL,
 	}
+	info: vk.ResourceDescriptorInfoEXT = {
+		sType = .RESOURCE_DESCRIPTOR_INFO_EXT,
+		type = type,
+		data = {pImage = &image_info},
+	}
+	return write_resource_descriptor(&info, index, device.heap_properties.imageDescriptorSize)
+}
+
+@(private = "file")
+write_resource_descriptor :: proc(info: ^vk.ResourceDescriptorInfoEXT, index: u32, descriptor_size: vk.DeviceSize) -> bool {
+	destination := heap_destination(heap.resource, index, descriptor_size)
 	if res := vk.WriteResourceDescriptorsEXT(device.handle, 1, info, &destination); res != .SUCCESS {
 		log.errorf("Failed to write a %v descriptor: %v", info.type, res)
 		return false
@@ -217,52 +190,46 @@ write_resource_descriptor :: proc(info: ^vk.ResourceDescriptorInfoEXT, index: u3
 }
 
 @(private = "file")
-@(require_results)
-make_heap_storage :: proc(size: vk.DeviceSize) -> (storage: Heap_Storage, err: Error) {
-	usage_info: vk.BufferUsageFlags2CreateInfo = {
-		sType = .BUFFER_USAGE_FLAGS_2_CREATE_INFO,
-		usage = {.DESCRIPTOR_HEAP_EXT, .SHADER_DEVICE_ADDRESS},
-	}
-	buffer_info: vk.BufferCreateInfo = {
-		sType       = .BUFFER_CREATE_INFO,
-		pNext       = &usage_info,
-		size        = size,
-		usage       = {.SHADER_DEVICE_ADDRESS},
-		sharingMode = .EXCLUSIVE,
-	}
-	if res := vk.CreateBuffer(device.handle, &buffer_info, nil, &storage.handle); res != .SUCCESS {
-		log.errorf("Failed to create a descriptor heap: %v", res)
-		return {}, .Heap_Creation_Failed
-	}
-	requirements: vk.MemoryRequirements
-	vk.GetBufferMemoryRequirements(device.handle, storage.handle, &requirements)
-	allocation, allocate_err := allocate_memory(requirements, {.HOST_VISIBLE, .HOST_COHERENT}, .Linear)
-	if allocate_err != nil {
-		vk.DestroyBuffer(device.handle, storage.handle, nil)
-		return {}, allocate_err
-	}
-	storage.allocation = allocation
-	if res := vk.BindBufferMemory(device.handle, storage.handle, allocation.memory, allocation.offset); res != .SUCCESS {
-		log.errorf("Failed to bind descriptor heap memory: %v", res)
-		destroy_heap_storage(&storage)
-		return {}, .Heap_Creation_Failed
-	}
-	storage.size = size
-	address_info: vk.BufferDeviceAddressInfo = {
-		sType  = .BUFFER_DEVICE_ADDRESS_INFO,
-		buffer = storage.handle,
-	}
-	storage.address = vk.GetBufferDeviceAddress(device.handle, &address_info)
-	return
+heap_destination :: proc(storage: Heap_Storage, index: u32, descriptor_size: vk.DeviceSize) -> vk.HostAddressRangeEXT {
+	return {address = &storage.buffer.allocation.mapped[vk.DeviceSize(index) * descriptor_size], size = int(descriptor_size)}
 }
 
 @(private = "file")
-destroy_heap_storage :: proc(storage: ^Heap_Storage) {
-	if storage.handle != 0 {
-		vk.DestroyBuffer(device.handle, storage.handle, nil)
+make_slot_pool :: proc(first: u32, count: int) -> Slot_Pool {
+	pool := Slot_Pool {
+		first = first,
+		free  = make([dynamic]u32, count),
 	}
-	free_memory(&storage.allocation)
-	storage^ = {}
+	for &slot, index in pool.free {
+		slot = u32(count - 1 - index)
+	}
+	return pool
+}
+
+@(private = "file")
+@(require_results)
+take_slot :: proc(pool: ^Slot_Pool, kind: string) -> (slot: u32, err: Error) {
+	if len(pool.free) == 0 {
+		log.errorf("The descriptor heap is out of %v slots (%v)", kind, cap(pool.free))
+		return 0, .Heap_Full
+	}
+	return pop(&pool.free), nil
+}
+
+@(private = "file")
+give_back_slot :: proc(pool: ^Slot_Pool, index: u32) {
+	if index > pool.first {
+		append(&pool.free, index - pool.first)
+	}
+}
+
+@(private = "file")
+@(require_results)
+make_heap_storage :: proc(size: vk.DeviceSize) -> (storage: Heap_Storage, err: Error) {
+	storage.buffer = make_host_buffer(size, {.DESCRIPTOR_HEAP_EXT, .SHADER_DEVICE_ADDRESS}) or_return
+	storage.address = buffer_address(storage.buffer.handle)
+	storage.size = size
+	return
 }
 
 @(private)
@@ -287,23 +254,11 @@ open_descriptor_heap :: proc() -> (err: Error) {
 		return .Heap_Too_Small
 	}
 
-	heap.buffer_first = u32(buffer_base / buffer_size)
-	heap.image_first = u32(image_base / image_size)
-	heap.sampler_first = u32(sampler_base / sampler_descriptor_size)
 	heap.resource = make_heap_storage(resource_size) or_return
 	heap.sampler = make_heap_storage(sampler_size) or_return
-	heap.free_buffers = make([dynamic]u32, 0, MAX_HEAP_BUFFERS)
-	for slot := MAX_HEAP_BUFFERS - 1; slot >= 0; slot -= 1 {
-		append(&heap.free_buffers, u32(slot))
-	}
-	heap.free_images = make([dynamic]u32, 0, MAX_HEAP_IMAGES)
-	for pair := MAX_HEAP_IMAGES - 1; pair >= 0; pair -= 1 {
-		append(&heap.free_images, u32(pair))
-	}
-	heap.free_samplers = make([dynamic]u32, 0, MAX_HEAP_SAMPLERS)
-	for slot := MAX_HEAP_SAMPLERS - 1; slot >= 0; slot -= 1 {
-		append(&heap.free_samplers, u32(slot))
-	}
+	heap.buffers = make_slot_pool(u32(buffer_base / buffer_size), MAX_HEAP_BUFFERS)
+	heap.images = make_slot_pool(u32(image_base / image_size), MAX_HEAP_IMAGES)
+	heap.samplers = make_slot_pool(u32(sampler_base / sampler_descriptor_size), MAX_HEAP_SAMPLERS)
 
 	heap.null_buffer = make_empty_buffer(16, Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
 	runtime.mem_zero(heap.null_buffer.mapped, 16)
@@ -315,45 +270,24 @@ open_descriptor_heap :: proc() -> (err: Error) {
 		format = heap.null_image.format,
 		subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
 	}
-	clear_null_image() or_return
+	command_buffer := staging_commands() or_return
+	emit_clear(command_buffer, {image = heap.null_image})
 	heap.null_sampler = make_sampler() or_return
 	log.infof("Descriptor heaps: resource %v KiB, sampler %v KiB", resource_size / 1024, sampler_size / 1024)
 	return nil
 }
 
-@(private = "file")
-@(require_results)
-clear_null_image :: proc() -> Error {
-	command_buffer := staging_commands() or_return
-	black: vk.ClearColorValue
-	range: vk.ImageSubresourceRange = {
-		aspectMask = {.COLOR},
-		levelCount = 1,
-		layerCount = 1,
-	}
-	vk.CmdClearColorImage(command_buffer, heap.null_image.handle, .GENERAL, &black, 1, &range)
-	return nil
-}
-
 @(private)
 close_descriptor_heap :: proc() {
-	if heap.resource.handle == 0 {
+	if heap.resource.buffer.handle == 0 {
 		return
 	}
 	delete_image(&heap.null_image)
 	delete_buffer(&heap.null_buffer)
-	destroy_heap_storage(&heap.resource)
-	destroy_heap_storage(&heap.sampler)
-	delete(heap.free_buffers)
-	delete(heap.free_images)
-	delete(heap.free_samplers)
+	destroy_host_buffer(&heap.resource.buffer)
+	destroy_host_buffer(&heap.sampler.buffer)
+	delete(heap.buffers.free)
+	delete(heap.images.free)
+	delete(heap.samplers.free)
 	heap = {}
-}
-
-@(private = "file")
-round_up :: proc(value, multiple: vk.DeviceSize) -> vk.DeviceSize {
-	if multiple == 0 {
-		return value
-	}
-	return (value + multiple - 1) / multiple * multiple
 }

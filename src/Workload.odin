@@ -108,8 +108,8 @@ Acquired_Surface :: struct {
 
 @(private)
 Execution_Slot :: struct {
-	fence:    vk.Fence,
-	acquired: [dynamic]vk.Semaphore,
+	fence:              vk.Fence,
+	acquire_semaphores: [dynamic]vk.Semaphore,
 }
 
 Workload :: struct {
@@ -127,6 +127,7 @@ Workload :: struct {
 	epoch:        u32,
 	emitted:      Emitted_State,
 	tables:       [dynamic]Buffer,
+	table_chunk:  int,
 	table_used:   int,
 	acquired:     [dynamic]Acquired_Surface,
 	readbacks:    [dynamic]Buffer,
@@ -168,28 +169,25 @@ Access :: struct {
 @(require_results)
 make_workload :: proc(name := "workload") -> (workload: Workload, err: Error) {
 	assert(initialised, "Valhalla.init must be called before make_workload")
+	reused := false
 	for index := len(retired_workloads) - 1; index >= 0; index -= 1 {
-		if !workload_idle(&retired_workloads[index]) {
-			continue
+		if workload_idle(&retired_workloads[index]) {
+			workload = retired_workloads[index]
+			unordered_remove(&retired_workloads, index)
+			reused = true
+			break
 		}
-		workload = retired_workloads[index]
-		unordered_remove(&retired_workloads, index)
-		set_workload_name(&workload, name)
-		register_workload(&workload)
-		if err = begin_recording(&workload); err != nil {
-			destroy_workload(&workload)
-			return {}, err
+	}
+	if !reused {
+		pool_info: vk.CommandPoolCreateInfo = {
+			sType            = .COMMAND_POOL_CREATE_INFO,
+			flags            = {.RESET_COMMAND_BUFFER},
+			queueFamilyIndex = device.queue_families.graphics,
 		}
-		return
-	}
-	pool_info: vk.CommandPoolCreateInfo = {
-		sType            = .COMMAND_POOL_CREATE_INFO,
-		flags            = {.RESET_COMMAND_BUFFER},
-		queueFamilyIndex = device.queue_families.graphics,
-	}
-	if res := vk.CreateCommandPool(device.handle, &pool_info, nil, &workload.command_pool); res != .SUCCESS {
-		log.errorf("Failed to create workload command pool: %v", res)
-		return {}, .Command_Pool_Creation_Failed
+		if res := vk.CreateCommandPool(device.handle, &pool_info, nil, &workload.command_pool); res != .SUCCESS {
+			log.errorf("Failed to create workload command pool: %v", res)
+			return {}, .Command_Pool_Creation_Failed
+		}
 	}
 	defer if err != nil {
 		destroy_workload(&workload)
@@ -248,7 +246,7 @@ release_workload_pool :: proc() {
 @(require_results)
 acquire :: proc(workload: ^Workload, surface: ^Surface) -> (image: Image, err: Error) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	for acquired in workload.acquired {
 		assert(acquired.surface != surface, "a workload acquires from each surface once")
 	}
@@ -267,7 +265,7 @@ acquire :: proc(workload: ^Workload, surface: ^Surface) -> (image: Image, err: E
 @(require_results)
 bind_shader :: proc(workload: ^Workload, shader: Shader) -> Error {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot bind a shader to a finalized workload; reset_workload to record again")
+	assert_recording(workload)
 	recording := shader.recording
 	graphics, is_graphics := shader.variant.(Graphics_Shader)
 	assert(
@@ -275,6 +273,102 @@ bind_shader :: proc(workload: ^Workload, shader: Shader) -> Error {
 		"the shader's push block holds more than the Valhalla header, but no set_push_data was recorded",
 	)
 
+	accesses := collect_accesses(shader)
+	scope: Rendering_Scope
+	extent: [2]u32
+	samples: vk.SampleCountFlags
+	if is_graphics {
+		check_graphics_recording(recording, graphics)
+		scope.view_mask = graphics.config.view_mask
+		first_attachment := len(accesses)
+		for image, index in recording.colour_attachments {
+			check_view_mask(scope.view_mask, image)
+			scope.colours[index] = u64(render_view(image))
+			append(&accesses, attachment_access(image))
+			extent, samples = attachment_extent(extent, samples, image)
+		}
+		scope.colour_count = len(recording.colour_attachments)
+		if depth, has_depth := recording.depth_attachment.?; has_depth {
+			check_view_mask(scope.view_mask, depth)
+			scope.depth = u64(render_view(depth))
+			append(&accesses, attachment_access(depth))
+			extent, samples = attachment_extent(extent, samples, depth)
+		}
+		scope.open = true
+		for access in accesses[:first_attachment] {
+			for attachment in accesses[first_attachment:] {
+				rendered := attachment.key
+				rendered.mips = 1
+				assert(!keys_overlap(rendered, access.key), "a shader cannot read or write an image it also renders to")
+			}
+		}
+	}
+
+	same_scope := is_graphics && workload.scope.open && workload.scope == scope
+	folded_colours: [MAX_COLOUR_ATTACHMENTS]Maybe(vk.ClearValue)
+	folded_depth: Maybe(vk.ClearValue)
+	folded_keys := make([dynamic]Resource_Key, 0, MAX_COLOUR_ATTACHMENTS + 1, context.temp_allocator)
+	depth, has_depth := recording.depth_attachment.?
+	for pending in workload.clears {
+		folded := false
+		if is_graphics && !same_scope {
+			for image, index in recording.colour_attachments {
+				if folds_into(pending, image, scope.view_mask) {
+					folded_colours[index] = pending.value
+					append(&folded_keys, attachment_access(image).key)
+					folded = true
+				}
+			}
+			if has_depth && folds_into(pending, depth, scope.view_mask) {
+				folded_depth = pending.value
+				append(&folded_keys, attachment_access(depth).key)
+				folded = true
+			}
+		}
+		if !folded {
+			close_scope(workload)
+			emit_clear(workload.command_buffer, pending)
+		}
+	}
+	clear(&workload.clears)
+
+	hazard := workload.raw_written
+	for access in accesses {
+		state, handle := resource_state(workload, access)
+		check_version(state, handle, access, recording.id, handle.read == workload.epoch)
+		if access.attachment && (same_scope || slice.contains(folded_keys[:], access.key)) {
+			continue
+		}
+		if has_hazard(workload, handle^, access) {
+			hazard = true
+		}
+	}
+	if hazard || !same_scope {
+		close_scope(workload)
+	}
+	if hazard {
+		emit_barrier(workload, accesses[:])
+	}
+	if is_graphics && !workload.scope.open {
+		open_scope(workload, recording, scope, extent, folded_colours, folded_depth)
+	}
+	for access in accesses {
+		commit_access(workload, &workload.resources[access.key], &workload.handles[handle_key(access.key)], access, recording.id)
+	}
+
+	table: vk.DeviceAddress
+	if len(recording.bindings) > 0 {
+		table = write_table(workload, recording) or_return
+	}
+	begin_label(workload.command_buffer, shader.name)
+	workload.emitted = replay(workload.command_buffer, shader, recording, scope, extent, samples, table, workload.emitted)
+	end_label(workload.command_buffer)
+	return nil
+}
+
+@(private = "file")
+collect_accesses :: proc(shader: Shader) -> [dynamic]Access {
+	recording := shader.recording
 	accesses := make([dynamic]Access, 0, len(recording.bindings) + MAX_COLOUR_ATTACHMENTS + 2, context.temp_allocator)
 	push_reads := make([dynamic]Shader_Resource, context.temp_allocator)
 	pack_push_data(shader, &push_reads)
@@ -309,131 +403,12 @@ bind_shader :: proc(workload: ^Workload, shader: Shader) -> Error {
 			append(&accesses, buffer_access(draw.buffer, read = true, write = false))
 		}
 	}
-
-	scope: Rendering_Scope
-	extent: [2]u32
-	samples: vk.SampleCountFlags
-	if is_graphics {
-		check_graphics_recording(recording, graphics)
-		scope.view_mask = graphics.config.view_mask
-		for image, index in recording.colour_attachments {
-			check_view_mask(scope.view_mask, image)
-			access := attachment_access(image)
-			scope.colours[index] = u64(image.attachment_view if image.attachment_view != 0 else image.view)
-			append(&accesses, access)
-			extent, samples = attachment_extent(extent, samples, image)
-		}
-		scope.colour_count = len(recording.colour_attachments)
-		if depth, has_depth := recording.depth_attachment.?; has_depth {
-			check_view_mask(scope.view_mask, depth)
-			access := attachment_access(depth)
-			scope.depth = u64(depth.attachment_view if depth.attachment_view != 0 else depth.view)
-			append(&accesses, access)
-			extent, samples = attachment_extent(extent, samples, depth)
-		}
-		scope.open = true
-		for access in accesses {
-			if access.attachment {
-				continue
-			}
-			for other in accesses {
-				rendered := other.key
-				rendered.mips = 1
-				assert(!other.attachment || !keys_overlap(rendered, access.key), "a shader cannot read or write an image it also renders to")
-			}
-		}
-	}
-
-	same_scope := is_graphics && workload.scope.open && workload.scope == scope
-	folded_colours: [MAX_COLOUR_ATTACHMENTS]Maybe(vk.ClearValue)
-	folded_depth: Maybe(vk.ClearValue)
-	folded_keys := make([dynamic]Resource_Key, 0, MAX_COLOUR_ATTACHMENTS + 1, context.temp_allocator)
-	if len(workload.clears) > 0 {
-		depth, has_depth := recording.depth_attachment.?
-		for pending in workload.clears {
-			folded := false
-			if is_graphics && !same_scope {
-				for image, index in recording.colour_attachments {
-					if folds_into(pending, image, scope.view_mask) {
-						folded_colours[index] = pending.value
-						append(&folded_keys, attachment_access(image).key)
-						folded = true
-					}
-				}
-				if has_depth && folds_into(pending, depth, scope.view_mask) {
-					folded_depth = pending.value
-					append(&folded_keys, attachment_access(depth).key)
-					folded = true
-				}
-			}
-			if !folded {
-				close_scope(workload)
-				emit_clear(workload.command_buffer, pending)
-			}
-		}
-		clear(&workload.clears)
-	}
-	hazard := workload.raw_written
-	now := workload.epoch + 1
-	for access in accesses {
-		state, handle := resource_state(workload, access)
-		check_version(state, handle, access, recording.id, handle.read == now)
-		if same_scope && access.attachment {
-			continue
-		}
-		if access.attachment && slice.contains(folded_keys[:], access.key) {
-			continue
-		}
-		if handle.layout != .GENERAL {
-			hazard = true
-		}
-		if access.read && handle.written == now {
-			hazard = true
-		}
-		if access.write && (handle.written == now || handle.read == now) {
-			hazard = true
-		}
-	}
-
-	if hazard || !same_scope {
-		close_scope(workload)
-	}
-	if hazard {
-		emit_barrier(workload, accesses[:])
-	}
-	if is_graphics && !workload.scope.open {
-		open_scope(workload, recording, scope, extent, folded_colours, folded_depth)
-	}
-
-	now = workload.epoch + 1
-	for access in accesses {
-		state := &workload.resources[access.key]
-		handle := &workload.handles[handle_key(access.key)]
-		if access.write {
-			assert(!state.produced, "this resource was produced by this workload and is written again; produce its final version")
-			state.version = access.version + 1
-			state.writer = recording.id
-			state.used = false
-			handle.written = now
-		} else if access.read {
-			handle.read = now
-			mark_used(workload, state, handle^, access.key)
-		}
-	}
-
-	table: vk.DeviceAddress
-	if len(recording.bindings) > 0 {
-		table = write_table(workload, recording) or_return
-	}
-	begin_label(workload.command_buffer, shader.name)
-	workload.emitted = replay(workload.command_buffer, shader, recording, scope, extent, samples, table, workload.emitted)
-	end_label(workload.command_buffer)
-	return nil
+	return accesses
 }
 
-clear_image :: proc(workload: ^Workload, image: Image, value: vk.ClearValue) -> (written: Image) {
+clear_image :: proc(workload: ^Workload, image: Image, value: vk.ClearValue) -> Image {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	assert(.TRANSFER_DST in image.usage, "the image cannot be cleared: it is not a transfer destination")
 	for pending in workload.clears {
 		if pending.image.handle == image.handle {
@@ -441,11 +416,9 @@ clear_image :: proc(workload: ^Workload, image: Image, value: vk.ClearValue) -> 
 			break
 		}
 	}
-	record_write(workload, image_access(image, read = false, write = true), flush = false)
+	record_access(workload, image_access(image, read = false, write = true), flush = false)
 	append(&workload.clears, Pending_Clear{image = image, value = value, version = image.version + 1})
-	written = image
-	written.version += 1
-	return
+	return next_version(image)
 }
 
 @(private = "file")
@@ -456,7 +429,7 @@ flush_clears :: proc(workload: ^Workload) {
 	clear(&workload.clears)
 }
 
-@(private = "file")
+@(private)
 emit_clear :: proc(cmd: vk.CommandBuffer, pending: Pending_Clear) {
 	image := pending.image
 	value := pending.value
@@ -489,17 +462,14 @@ folds_into :: proc(pending: Pending_Clear, attachment: Image, view_mask: u32) ->
 	return image.layers < 32 && view_mask == (u32(1) << image.layers) - 1
 }
 
-clear_buffer :: proc(workload: ^Workload, buffer: Buffer, value: u32 = 0) -> (written: Buffer) {
+clear_buffer :: proc(workload: ^Workload, buffer: Buffer, value: u32 = 0) -> Buffer {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
-	access := buffer_access(buffer, read = false, write = true)
-	record_write(workload, access)
+	assert_recording(workload)
+	record_access(workload, buffer_access(buffer, read = false, write = true))
 	begin_label(workload.command_buffer, "clear_buffer")
 	vk.CmdFillBuffer(workload.command_buffer, buffer.handle, 0, vk.DeviceSize(vk.WHOLE_SIZE), value)
 	end_label(workload.command_buffer)
-	written = buffer
-	written.version += 1
-	return
+	return next_version(buffer)
 }
 
 Image_Region :: struct {
@@ -516,19 +486,15 @@ copy_buffer :: proc(
 	#any_int source_offset: int = 0,
 	#any_int destination_offset: int = 0,
 	#any_int size: int = 0,
-) -> (
-	written: Buffer,
-) {
+) -> Buffer {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	region := buffer_copy_region(source, destination, source_offset, destination_offset, size)
 	record_copy(workload, buffer_access(source, read = true, write = false), buffer_access(destination, read = false, write = true))
 	begin_label(workload.command_buffer, "copy_buffer")
-	emit_buffer_copy(workload.command_buffer, source, destination, region)
+	emit_buffer_copy(workload.command_buffer, source.handle, destination.handle, region)
 	end_label(workload.command_buffer)
-	written = destination
-	written.version += 1
-	return
+	return next_version(destination)
 }
 
 copy_image :: proc(
@@ -536,19 +502,15 @@ copy_image :: proc(
 	source, destination: Image,
 	source_region := Image_Region{},
 	destination_region := Image_Region{},
-) -> (
-	written: Image,
-) {
+) -> Image {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	region := image_copy_region(source, destination, source_region, destination_region)
 	record_copy(workload, image_access(source, read = true, write = false), image_access(destination, read = false, write = true))
 	begin_label(workload.command_buffer, "copy_image")
-	emit_image_copy(workload.command_buffer, source, destination, region)
+	emit_image_copy(workload.command_buffer, source.handle, destination.handle, region)
 	end_label(workload.command_buffer)
-	written = destination
-	written.version += 1
-	return
+	return next_version(destination)
 }
 
 blit_image :: proc(
@@ -557,19 +519,15 @@ blit_image :: proc(
 	source_region := Image_Region{},
 	destination_region := Image_Region{},
 	filter := vk.Filter.LINEAR,
-) -> (
-	written: Image,
-) {
+) -> Image {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	region := image_blit_region(source, destination, source_region, destination_region, filter)
 	record_copy(workload, image_access(source, read = true, write = false), image_access(destination, read = false, write = true))
 	begin_label(workload.command_buffer, "blit_image")
-	emit_image_blit(workload.command_buffer, source, destination, region, filter)
+	emit_image_blit(workload.command_buffer, source.handle, destination.handle, region, filter)
 	end_label(workload.command_buffer)
-	written = destination
-	written.version += 1
-	return
+	return next_version(destination)
 }
 
 generate_workload_mips :: proc(workload: ^Workload, image: Image) -> (written: Image) {
@@ -587,19 +545,15 @@ copy_buffer_to_image :: proc(
 	destination: Image,
 	#any_int source_offset: int = 0,
 	destination_region := Image_Region{},
-) -> (
-	written: Image,
-) {
+) -> Image {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	region := buffer_image_region(source, destination, source_offset, destination_region, to_image = true)
 	record_copy(workload, buffer_access(source, read = true, write = false), image_access(destination, read = false, write = true))
 	begin_label(workload.command_buffer, "copy_buffer_to_image")
-	emit_buffer_to_image(workload.command_buffer, source, destination, region)
+	emit_buffer_to_image(workload.command_buffer, source.handle, destination.handle, region)
 	end_label(workload.command_buffer)
-	written = destination
-	written.version += 1
-	return
+	return next_version(destination)
 }
 
 copy_image_to_buffer :: proc(
@@ -608,51 +562,29 @@ copy_image_to_buffer :: proc(
 	destination: Buffer,
 	source_region := Image_Region{},
 	#any_int destination_offset: int = 0,
-) -> (
-	written: Buffer,
-) {
+) -> Buffer {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	region := buffer_image_region(destination, source, destination_offset, source_region, to_image = false)
 	record_copy(workload, image_access(source, read = true, write = false), buffer_access(destination, read = false, write = true))
 	begin_label(workload.command_buffer, "copy_image_to_buffer")
-	emit_image_to_buffer(workload.command_buffer, source, destination, region)
+	emit_image_to_buffer(workload.command_buffer, source.handle, destination.handle, region)
 	end_label(workload.command_buffer)
-	written = destination
-	written.version += 1
-	return
+	return next_version(destination)
 }
 
 @(require_results)
 readback_image :: proc(workload: ^Workload, image: Image) -> (readback: Readback, err: Error) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
-	assert(.TRANSFER_SRC in image.usage, "the image cannot be read back: it is not a transfer source")
-	assert(card(image.aspect) == 1, "images with both depth and stencil cannot be read back yet")
-	texel_size, known := format_texel_size(image.format)
-	assert(known, "reading back this format is not supported yet")
-	readback.buffer = make_readback_buffer(workload, int(texel_size * image.extent.x * image.extent.y * image.extent.z * image.layers)) or_return
+	assert_recording(workload)
+	readback.buffer = make_readback_buffer(workload, image_region_bytes(image, {})) or_return
 	readback.format = image.format
 	readback.extent = image.extent
 	readback.layers = image.layers
-	base_mip, base_layer := view_base(image)
-	access := image_access(image, read = true, write = false)
-	record_read(workload, access)
-	region: vk.BufferImageCopy2 = {
-		sType            = .BUFFER_IMAGE_COPY_2,
-		imageSubresource = {aspectMask = image.aspect, mipLevel = base_mip, baseArrayLayer = base_layer, layerCount = image.layers},
-		imageExtent      = {image.extent.x, image.extent.y, image.extent.z},
-	}
-	copy_info: vk.CopyImageToBufferInfo2 = {
-		sType          = .COPY_IMAGE_TO_BUFFER_INFO_2,
-		srcImage       = image.handle,
-		srcImageLayout = .GENERAL,
-		dstBuffer      = readback.buffer.handle,
-		regionCount    = 1,
-		pRegions       = &region,
-	}
+	region := buffer_image_region(readback.buffer, image, 0, {}, to_image = false)
+	record_access(workload, image_access(image, read = true, write = false))
 	begin_label(workload.command_buffer, "readback_image")
-	vk.CmdCopyImageToBuffer2(workload.command_buffer, &copy_info)
+	emit_image_to_buffer(workload.command_buffer, image.handle, readback.buffer.handle, region)
 	host_barrier(workload.command_buffer)
 	end_label(workload.command_buffer)
 	return
@@ -661,30 +593,18 @@ readback_image :: proc(workload: ^Workload, image: Image) -> (readback: Readback
 @(require_results)
 readback_buffer :: proc(workload: ^Workload, buffer: Buffer) -> (readback: Readback, err: Error) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	readback.buffer = make_readback_buffer(workload, int(buffer.size)) or_return
-	access := buffer_access(buffer, read = true, write = false)
-	record_read(workload, access)
-	region: vk.BufferCopy2 = {
-		sType = .BUFFER_COPY_2,
-		size  = buffer.size,
-	}
-	copy_info: vk.CopyBufferInfo2 = {
-		sType       = .COPY_BUFFER_INFO_2,
-		srcBuffer   = buffer.handle,
-		dstBuffer   = readback.buffer.handle,
-		regionCount = 1,
-		pRegions    = &region,
-	}
+	record_access(workload, buffer_access(buffer, read = true, write = false))
 	begin_label(workload.command_buffer, "readback_buffer")
-	vk.CmdCopyBuffer2(workload.command_buffer, &copy_info)
+	emit_buffer_copy(workload.command_buffer, buffer.handle, readback.buffer.handle, {sType = .BUFFER_COPY_2, size = buffer.size})
 	host_barrier(workload.command_buffer)
 	end_label(workload.command_buffer)
 	return
 }
 
 workload_produces_image :: proc(workload: ^Workload, image: Image) -> (produced: Image) {
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	_, is_swapchain := image.variant.(Swapchain_Image)
 	assert(!is_swapchain, "a surface image's output is its present; it cannot be produced")
 	mark_produced(workload, image_access(image, read = false, write = false))
@@ -695,7 +615,7 @@ workload_produces_image :: proc(workload: ^Workload, image: Image) -> (produced:
 }
 
 workload_produces_buffer :: proc(workload: ^Workload, buffer: Buffer) -> (produced: Buffer) {
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	mark_produced(workload, buffer_access(buffer, read = false, write = false))
 	produced = buffer
 	produced.version = 0
@@ -709,13 +629,13 @@ workload_produces :: proc {
 }
 
 workload_discards_image :: proc(workload: ^Workload, image: Image) {
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	_, handle := resource_state(workload, image_access(image, read = false, write = false))
 	handle.discarded = true
 }
 
 workload_discards_buffer :: proc(workload: ^Workload, buffer: Buffer) {
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	_, handle := resource_state(workload, buffer_access(buffer, read = false, write = false))
 	handle.discarded = true
 }
@@ -875,7 +795,7 @@ write_to_sink :: proc "c" (ctx: rawptr, data: rawptr, size: c.int) {
 }
 
 present :: proc(workload: ^Workload, image: Image) {
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	swapchain_image, is_swapchain := image.variant.(Swapchain_Image)
 	assert(is_swapchain, "present needs an image from acquire")
 	acquired := find_acquired(workload, swapchain_image.surface)
@@ -885,7 +805,7 @@ present :: proc(workload: ^Workload, image: Image) {
 	flush_clears(workload)
 	access := image_access(image, read = true, write = false)
 	state, handle := resource_state(workload, access)
-	check_version(state, handle, access, 0, handle.read == workload.epoch + 1)
+	check_version(state, handle, access, 0, handle.read == workload.epoch)
 	close_scope(workload)
 	handle.presented = true
 	state.used = true
@@ -893,7 +813,7 @@ present :: proc(workload: ^Workload, image: Image) {
 }
 
 raw_commands :: proc(workload: ^Workload) -> vk.CommandBuffer {
-	assert(workload.state == .Recording, "cannot record into a finalized workload")
+	assert_recording(workload)
 	close_scope(workload)
 	flush_clears(workload)
 	global_barrier(workload.command_buffer)
@@ -943,9 +863,9 @@ execute_workload :: proc(workload: ^Workload) -> (execution: Execution, err: Err
 	indices := make([]u32, len(workload.acquired), context.temp_allocator)
 	for &acquired, index in workload.acquired {
 		acquire_err: Error
-		indices[index], acquire_err = acquire_next_image(acquired.surface, slot.acquired[index])
+		indices[index], acquire_err = acquire_next_image(acquired.surface, slot.acquire_semaphores[index])
 		if acquire_err != nil {
-			release_acquires(slot.acquired[:index])
+			release_acquires(slot.acquire_semaphores[:index])
 			if acquire_err == Surface_Error.Out_Of_Date {
 				return {}, .Swapchain_Changed
 			}
@@ -975,7 +895,7 @@ execute_workload :: proc(workload: ^Workload) -> (execution: Execution, err: Err
 		}
 		wait_infos[submit] = {
 			sType     = .SEMAPHORE_SUBMIT_INFO,
-			semaphore = slot.acquired[index],
+			semaphore = slot.acquire_semaphores[index],
 			stageMask = {.ALL_TRANSFER},
 		}
 		signal_infos[submit] = {
@@ -1054,6 +974,14 @@ wait_execution :: proc(execution: Execution) -> Error {
 	return nil
 }
 
+@(private)
+@(require_results)
+run_workload :: proc(workload: ^Workload) -> Error {
+	finalize_workload(workload) or_return
+	execution := execute_workload(workload) or_return
+	return wait_execution(execution)
+}
+
 @(require_results)
 reset_workload :: proc(workload: ^Workload) -> Error {
 	wait_all(workload)
@@ -1082,10 +1010,10 @@ destroy_workload :: proc(workload: ^Workload) {
 		if slot.fence != 0 {
 			vk.DestroyFence(device.handle, slot.fence, nil)
 		}
-		for semaphore in slot.acquired {
+		for semaphore in slot.acquire_semaphores {
 			vk.DestroySemaphore(device.handle, semaphore, nil)
 		}
-		delete(slot.acquired)
+		delete(slot.acquire_semaphores)
 	}
 	if workload.command_pool != 0 {
 		vk.DestroyCommandPool(device.handle, workload.command_pool, nil)
@@ -1254,9 +1182,7 @@ image_copy_region :: proc(source, destination: Image, source_region, destination
 	assert(.TRANSFER_DST in destination.usage, "the destination image is not a transfer destination")
 	assert(source.aspect == destination.aspect, "a copy needs images with the same aspects")
 	assert(source.samples == destination.samples, "a copy needs images with the same sample count")
-	source_size, source_known := format_texel_size(source.format)
-	destination_size, destination_known := format_texel_size(destination.format)
-	assert(source_known && destination_known && source_size == destination_size, "a copy needs formats with the same texel size; use blit_image to convert")
+	assert(same_texel_size(source.format, destination.format), "a copy needs formats with the same texel size; use blit_image to convert")
 	from := resolve_region(source, source_region)
 	to := resolve_region(destination, destination_region, from.extent, from.subresource.layerCount)
 	check_same_image(source, destination, from, to)
@@ -1306,12 +1232,12 @@ buffer_image_region :: proc(buffer: Buffer, image: Image, buffer_offset: int, im
 }
 
 @(private)
-emit_buffer_copy :: proc(cmd: vk.CommandBuffer, source, destination: Buffer, region: vk.BufferCopy2) {
+emit_buffer_copy :: proc(cmd: vk.CommandBuffer, source, destination: vk.Buffer, region: vk.BufferCopy2) {
 	region := region
 	copy_info: vk.CopyBufferInfo2 = {
 		sType       = .COPY_BUFFER_INFO_2,
-		srcBuffer   = source.handle,
-		dstBuffer   = destination.handle,
+		srcBuffer   = source,
+		dstBuffer   = destination,
 		regionCount = 1,
 		pRegions    = &region,
 	}
@@ -1319,7 +1245,7 @@ emit_buffer_copy :: proc(cmd: vk.CommandBuffer, source, destination: Buffer, reg
 }
 
 @(private)
-emit_image_copy :: proc(cmd: vk.CommandBuffer, source, destination: Image, region: Image_Copy_Region) {
+emit_image_copy :: proc(cmd: vk.CommandBuffer, source, destination: vk.Image, region: Image_Copy_Region) {
 	copy_region: vk.ImageCopy2 = {
 		sType          = .IMAGE_COPY_2,
 		srcSubresource = region.from.subresource,
@@ -1330,9 +1256,9 @@ emit_image_copy :: proc(cmd: vk.CommandBuffer, source, destination: Image, regio
 	}
 	copy_info: vk.CopyImageInfo2 = {
 		sType          = .COPY_IMAGE_INFO_2,
-		srcImage       = source.handle,
+		srcImage       = source,
 		srcImageLayout = .GENERAL,
-		dstImage       = destination.handle,
+		dstImage       = destination,
 		dstImageLayout = .GENERAL,
 		regionCount    = 1,
 		pRegions       = &copy_region,
@@ -1341,7 +1267,7 @@ emit_image_copy :: proc(cmd: vk.CommandBuffer, source, destination: Image, regio
 }
 
 @(private)
-emit_image_blit :: proc(cmd: vk.CommandBuffer, source, destination: Image, region: Image_Copy_Region, filter: vk.Filter) {
+emit_image_blit :: proc(cmd: vk.CommandBuffer, source, destination: vk.Image, region: Image_Copy_Region, filter: vk.Filter) {
 	far :: proc(region: Resolved_Region) -> vk.Offset3D {
 		return {region.offset.x + i32(region.extent.width), region.offset.y + i32(region.extent.height), region.offset.z + i32(region.extent.depth)}
 	}
@@ -1354,9 +1280,9 @@ emit_image_blit :: proc(cmd: vk.CommandBuffer, source, destination: Image, regio
 	}
 	blit_info: vk.BlitImageInfo2 = {
 		sType          = .BLIT_IMAGE_INFO_2,
-		srcImage       = source.handle,
+		srcImage       = source,
 		srcImageLayout = .GENERAL,
-		dstImage       = destination.handle,
+		dstImage       = destination,
 		dstImageLayout = .GENERAL,
 		regionCount    = 1,
 		pRegions       = &blit_region,
@@ -1366,7 +1292,7 @@ emit_image_blit :: proc(cmd: vk.CommandBuffer, source, destination: Image, regio
 }
 
 @(private)
-emit_buffer_to_image :: proc(cmd: vk.CommandBuffer, source: Buffer, destination: Image, region: Buffer_Image_Region) {
+emit_buffer_to_image :: proc(cmd: vk.CommandBuffer, source: vk.Buffer, destination: vk.Image, region: Buffer_Image_Region) {
 	copy_region: vk.BufferImageCopy2 = {
 		sType            = .BUFFER_IMAGE_COPY_2,
 		bufferOffset     = region.offset,
@@ -1376,8 +1302,8 @@ emit_buffer_to_image :: proc(cmd: vk.CommandBuffer, source: Buffer, destination:
 	}
 	copy_info: vk.CopyBufferToImageInfo2 = {
 		sType          = .COPY_BUFFER_TO_IMAGE_INFO_2,
-		srcBuffer      = source.handle,
-		dstImage       = destination.handle,
+		srcBuffer      = source,
+		dstImage       = destination,
 		dstImageLayout = .GENERAL,
 		regionCount    = 1,
 		pRegions       = &copy_region,
@@ -1386,7 +1312,7 @@ emit_buffer_to_image :: proc(cmd: vk.CommandBuffer, source: Buffer, destination:
 }
 
 @(private)
-emit_image_to_buffer :: proc(cmd: vk.CommandBuffer, source: Image, destination: Buffer, region: Buffer_Image_Region) {
+emit_image_to_buffer :: proc(cmd: vk.CommandBuffer, source: vk.Image, destination: vk.Buffer, region: Buffer_Image_Region) {
 	copy_region: vk.BufferImageCopy2 = {
 		sType            = .BUFFER_IMAGE_COPY_2,
 		bufferOffset     = region.offset,
@@ -1396,9 +1322,9 @@ emit_image_to_buffer :: proc(cmd: vk.CommandBuffer, source: Image, destination: 
 	}
 	copy_info: vk.CopyImageToBufferInfo2 = {
 		sType          = .COPY_IMAGE_TO_BUFFER_INFO_2,
-		srcImage       = source.handle,
+		srcImage       = source,
 		srcImageLayout = .GENERAL,
-		dstBuffer      = destination.handle,
+		dstBuffer      = destination,
 		regionCount    = 1,
 		pRegions       = &copy_region,
 	}
@@ -1456,25 +1382,22 @@ format_has_features :: proc(format: vk.Format, features: vk.FormatFeatureFlags) 
 
 @(private = "file")
 record_copy :: proc(workload: ^Workload, source, destination: Access) {
-	if source.key == destination.key {
-		record_write(workload, destination)
-		return
+	if source.key != destination.key {
+		record_access(workload, source)
 	}
-	record_read(workload, source)
-	record_write(workload, destination)
+	record_access(workload, destination)
+}
+
+@(private = "file")
+assert_recording :: proc(workload: ^Workload, loc := #caller_location) {
+	assert(workload.state == .Recording, "cannot record into a finalized workload; reset_workload to record again", loc)
 }
 
 @(private)
-@(require_results)
-staged_transfer :: proc() -> (cmd: vk.CommandBuffer, err: Error) {
-	cmd = staging_commands() or_return
-	memory_barrier(cmd, {.ALL_TRANSFER}, {.TRANSFER_WRITE}, {.ALL_TRANSFER}, {.TRANSFER_READ, .TRANSFER_WRITE})
-	return
-}
-
-@(private)
-end_staged_transfer :: proc(cmd: vk.CommandBuffer) {
-	memory_barrier(cmd, {.ALL_TRANSFER}, {.TRANSFER_READ, .TRANSFER_WRITE}, {.ALL_TRANSFER}, {.TRANSFER_READ, .TRANSFER_WRITE})
+next_version :: proc(resource: $T) -> T {
+	written := resource
+	written.version += 1
+	return written
 }
 
 @(private = "file")
@@ -1536,36 +1459,39 @@ check_version :: proc(state: ^Resource_State, handle: ^Handle_State, access: Acc
 }
 
 @(private = "file")
-record_write :: proc(workload: ^Workload, access: Access, flush := true) {
+record_access :: proc(workload: ^Workload, access: Access, flush := true) {
 	if flush {
 		flush_clears(workload)
 	}
 	state, handle := resource_state(workload, access)
-	now := workload.epoch + 1
-	check_version(state, handle, access, 0, handle.read == now)
+	check_version(state, handle, access, 0, handle.read == workload.epoch)
 	close_scope(workload)
-	if workload.raw_written || handle.written == now || handle.read == now || handle.layout != .GENERAL {
+	if has_hazard(workload, handle^, access) {
 		emit_barrier(workload, {access})
 	}
-	assert(!state.produced, "this resource was produced by this workload and is written again; produce its final version")
-	state.version = access.version + 1
-	state.writer = 0
-	state.used = false
-	handle.written = workload.epoch + 1
+	commit_access(workload, state, handle, access, 0)
 }
 
 @(private = "file")
-record_read :: proc(workload: ^Workload, access: Access) {
-	flush_clears(workload)
-	state, handle := resource_state(workload, access)
-	now := workload.epoch + 1
-	check_version(state, handle, access, 0, handle.read == now)
-	close_scope(workload)
-	if workload.raw_written || handle.written == now || handle.layout != .GENERAL {
-		emit_barrier(workload, {access})
+has_hazard :: proc(workload: ^Workload, handle: Handle_State, access: Access) -> bool {
+	if workload.raw_written || handle.layout != .GENERAL || handle.written == workload.epoch {
+		return true
 	}
-	handle.read = workload.epoch + 1
-	mark_used(workload, state, handle^, access.key)
+	return access.write && handle.read == workload.epoch
+}
+
+@(private = "file")
+commit_access :: proc(workload: ^Workload, state: ^Resource_State, handle: ^Handle_State, access: Access, writer: u64) {
+	if access.write {
+		assert(!state.produced, "this resource was produced by this workload and is written again; produce its final version")
+		state.version = access.version + 1
+		state.writer = writer
+		state.used = false
+		handle.written = workload.epoch
+	} else if access.read {
+		handle.read = workload.epoch
+		mark_used(workload, state, handle^, access.key)
+	}
 }
 
 @(private = "file")
@@ -1670,33 +1596,13 @@ open_scope :: proc(
 	folded_depth: Maybe(vk.ClearValue),
 ) {
 	colours := make([]vk.RenderingAttachmentInfo, len(recording.colour_attachments), context.temp_allocator)
-	depth, has_depth := recording.depth_attachment.?
 	for image, index in recording.colour_attachments {
-		colours[index] = {
-			sType       = .RENDERING_ATTACHMENT_INFO,
-			imageView   = image.attachment_view if image.attachment_view != 0 else image.view,
-			imageLayout = .GENERAL,
-			loadOp      = .LOAD,
-			storeOp     = .STORE,
-		}
-		if value, folded := folded_colours[index].?; folded {
-			colours[index].loadOp = .CLEAR
-			colours[index].clearValue = value
-		}
+		colours[index] = rendering_attachment(image, folded_colours[index])
 	}
+	depth, has_depth := recording.depth_attachment.?
 	depth_info: vk.RenderingAttachmentInfo
 	if has_depth {
-		depth_info = {
-			sType       = .RENDERING_ATTACHMENT_INFO,
-			imageView   = depth.attachment_view if depth.attachment_view != 0 else depth.view,
-			imageLayout = .GENERAL,
-			loadOp      = .LOAD,
-			storeOp     = .STORE,
-		}
-		if value, folded := folded_depth.?; folded {
-			depth_info.loadOp = .CLEAR
-			depth_info.clearValue = value
-		}
+		depth_info = rendering_attachment(depth, folded_depth)
 	}
 	rendering_info: vk.RenderingInfo = {
 		sType                = .RENDERING_INFO,
@@ -1710,6 +1616,27 @@ open_scope :: proc(
 	}
 	vk.CmdBeginRendering(workload.command_buffer, &rendering_info)
 	workload.scope = scope
+}
+
+@(private = "file")
+rendering_attachment :: proc(image: Image, folded_clear: Maybe(vk.ClearValue)) -> vk.RenderingAttachmentInfo {
+	info: vk.RenderingAttachmentInfo = {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = render_view(image),
+		imageLayout = .GENERAL,
+		loadOp      = .LOAD,
+		storeOp     = .STORE,
+	}
+	if value, folded := folded_clear.?; folded {
+		info.loadOp = .CLEAR
+		info.clearValue = value
+	}
+	return info
+}
+
+@(private = "file")
+render_view :: proc(image: Image) -> vk.ImageView {
+	return image.attachment_view if image.attachment_view != 0 else image.view
 }
 
 @(private = "file")
@@ -2031,13 +1958,16 @@ emit_stencil :: proc(cmd: vk.CommandBuffer, faces: vk.StencilFaceFlags, stencil:
 @(private = "file")
 @(require_results)
 write_table :: proc(workload: ^Workload, recording: Shader_Recording) -> (address: vk.DeviceAddress, err: Error) {
-	size := align_up(vk.DeviceSize(size_of(u32) * (TABLE_HEADER_WORDS + len(recording.bindings))), 16)
-	if len(workload.tables) == 0 || vk.DeviceSize(workload.table_used) + size > vk.DeviceSize(TABLE_CHUNK_SIZE) {
-		chunk := make_empty_buffer(TABLE_CHUNK_SIZE, Buffer_Settings{memory = .Host_Visible}) or_return
-		append(&workload.tables, chunk)
+	size := round_up(vk.DeviceSize(size_of(u32) * (TABLE_HEADER_WORDS + len(recording.bindings))), 16)
+	if vk.DeviceSize(workload.table_used) + size > TABLE_CHUNK_SIZE {
+		workload.table_chunk += 1
 		workload.table_used = 0
 	}
-	chunk := workload.tables[len(workload.tables) - 1]
+	if workload.table_chunk == len(workload.tables) {
+		chunk := make_empty_buffer(TABLE_CHUNK_SIZE, Buffer_Settings{memory = .Host_Visible}) or_return
+		append(&workload.tables, chunk)
+	}
+	chunk := workload.tables[workload.table_chunk]
 	words := ([^]u32)(&chunk.mapped[workload.table_used])
 	words[0] = u32(len(recording.bindings))
 	words[1] = null_buffer_index()
@@ -2117,7 +2047,7 @@ take_slot :: proc(workload: ^Workload) -> (slot: ^Execution_Slot, err: Error) {
 			return nil, .Sync_Creation_Failed
 		}
 	}
-	for len(slot.acquired) < len(workload.acquired) {
+	for len(slot.acquire_semaphores) < len(workload.acquired) {
 		semaphore_info: vk.SemaphoreCreateInfo = {
 			sType = .SEMAPHORE_CREATE_INFO,
 		}
@@ -2126,7 +2056,7 @@ take_slot :: proc(workload: ^Workload) -> (slot: ^Execution_Slot, err: Error) {
 			log.errorf("Failed to create an acquire semaphore: %v", res)
 			return nil, .Sync_Creation_Failed
 		}
-		append(&slot.acquired, semaphore)
+		append(&slot.acquire_semaphores, semaphore)
 	}
 	if res := vk.WaitForFences(device.handle, 1, &slot.fence, true, max(u64)); res != .SUCCESS {
 		log.errorf("Failed to wait for an earlier execution: %v", res)
@@ -2177,11 +2107,9 @@ begin_recording :: proc(workload: ^Workload) -> Error {
 	clear(&workload.handles)
 	workload.scope = {}
 	workload.raw_written = false
+	workload.epoch = 1
+	workload.table_chunk = 0
 	workload.table_used = 0
-	for &table in workload.tables[min(1, len(workload.tables)):] {
-		delete_buffer(&table)
-	}
-	resize(&workload.tables, min(1, len(workload.tables)))
 	for &buffer in workload.readbacks {
 		delete_buffer(&buffer)
 	}

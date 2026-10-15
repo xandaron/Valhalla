@@ -40,12 +40,10 @@ Surface :: struct {
 	format:             vk.SurfaceFormatKHR,
 	extent:             [2]u32,
 	images:             []vk.Image,
-	views:              []vk.ImageView,
 	present_semaphores: []vk.Semaphore,
 	stand_in:           Image,
 	copy_pool:          vk.CommandPool,
 	copies:             []vk.CommandBuffer,
-	image_usage:        vk.ImageUsageFlags,
 	generation:         u64,
 	hdr:                bool,
 	hdr_available:      bool,
@@ -101,7 +99,7 @@ delete_surface :: proc(surface: ^Surface) {
 	vk.DeviceWaitIdle(device.handle)
 	destroy_presentation(surface)
 	destroy_present_semaphores(surface)
-	destroy_swapchain(surface.swapchain, surface.images, surface.views)
+	destroy_swapchain(surface.swapchain, surface.images)
 	vk.DestroySurfaceKHR(device.instance, surface.handle, nil)
 	surface^ = {}
 }
@@ -190,10 +188,8 @@ is_hdr_format :: proc(format: vk.SurfaceFormatKHR) -> bool {
 @(private = "file")
 choose_format :: proc(formats: []vk.SurfaceFormatKHR, want_hdr, manual_encoding: bool) -> (vk.SurfaceFormatKHR, bool) {
 	if want_hdr {
-		for format in formats {
-			if is_hdr_format(format) {
-				return format, true
-			}
+		if index, found := slice.linear_search_proc(formats, is_hdr_format); found {
+			return formats[index], true
 		}
 	}
 	encoding := [2]vk.Format{.B8G8R8A8_SRGB, .R8G8B8A8_SRGB}
@@ -220,11 +216,7 @@ choose_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR, framebuffer: [2]i
 }
 
 @(private = "file")
-destroy_swapchain :: proc(swapchain: vk.SwapchainKHR, images: []vk.Image, views: []vk.ImageView) {
-	for view in views {
-		vk.DestroyImageView(device.handle, view, nil)
-	}
-	delete(views)
+destroy_swapchain :: proc(swapchain: vk.SwapchainKHR, images: []vk.Image) {
 	delete(images)
 	if swapchain != 0 {
 		vk.DestroySwapchainKHR(device.handle, swapchain, nil)
@@ -260,32 +252,17 @@ recreate_swapchain :: proc(surface: ^Surface) -> Error {
 
 	vk.DeviceWaitIdle(device.handle)
 
-	surface.hdr_available = false
-	for format in support.formats {
-		if is_hdr_format(format) {
-			surface.hdr_available = true
-			break
-		}
-	}
+	surface.hdr_available = slice.any_of_proc(support.formats, is_hdr_format)
 	format, hdr := choose_format(support.formats, surface.settings.prefer_hdr && surface.hdr_available, surface.settings.manual_encoding)
 
 	max_count := support.capabilities.maxImageCount
 	min_count := support.capabilities.minImageCount
 	image_count := max_count if max_count == 1 else max(2, min_count)
 
-	families := device.queue_families
-	family_indices := make([dynamic]u32, 0, 3, context.temp_allocator)
-	append(&family_indices, families.graphics)
-	if families.present != families.graphics {
-		append(&family_indices, families.present)
-	}
-	if families.compute != families.graphics && families.compute != families.present {
-		append(&family_indices, families.compute)
-	}
-
-	old_swapchain, old_images, old_views := surface.swapchain, surface.images, surface.views
-	surface.swapchain, surface.images, surface.views = 0, nil, nil
-	defer destroy_swapchain(old_swapchain, old_images, old_views)
+	family_indices := unique_queue_families()
+	old_swapchain, old_images := surface.swapchain, surface.images
+	surface.swapchain, surface.images = 0, nil
+	defer destroy_swapchain(old_swapchain, old_images)
 
 	swapchain_info: vk.SwapchainCreateInfoKHR = {
 		sType                 = .SWAPCHAIN_CREATE_INFO_KHR,
@@ -317,28 +294,12 @@ recreate_swapchain :: proc(surface: ^Surface) -> Error {
 	surface.extent = {extent.width, extent.height}
 	surface.minimised = false
 	surface.suboptimal = false
-	surface.image_usage = usage
 	surface.generation += 1
 
 	count: u32
 	vk.GetSwapchainImagesKHR(device.handle, surface.swapchain, &count, nil)
 	surface.images = make([]vk.Image, count)
 	vk.GetSwapchainImagesKHR(device.handle, surface.swapchain, &count, raw_data(surface.images))
-
-	surface.views = make([]vk.ImageView, count)
-	for image, index in surface.images {
-		view_info: vk.ImageViewCreateInfo = {
-			sType = .IMAGE_VIEW_CREATE_INFO,
-			image = image,
-			viewType = .D2,
-			format = format.format,
-			subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
-		}
-		if res := vk.CreateImageView(device.handle, &view_info, nil, &surface.views[index]); res != .SUCCESS {
-			log.errorf("Failed to create swapchain image view: %v", res)
-			return .Swapchain_Creation_Failed
-		}
-	}
 	rebuild_present_semaphores(surface) or_return
 	return rebuild_presentation(surface)
 }
@@ -359,7 +320,13 @@ destroy_presentation :: proc(surface: ^Surface) {
 rebuild_presentation :: proc(surface: ^Surface) -> Error {
 	destroy_presentation(surface)
 	storage: vk.ImageUsageFlags = {.STORAGE} if format_has_features(surface.format.format, {.STORAGE_IMAGE}) else {}
-	surface.stand_in = make_owned_image(surface.format.format, {surface.extent.x, surface.extent.y, 1}, .Colour, .D2, 1, 1, 1, "surface stand-in", {}, storage) or_return
+	stand_in := Image_Settings {
+		shape  = .D2,
+		format = surface.format.format,
+		size   = {surface.extent.x, surface.extent.y, 1},
+		name   = "surface stand-in",
+	}
+	surface.stand_in = make_owned_image(stand_in, storage) or_return
 	pool_info: vk.CommandPoolCreateInfo = {
 		sType            = .COMMAND_POOL_CREATE_INFO,
 		queueFamilyIndex = device.queue_families.graphics,
@@ -380,14 +347,14 @@ rebuild_presentation :: proc(surface: ^Surface) -> Error {
 		return .Swapchain_Creation_Failed
 	}
 	for cmd, index in surface.copies {
-		record_copy(cmd, surface.stand_in, surface.images[index], surface.extent) or_return
+		record_present_copy(cmd, surface.stand_in, surface.images[index], surface.extent) or_return
 	}
 	return nil
 }
 
 @(private = "file")
 @(require_results)
-record_copy :: proc(cmd: vk.CommandBuffer, stand_in: Image, target: vk.Image, extent: [2]u32) -> Error {
+record_present_copy :: proc(cmd: vk.CommandBuffer, stand_in: Image, target: vk.Image, extent: [2]u32) -> Error {
 	begin_info: vk.CommandBufferBeginInfo = {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 		flags = {.SIMULTANEOUS_USE},

@@ -1,6 +1,7 @@
 package Valhalla
 
 import "base:runtime"
+import "core:log"
 import "core:strings"
 import "vendor:glfw"
 
@@ -205,6 +206,17 @@ window_data :: proc "contextless" (handle: glfw.WindowHandle) -> ^Window_Data {
 }
 
 @(private)
+install_error_callback :: proc() {
+	glfw.SetErrorCallback(proc "c" (code: i32, description: cstring) {
+		context = runtime_context
+		if reading_clipboard && code == glfw.FORMAT_UNAVAILABLE {
+			return
+		}
+		log.errorf("GLFW error %v: %s", code, description)
+	})
+}
+
+@(private)
 install_joystick_callback :: proc() {
 	glfw.SetJoystickCallback(proc "c" (joystick, event: i32) {
 		context = runtime_context
@@ -219,39 +231,27 @@ install_window_callbacks :: proc(handle: glfw.WindowHandle) {
 	install_modal_loop_timer(handle)
 	glfw.SetKeyCallback(handle, proc "c" (handle: glfw.WindowHandle, key, scancode, action, mods: i32) {
 		context = runtime_context
-		if data := window_data(handle); data.key != nil {
-			data.key(&data.window, Key(key), scancode, Action(action), transmute(Modifiers)u8(mods))
-		}
+		inject_key(&window_data(handle).window, Key(key), scancode, Action(action), transmute(Modifiers)u8(mods))
 	})
 	glfw.SetCharCallback(handle, proc "c" (handle: glfw.WindowHandle, codepoint: rune) {
 		context = runtime_context
-		if data := window_data(handle); data.text != nil {
-			data.text(&data.window, codepoint)
-		}
+		inject_text(&window_data(handle).window, codepoint)
 	})
 	glfw.SetMouseButtonCallback(handle, proc "c" (handle: glfw.WindowHandle, button, action, mods: i32) {
 		context = runtime_context
-		if data := window_data(handle); data.mouse_button != nil {
-			data.mouse_button(&data.window, Mouse_Button(button), Action(action), transmute(Modifiers)u8(mods))
-		}
+		inject_mouse_button(&window_data(handle).window, Mouse_Button(button), Action(action), transmute(Modifiers)u8(mods))
 	})
 	glfw.SetCursorPosCallback(handle, proc "c" (handle: glfw.WindowHandle, x, y: f64) {
 		context = runtime_context
-		if data := window_data(handle); data.cursor_position != nil {
-			data.cursor_position(&data.window, {x, y})
-		}
+		inject_cursor_position(&window_data(handle).window, {x, y})
 	})
 	glfw.SetCursorEnterCallback(handle, proc "c" (handle: glfw.WindowHandle, entered: i32) {
 		context = runtime_context
-		if data := window_data(handle); data.cursor_enter != nil {
-			data.cursor_enter(&data.window, entered != 0)
-		}
+		inject_cursor_enter(&window_data(handle).window, entered != 0)
 	})
 	glfw.SetScrollCallback(handle, proc "c" (handle: glfw.WindowHandle, x, y: f64) {
 		context = runtime_context
-		if data := window_data(handle); data.scroll != nil {
-			data.scroll(&data.window, {x, y})
-		}
+		inject_scroll(&window_data(handle).window, {x, y})
 	})
 	glfw.SetDropCallback(handle, proc "c" (handle: glfw.WindowHandle, count: i32, paths: [^]cstring) {
 		context = runtime_context
@@ -293,9 +293,7 @@ install_window_callbacks :: proc(handle: glfw.WindowHandle) {
 	})
 	glfw.SetWindowFocusCallback(handle, proc "c" (handle: glfw.WindowHandle, focused: i32) {
 		context = runtime_context
-		if data := window_data(handle); data.window_focus != nil {
-			data.window_focus(&data.window, focused != 0)
-		}
+		inject_focus(&window_data(handle).window, focused != 0)
 	})
 	glfw.SetWindowIconifyCallback(handle, proc "c" (handle: glfw.WindowHandle, minimised: i32) {
 		context = runtime_context
@@ -609,7 +607,7 @@ set_cursor :: proc(window: ^Window, cursor: Maybe(Cursor)) {
 	glfw.SetCursor(window.handle, handle)
 }
 
-@(private)
+@(private = "file")
 reading_clipboard: bool
 
 clipboard_text :: proc() -> string {
@@ -723,59 +721,54 @@ Gamepad_State :: struct {
 #assert(size_of(Gamepad_State) == size_of(glfw.GamepadState))
 #assert(offset_of(Gamepad_State, axes) == offset_of(glfw.GamepadState, axes))
 
+@(private = "file")
+joystick_id :: proc(joystick: int, loc := #caller_location) -> i32 {
+	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range", loc)
+	return i32(joystick)
+}
+
 joystick_present :: proc(joystick: int) -> bool {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return bool(glfw.JoystickPresent(i32(joystick)))
+	return bool(glfw.JoystickPresent(joystick_id(joystick)))
 }
 
 joystick_axes :: proc(joystick: int) -> []f32 {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return glfw.GetJoystickAxes(i32(joystick))
+	return glfw.GetJoystickAxes(joystick_id(joystick))
 }
 
 joystick_buttons :: proc(joystick: int) -> []Action {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return transmute([]Action)glfw.GetJoystickButtons(i32(joystick))
+	return transmute([]Action)glfw.GetJoystickButtons(joystick_id(joystick))
 }
 
 joystick_hats :: proc(joystick: int) -> []Hat {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return transmute([]Hat)glfw.GetJoystickHats(i32(joystick))
+	return transmute([]Hat)glfw.GetJoystickHats(joystick_id(joystick))
 }
 
 joystick_name :: proc(joystick: int) -> string {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return glfw.GetJoystickName(i32(joystick))
+	return glfw.GetJoystickName(joystick_id(joystick))
 }
 
 joystick_guid :: proc(joystick: int) -> string {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return glfw.GetJoystickGUID(i32(joystick))
+	return glfw.GetJoystickGUID(joystick_id(joystick))
 }
 
 set_joystick_user_pointer :: proc(joystick: int, pointer: rawptr) {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	glfw.SetJoystickUserPointer(i32(joystick), pointer)
+	glfw.SetJoystickUserPointer(joystick_id(joystick), pointer)
 }
 
 joystick_user_pointer :: proc(joystick: int) -> rawptr {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return glfw.GetJoystickUserPointer(i32(joystick))
+	return glfw.GetJoystickUserPointer(joystick_id(joystick))
 }
 
 joystick_is_gamepad :: proc(joystick: int) -> bool {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return bool(glfw.JoystickIsGamepad(i32(joystick)))
+	return bool(glfw.JoystickIsGamepad(joystick_id(joystick)))
 }
 
 gamepad_name :: proc(joystick: int) -> string {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	return glfw.GetGamepadName(i32(joystick))
+	return glfw.GetGamepadName(joystick_id(joystick))
 }
 
 gamepad_state :: proc(joystick: int) -> (state: Gamepad_State, ok: bool) {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range")
-	ok = bool(glfw.GetGamepadState(i32(joystick), (^glfw.GamepadState)(&state)))
+	ok = bool(glfw.GetGamepadState(joystick_id(joystick), (^glfw.GamepadState)(&state)))
 	return
 }
 

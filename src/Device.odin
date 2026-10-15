@@ -3,6 +3,7 @@ package Valhalla
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:slice"
 import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
@@ -158,7 +159,7 @@ init :: proc(
 		feature_chain       = feature_chain,
 	}
 	runtime_context = context
-	glfw.SetErrorCallback(glfw_error_callback)
+	install_error_callback()
 	if !glfw.Init() {
 		return .GLFW_Init_Failed
 	}
@@ -245,15 +246,6 @@ end_label :: proc(cmd: vk.CommandBuffer) {
 }
 
 @(private = "file")
-glfw_error_callback :: proc "c" (code: i32, description: cstring) {
-	context = runtime_context
-	if reading_clipboard && code == glfw.FORMAT_UNAVAILABLE {
-		return
-	}
-	log.errorf("GLFW error %v: %s", code, description)
-}
-
-@(private = "file")
 vulkan_debug_callback :: proc "system" (
 	severity: vk.DebugUtilsMessageSeverityFlagsEXT,
 	types: vk.DebugUtilsMessageTypeFlagsEXT,
@@ -335,11 +327,9 @@ create_instance :: proc(settings: Device_Settings) -> (debug_utils: bool, err: E
 			log.warnf("Couldn't find instance extension: %s", name)
 		}
 	}
-	user_loop: for name in settings.instance_extensions {
-		for existing in extensions {
-			if name == existing {
-				continue user_loop
-			}
+	for name in settings.instance_extensions {
+		if slice.contains(extensions[:], name) {
+			continue
 		}
 		if !has_extension(available_extensions, name) {
 			log.errorf("Requested instance extension is not available: %s", name)
@@ -522,10 +512,15 @@ request_features :: proc(chain: ^Feature_Chain, user: Device_Features) {
 }
 
 @(private = "file")
+query_supported_features :: proc(physical_device: vk.PhysicalDevice, support: ^Feature_Chain) {
+	link_feature_chain(support)
+	vk.GetPhysicalDeviceFeatures2(physical_device, &support.features)
+}
+
+@(private = "file")
 supports_requested_features :: proc(physical_device: vk.PhysicalDevice, request: ^Feature_Chain) -> bool {
 	support: Feature_Chain
-	link_feature_chain(&support)
-	vk.GetPhysicalDeviceFeatures2(physical_device, &support.features)
+	query_supported_features(physical_device, &support)
 
 	return(
 		!missing_feature_bools(&request.features.features, &support.features.features, 0, size_of(vk.PhysicalDeviceFeatures)) &&
@@ -547,13 +542,10 @@ supports_requested_features :: proc(physical_device: vk.PhysicalDevice, request:
 collect_device_extensions :: proc(settings: Device_Settings) -> []cstring {
 	extensions := make([dynamic]cstring, 0, len(DEVICE_EXTENSIONS) + len(settings.device_extensions), context.temp_allocator)
 	append(&extensions, ..DEVICE_EXTENSIONS)
-	user_loop: for name in settings.device_extensions {
-		for existing in extensions {
-			if name == existing {
-				continue user_loop
-			}
+	for name in settings.device_extensions {
+		if !slice.contains(extensions[:], name) {
+			append(&extensions, name)
 		}
-		append(&extensions, name)
 	}
 	return extensions[:]
 }
@@ -662,28 +654,15 @@ create_logical_device :: proc(settings: Device_Settings) -> Error {
 	families := device.queue_families
 
 	priority: f32 = 1.0
-	queue_infos := make([dynamic]vk.DeviceQueueCreateInfo, 0, 3, context.temp_allocator)
-	append(&queue_infos, vk.DeviceQueueCreateInfo {
-		sType = .DEVICE_QUEUE_CREATE_INFO,
-		queueFamilyIndex = families.graphics,
-		queueCount = 1,
-		pQueuePriorities = &priority,
-	})
-	if families.graphics != families.present {
-		append(&queue_infos, vk.DeviceQueueCreateInfo {
-			sType = .DEVICE_QUEUE_CREATE_INFO,
-			queueFamilyIndex = families.present,
-			queueCount = 1,
+	unique_families := unique_queue_families()
+	queue_infos := make([]vk.DeviceQueueCreateInfo, len(unique_families), context.temp_allocator)
+	for family, index in unique_families {
+		queue_infos[index] = {
+			sType            = .DEVICE_QUEUE_CREATE_INFO,
+			queueFamilyIndex = family,
+			queueCount       = 1,
 			pQueuePriorities = &priority,
-		})
-	}
-	if families.graphics != families.compute && families.present != families.compute {
-		append(&queue_infos, vk.DeviceQueueCreateInfo {
-			sType = .DEVICE_QUEUE_CREATE_INFO,
-			queueFamilyIndex = families.compute,
-			queueCount = 1,
-			pQueuePriorities = &priority,
-		})
+		}
 	}
 
 	features: Feature_Chain
@@ -693,19 +672,14 @@ create_logical_device :: proc(settings: Device_Settings) -> Error {
 	append(&extensions, ..collect_device_extensions(settings))
 
 	support: Feature_Chain
-	link_feature_chain(&support)
-	vk.GetPhysicalDeviceFeatures2(device.physical_device, &support.features)
+	query_supported_features(device.physical_device, &support)
 	features.features.features.multiDrawIndirect = features.features.features.multiDrawIndirect || support.features.features.multiDrawIndirect
 	features.vulkan12.drawIndirectCount = features.vulkan12.drawIndirectCount || support.vulkan12.drawIndirectCount
 	device.optional.multi_draw_indirect = bool(features.features.features.multiDrawIndirect)
 	device.optional.draw_indirect_count = bool(features.vulkan12.drawIndirectCount)
 
 	mesh_features: vk.PhysicalDeviceMeshShaderFeaturesEXT
-	user_mesh := false
-	for name in settings.device_extensions {
-		user_mesh ||= name == vk.EXT_MESH_SHADER_EXTENSION_NAME
-	}
-	if !user_mesh && supports_extensions(device.physical_device, {vk.EXT_MESH_SHADER_EXTENSION_NAME}) {
+	if !slice.contains(settings.device_extensions, vk.EXT_MESH_SHADER_EXTENSION_NAME) && supports_extensions(device.physical_device, {vk.EXT_MESH_SHADER_EXTENSION_NAME}) {
 		mesh_support: vk.PhysicalDeviceMeshShaderFeaturesEXT = {
 			sType = .PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
 		}
@@ -748,4 +722,16 @@ create_logical_device :: proc(settings: Device_Settings) -> Error {
 	vk.GetDeviceQueue(device.handle, families.present, 0, &device.present_queue)
 	vk.GetDeviceQueue(device.handle, families.compute, 0, &device.compute_queue)
 	return nil
+}
+
+@(private)
+unique_queue_families :: proc() -> []u32 {
+	families := device.queue_families
+	unique := make([dynamic]u32, 0, 3, context.temp_allocator)
+	for family in ([3]u32{families.graphics, families.present, families.compute}) {
+		if !slice.contains(unique[:], family) {
+			append(&unique, family)
+		}
+	}
+	return unique[:]
 }

@@ -106,50 +106,13 @@ make_empty_buffer :: proc(#any_int size: int, settings: Buffer_Settings) -> (buf
 		delete_buffer(&buffer)
 	}
 	owned := &buffer.variant.(Owned_Buffer)
-
-	dedicated_requirements: vk.MemoryDedicatedRequirements = {
-		sType = .MEMORY_DEDICATED_REQUIREMENTS,
-	}
-	requirements: vk.MemoryRequirements2 = {
-		sType = .MEMORY_REQUIREMENTS_2,
-		pNext = &dedicated_requirements,
-	}
-	vk.GetBufferMemoryRequirements2(
-		device.handle,
-		&vk.BufferMemoryRequirementsInfo2{sType = .BUFFER_MEMORY_REQUIREMENTS_INFO_2, buffer = buffer.handle},
-		&requirements,
-	)
-	dedicated_info: vk.MemoryDedicatedAllocateInfo = {
-		sType  = .MEMORY_DEDICATED_ALLOCATE_INFO,
-		buffer = buffer.handle,
-	}
-	dedicated: ^vk.MemoryDedicatedAllocateInfo
-	if dedicated_requirements.prefersDedicatedAllocation || dedicated_requirements.requiresDedicatedAllocation {
-		dedicated = &dedicated_info
-	}
-	owned.allocation = allocate_memory(
-		requirements.memoryRequirements,
-		BUFFER_MEMORY_PROPERTIES[settings.memory],
-		.Linear,
-		dedicated,
-	) or_return
-	bind_info: vk.BindBufferMemoryInfo = {
-		sType        = .BIND_BUFFER_MEMORY_INFO,
-		buffer       = buffer.handle,
-		memory       = owned.allocation.memory,
-		memoryOffset = owned.allocation.offset,
-	}
-	if res := vk.BindBufferMemory2(device.handle, 1, &bind_info); res != .SUCCESS {
+	owned.allocation = allocate_memory(buffer.handle, BUFFER_MEMORY_PROPERTIES[settings.memory]) or_return
+	if res := vk.BindBufferMemory(device.handle, buffer.handle, owned.allocation.memory, owned.allocation.offset); res != .SUCCESS {
 		log.errorf("Failed to bind buffer memory: %v", res)
 		return buffer, .Buffer_Bind_Failed
 	}
-
 	buffer.mapped = owned.allocation.mapped
-	address_info: vk.BufferDeviceAddressInfo = {
-		sType  = .BUFFER_DEVICE_ADDRESS_INFO,
-		buffer = buffer.handle,
-	}
-	buffer.address = vk.GetBufferDeviceAddress(device.handle, &address_info)
+	buffer.address = buffer_address(buffer.handle)
 	acquire_buffer_slot(&buffer) or_return
 	return
 }
@@ -223,9 +186,8 @@ load_memory_to_buffer :: proc(source: []u8, buffer: ^Buffer, #any_int offset: in
 load_image_to_buffer :: proc(source: ^Image, buffer: ^Buffer, source_region := Image_Region{}, #any_int offset: int = 0) -> Error {
 	assert(source.layout == .GENERAL, "immediate copies need an image in GENERAL, as every image Valhalla makes is")
 	region := buffer_image_region(buffer^, source^, offset, source_region, to_image = false)
-	cmd := staged_transfer() or_return
-	emit_image_to_buffer(cmd, source^, buffer^, region)
-	end_staged_transfer(cmd)
+	cmd := staging_commands() or_return
+	emit_image_to_buffer(cmd, source.handle, buffer.handle, region)
 	return nil
 }
 
@@ -237,9 +199,8 @@ load_buffer_to_buffer :: proc(
 	#any_int size: int = 0,
 ) -> Error {
 	region := buffer_copy_region(source^, buffer^, source_offset, offset, size)
-	cmd := staged_transfer() or_return
-	emit_buffer_copy(cmd, source^, buffer^, region)
-	end_staged_transfer(cmd)
+	cmd := staging_commands() or_return
+	emit_buffer_copy(cmd, source.handle, buffer.handle, region)
 	return nil
 }
 
@@ -254,9 +215,7 @@ write_buffer_to_file :: proc(source: ^Buffer, filename: string) -> Error {
 	workload := make_workload() or_return
 	defer delete_workload(&workload)
 	shot := readback_buffer(&workload, source^) or_return
-	finalize_workload(&workload) or_return
-	execution := execute_workload(&workload) or_return
-	wait_execution(execution) or_return
+	run_workload(&workload) or_return
 	return write_readback_to_file(shot, filename, encoded = false)
 }
 
@@ -271,9 +230,7 @@ write_buffer_to_surface :: proc(source: ^Buffer, surface: ^Surface, #any_int sou
 	image := acquire(&workload, surface) or_return
 	shown := copy_buffer_to_image(&workload, source^, image, source_offset)
 	present(&workload, shown)
-	finalize_workload(&workload) or_return
-	execution := execute_workload(&workload) or_return
-	return wait_execution(execution)
+	return run_workload(&workload)
 }
 
 write_buffer :: proc {
