@@ -1,154 +1,171 @@
-# Valhalla Graphics Engine
+# Valhalla
 
-Valhalla is a 3D graphics rendering demo showcasing modern graphics techniques and real-time rendering capabilities. This project serves as a demonstration of graphics programming concepts and rendering features.
+A graphics package for Odin on Vulkan 1.4. It covers the GPU device, resources, shaders, recorded GPU
+work, windows and input, and leaves the frame loop and everything else to the program using it.
+Pending work is in [`TODO.md`](TODO.md).
 
-## Features
+## Requirements
 
-- Rigged 3D model and animation support
-- Multiple light sources
-- Custom shaders
-- Shadow mapping
-- Real-time rendering
-- Bindless rendering via `VK_EXT_descriptor_heap`, vertex pulling, multiview shadow maps
-- Cross-platform (Windows and Linux; macOS is written but unverified)
+- [Odin](https://odin-lang.org/docs/install/)
+- The [Vulkan SDK](https://vulkan.lunarg.com/). Valhalla always enables the validation layer, and on
+  Windows it loads Slang's DLLs (`slang.dll`, `slang-compiler.dll`) from the SDK's `Bin` directory,
+  which must be on `PATH` (or link Slang statically; see [Linking](#linking)).
+- A GPU and driver with `VK_EXT_descriptor_heap`, `VK_KHR_shader_untyped_pointers`,
+  `VK_KHR_unified_image_layouts` and `VK_EXT_extended_dynamic_state3`.
+- On Linux, GLFW 3.4 or later.
 
-## Project Structure
+## Running the examples
 
-- `src/` &mdash; The Valhalla package: graphics, window management and input
-- `demo/src/` &mdash; The demo executable: project and scene files, editor UI, external API, frame loop
-- `demo/` &mdash; The project directory passed to the executable at runtime
-  - `demo/shaders/` &mdash; Slang shaders, compiled at startup
-  - `demo/assets/` &mdash; Models and textures
-  - `demo/scenes/` &mdash; Serialised scenes
-  - `demo/scene_components/` &mdash; Model and texture descriptors referenced by scenes
+From the repository root:
 
-## Getting Started
+```sh
+odin run examples/hello_triangle
+```
 
-### Prerequisites
-
-- [Odin](https://odin-lang.org/docs/install/) programming language
-- [VulkanSDK](https://vulkan.lunarg.com/) (recommended for development)
+| Example | Shows |
+| --- | --- |
+| `hello_triangle` | The smallest program: a window, a shader, and a workload recorded every frame |
+| `textured_cube` | Vertex and index buffers, a texture and sampler, depth, and a workload recorded once |
+| `offscreen` | No window: renders into an image and writes it to `triangle.png` |
+| `hdr` | An HDR surface with a PQ-encoding pass, falling back to SDR |
+| `lighting` | Shadow maps for a sun and four point lights, using multiview for cube maps |
+| `two_windows` | One workload drawing to two windows, input in one driving the other |
+| `input` | Keyboard, mouse, gamepad, clipboard, cursors, file drops and fullscreen |
+| `imgui` | Dear ImGui through `Valhalla_ImGui` |
+| `image_editor` | A node-graph image editor with runtime-compiled custom shaders |
 
 ### Setup
 
-#### Linux
+```odin
+Valhalla.init(app_name = "My App") or_return
+defer Valhalla.shutdown()
 
-- Install [Assimp](https://github.com/assimp/assimp/releases/tag/v6.0.1) as a shared library.
-- Install GLFW 3.4+ (older versions may cause crashes).
+window := Valhalla.make_window(title = "My App") or_return
+defer Valhalla.delete_window(&window)
 
-Clone the repository and build the demo program:
-
-```sh
-git clone https://github.com/xandaron/valhalla.git
-cd valhalla
-odin build demo/src -out:bin/demo.exe
-./bin/demo.exe
+surface := Valhalla.make_surface(&window, {}) or_return
+defer Valhalla.delete_surface(&surface)
 ```
 
-The argument is the project directory, and the app runs with it as its working directory.
+`init` picks the GPU and creates the device; extra extensions and features are parameters of `init`.
+A **surface** is a window's swapchain. It rebuilds itself when the window resizes, and its state
+(`extent`, `format`, `hdr`, `minimised`) is read from its fields.
 
-## Roadmap
+### Resources
 
-Large undertakings, roughly in the order they are likely to be tackled. Each one is broken into
-checkable work in [Tasks](#tasks).
+```odin
+vertices := Valhalla.make_buffer(slice.to_bytes(data[:]), Valhalla.Buffer_Settings{usage = {.Storage}}) or_return
+texture  := Valhalla.make_image_from_file("albedo.png") or_return
+linear   := Valhalla.make_sampler() or_return
+```
 
-| # | Undertaking | State |
+Buffers, images and samplers are uploaded when they are made, and stay on the GPU until written again.
+There are no vertex buffers: vertex shaders read vertex data from storage buffers. Data that changes
+every frame belongs in a `.Host_Visible` buffer, written with `load_memory_to_buffer`. The application
+must not write a resource while the GPU is still using it.
+
+### Shaders
+
+A shader is a pipeline built from Slang (a file or source) or SPIR-V. Shaders declare no bindings:
+resources reach them through push data. The Odin struct named by `push_type` is matched against the
+shader's push struct when the shader is made, and `Image`, `Buffer` and `Sampler` fields arrive as
+typed handles used as the resources themselves:
+
+```odin
+Push :: struct {
+	vertices: Valhalla.Buffer,
+	albedo:   Valhalla.Image,
+	linear:   Valhalla.Sampler,
+}
+
+shader, _ := Valhalla.make_shader(
+	#load("Mesh.slang"),
+	[]string{"vertex_main", "fragment_main"},
+	{search_paths = {"path/to/valhalla/src/shaders"}},
+	{push_type = Push, colour_formats = {0 = surface.format.format}},
+) or_return
+```
+
+```slang
+import Valhalla;
+
+struct Push {
+	ValhallaHeader header;
+	DescriptorHandle<StructuredBuffer<Vertex>> vertices;
+	DescriptorHandle<Texture2D<float4>> albedo;
+	DescriptorHandle<SamplerState> linear;
+};
+[[vk::push_constant]] ConstantBuffer<Push> push;
+
+// push.vertices[vertex_id], push.albedo.Sample(push.linear, uv)
+```
+
+The second return value is the compiler's diagnostics. Everything Vulkan allows to be dynamic (depth
+test, blending, culling, viewport, ...) is set per draw with `set_*` procedures, not baked into the
+shader. Shaders work in linear light: sRGB textures decode when sampled and SDR surfaces encode on
+write.
+
+### Workloads
+
+A **workload** is recorded GPU work that can be executed any number of times. A shader holds a small
+recording of its own (attachments, push data, draws), and `bind_shader` replays it into a workload:
+
+```odin
+frame := Valhalla.make_workload() or_return
+defer Valhalla.delete_workload(&frame)
+
+image := Valhalla.acquire(&frame, &surface) or_return
+cleared := Valhalla.clear_image(&frame, image, {})
+
+Valhalla.reset_shader(&shader)
+Valhalla.set_push_data(&shader, Push{vertices, texture, linear})
+drawn := Valhalla.bind_shader_colour(&shader, cleared)
+Valhalla.draw(&shader, 3, 1, 0, 0)
+Valhalla.bind_shader(&frame, shader) or_return
+
+Valhalla.present(&frame, drawn)
+Valhalla.finalize_workload(&frame) or_return
+
+execution := Valhalla.execute_workload(&frame) or_return
+Valhalla.wait_execution(execution) or_return
+```
+
+- **Writes return versions.** `clear_image`, the attachment binds and `bind_shader_output` return the
+  resource's next version, and the next operation takes that version. Ordering and barriers follow
+  from it: bind whatever reads a version before whatever writes the next one, and the order the code is
+  written in is the order it runs.
+- **Record once, execute often.** A workload can be recorded every frame (`hello_triangle`), or
+  recorded once with per-frame data written into host-visible buffers between executions
+  (`textured_cube`). When the swapchain is rebuilt, `execute_workload` returns
+  `.Swapchain_Changed` and the workload is recorded again.
+- **Wait before reusing.** Wait for an execution before writing, resizing or deleting what it uses.
+- `readback` copies a resource out of a workload for the CPU; `raw_commands` gives the command buffer
+  for raw Vulkan.
+
+### Windows and input
+
+The input API mirrors GLFW's, renamed to Valhalla's style: `poll_events`, `key_down`,
+`cursor_position`, per-window callbacks such as `set_key_callback`, plus gamepads, clipboard, cursors
+and monitors. `set_frame_callback` keeps frames coming while a window is being dragged or resized.
+
+## Linking
+
+Each binding links the libraries committed beside it by default. A define points it at another
+directory, relative to the binding's package (Odin reads an absolute path's drive letter as a
+collection name):
+
+| Define | Binding | Effect |
 | --- | --- | --- |
-| 1 | **Scene editor** — docking, an object catalog and inspector, click-to-select, tabs and renaming, so scenes can be built in the editor | Partly done |
-| 2 | **Colour correctness** — colour space handling, light falloff and gizmo picking | Done |
-| 3 | **Light types** — only point lights exist; directional and spot lights are missing | Not started |
-| 4 | **Shadow quality and cost** — per-face culling, filtering, cascades for directional lights | Partly done |
-| 5 | **Shader loading and hot reload** — shaders are hardcoded at startup and nothing reaches the reload path | Not started |
-| 6 | **Renderer performance** — buffer consolidation, swapchain format selection | Partly done |
-| 7 | **Project files** — a migrator for outdated file versions | Partly done |
+| `SLANG_LIB_DIR` | `src/slang` | Links Slang's static libraries from that directory instead of the DLL import libraries, so no Slang DLL is needed |
+| `IMGUI_LIB_DIR` | `deps/imgui` | Takes the prebuilt ImGui library from that directory |
+| `TINYFILEDIALOGS_LIB_DIR` | `deps/tinyfiledialogs` | Takes the prebuilt tinyfiledialogs library from that directory |
 
-## Tasks
-
-### 1. Scene editor
-
-The editor is a main menu bar and docked panels around a passthrough central node the scene
-shows through: Objects, Lights and Scenes on the left, the Inspector on the right, and Scene,
-Settings, Models and Textures below it. **F1** hides all of it, and so does fly mode (middle
-click) until it ends.
-
-- [x] **Docking.** `DockSpaceOverViewport` with a passthrough central node; the default layout is
-      built with the DockBuilder when `imgui.ini` holds none
-- [x] **Object inspector.** Reflected fields plus the model, animation clip and texture pickers;
-      lights are inspected the same way
-- [x] **Click to select.** `cursorRay` builds the ray from the letterboxed content rect and the
-      active camera; `pick` tests each mesh's box in object space via `objectTransform`,
-      which the instance buffer shares, so attachments are honoured. Light gizmos are picked as
-      spheres of `lightGizmoRadius` while they are shown
-- [x] **Object catalog.** Objects panel, filterable by name
-- [x] **Translate gizmo.** The selected object or light shows X/Y/Z arrows and plane pads, drawn
-      on imgui's background draw list; arrows drag along the closest point between the mouse ray
-      and the axis, pads along the ray's hit on the plane through the gizmo. Attached objects are
-      moved in their parent's space, so the handles stay world-aligned
-- [x] **Tabs.** Each inspector tab has a pin left of its name, off by default. Showing an unpinned
-      tab, including a newly opened one, closes every other unpinned tab. The Scenes panel lists every `.scene` in the scenes directory and
-      opens or switches to one on click
-- [x] **Renaming.** `nameField` in `UI.odin`, backed by a `strings.Builder` that `InputText`'s
-      `.CallbackResize` grows; commits on deactivation. Renames objects and scenes
-- [ ] The scene still renders across the whole window behind the panels. Letterboxing it into the
-      central node would need PostProcess re-recorded whenever the dock layout changes, and
-      `cursorToRenderNDC` moved to the same rect
-- [ ] Picking uses bind-pose mesh boxes, so animated and skinned objects are picked by where their
-      rest pose is
-- [ ] Deleting objects. Selection and open tabs are indices into `scene.objects`, so removal must
-      remap them (and every `Attachment.targetIdx`)
-- [ ] If the name field becomes imreflect's string widget, so every string field is editable,
-      settle first who owns the string's memory, since imreflect cannot know the allocator
-
-### 2. Colour correctness
-
-- [x] Gizmo picking — clicking a light's billboard opens it in the inspector (see 1)
-
-### 3. Light types
-
-- [ ] Directional lights
-- [ ] Spot lights
-- [ ] Generalise `PointLight` into a light type the shaders can switch on, rather than the
-      single struct in `SceneData.odin`
-- [ ] Editor support for creating and editing each type
-
-### 4. Shadow quality and cost
-
-- [ ] Per-face culling — every light currently submits all geometry to all six views
-- [ ] Skip faces a light cannot affect
-- [ ] Cascaded shadow maps for directional lights (depends on 3, light types)
-- [ ] Revisit the fixed 512x512 `SHADOW_RESOLUTION` and the 20-sample PCF loop
-
-### 5. Shader loading and hot reload
-
-Shaders are compiled from ten hardcoded `compileShader` calls in `demo/src/Main.odin`, and nothing calls
-`updatePipelineShaders` any more, although it still rebuilds any of the six pipelines and dirties
-only the affected pass. This undertaking covers a shader manifest that maps source, entry point
-and stage to each pipeline; reload driven by that manifest, which must leave a working pipeline
-alone when a compile fails; and deciding whether shaders ship with the engine or are copied into
-a project at creation, since a fresh project has none and cannot start.
-
-### 6. Renderer performance
-
-- [ ] Combine the per-purpose scene buffers into one buffer with offsets (`SceneBuffers`)
-- [ ] Improve swapchain format selection, which currently takes the first format offered
-      unless HDR is enabled
-
-### 7. Project files
-
-The engine is given a project file, not a directory, and can only ever load one — creating a
-project is `tools/projectgen`'s job. Both the engine and the tools share `ProjectData`, so the
-format has a single definition.
+`libs/` at the repository root is ignored by git for local libraries such as Slang's static build:
 
 ```sh
-./tools/projectgen/projectgen.exe ./demo -name:demo -startup:./scenes/creature.scene
-./bin/demo.exe
+odin run examples/hello_triangle -define:SLANG_LIB_DIR=../../libs
 ```
-
-- [ ] A migrator that upgrades outdated project, scene, component and settings files. Until it
-      exists every `*_FORMAT_VERSION` stays at 1: bumping one only turns an old file from a misparse
-      into a refusal, and there is nothing to upgrade it with. When a struct changes before then,
-      regenerate the affected files instead
 
 ## License
 
-This project is licensed under the MIT License.
+MIT.
