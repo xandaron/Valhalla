@@ -46,13 +46,12 @@ package assimp
 import "core:c"
 
 when ODIN_OS == .Windows {
-    foreign import lib "libassimp.lib"
-    @(require, extra_linker_flags="/ignore:4099")
-    foreign import "../zlib/libz.lib"
+    foreign import lib {
+        "assimp-vc143-mt.lib",
+    }
 }
 else {
     foreign import lib {
-        "system:z",
         "system:assimp",
     }
 }
