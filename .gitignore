@@ -2,7 +2,6 @@
 bin/
 libs/
 logs/
-projs/
 imgui.ini
 *.pipeline_cache
 config/*
@@ -15,5 +14,4 @@ Creature Builder/
 xr/
 
 // Misc
-docs/
 dump/
