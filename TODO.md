@@ -39,7 +39,9 @@
 - [ ] Use `workload_produces`/`workload_discards` beyond warnings: barriers for produced resources
       at the end of a workload instead of a global one at the start, semaphores between producers and
       consumers on different queues, and transient attachments (`storeOp = DONT_CARE`) for discarded
-      ones, which needs the discard known before the attachment is first bound.
+      ones, which needs the discard known before the attachment is first bound. Workloads stay
+      independent: a consumer waits on the timeline value of its producer's latest execution, if
+      it has one, and never makes the producer run again or waits for a future run of it.
 - [ ] GPU timing.
 - [ ] The Slang bindings mark `Global_Session` and `Module` `@(private)`, so `Shader.odin` names them
       through `intrinsics.type_proc_return_type`. Export them from `src/slang`.

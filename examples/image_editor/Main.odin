@@ -104,6 +104,10 @@ Node :: struct {
 	preview:         Valhalla.Image,
 	written:         Valhalla.Image,
 	preview_shown:   Valhalla.Image,
+	workload:        Valhalla.Workload,
+	has_workload:    bool,
+	recorded:        bool,
+	stale:           bool,
 	slot:            u32,
 	valid:           bool,
 	doomed:          bool,
@@ -234,10 +238,8 @@ Editor :: struct {
 	show_imgui_demo:   bool,
 	minimised:         bool,
 	pipeline_cache:    Valhalla.Pipeline_Cache,
-	graph:             Valhalla.Workload,
 	graph_signature:   u64,
 	graph_recorded:    bool,
-	graph_stale:       bool,
 	graph_last:        Valhalla.Execution,
 	params:            Valhalla.Buffer,
 	param_values:      [dynamic]Node_Params,
@@ -304,6 +306,7 @@ free_node :: proc(node: ^Node) {
 	Valhalla.delete_image(&node.temp)
 	Valhalla.delete_image(&node.preview)
 	Valhalla.delete_shader(&node.shader)
+	Valhalla.delete_workload(&node.workload)
 	delete(node.inputs)
 	delete(node.path)
 	delete(node.load_error)
@@ -427,6 +430,7 @@ ensure_image :: proc(image: ^Valhalla.Image, format: vk.Format, size: [2]u32) ->
 
 run_pass :: proc(
 	editor: ^Editor,
+	workload: ^Valhalla.Workload,
 	shader: ^Valhalla.Shader,
 	target: Valhalla.Image,
 	a: Maybe(Valhalla.Image),
@@ -451,7 +455,7 @@ run_pass :: proc(
 		},
 	)
 	Valhalla.draw(shader, 3, 1, 0, 0, draw_data = slot)
-	Valhalla.bind_shader(&editor.graph, shader^) or_return
+	Valhalla.bind_shader(workload, shader^) or_return
 	return
 }
 
@@ -494,7 +498,6 @@ ensure_display :: proc(editor: ^Editor, size: [2]u32) -> Valhalla.Error {
 
 record_graph :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
 	Valhalla.wait_execution(editor.last) or_return
-	Valhalla.reset_workload(&editor.graph) or_return
 	if editor.params.size < vk.DeviceSize(max(len(order), 1) * size_of(Node_Params)) {
 		Valhalla.delete_buffer(&editor.params)
 		editor.params = Valhalla.make_empty_buffer(max(len(order), 64) * size_of(Node_Params), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
@@ -504,90 +507,112 @@ record_graph :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
 	editor.display_valid = false
 	for node in editor.nodes {
 		node.valid = false
+		node.recorded = false
+		node.preview_shown = editor.black
 	}
 	for node, index in order {
 		node.slot = u32(index)
 	}
-
 	for node in order {
-		switch node.kind {
-		case .Value, .Time:
-		case .Image_File:
-			if node.source.handle != 0 {
-				node.written = node.source
-				node.valid = true
-			}
-		case .Adjust, .Blur, .Sharpen:
-			a, has_a := image_input(node, 0).?
-			if !has_a {
-				break
-			}
-			ensure_image(&node.image, .R16G16B16A16_SFLOAT, a.extent.xy) or_return
-			#partial switch node.kind {
-			case .Adjust:
-				node.written = run_pass(editor, &editor.adjust, node.image, a, nil, node.slot) or_return
-			case .Blur:
-				ensure_image(&node.temp, .R16G16B16A16_SFLOAT, a.extent.xy) or_return
-				across := run_pass(editor, &editor.blur, node.temp, a, nil, node.slot, {1, 0}) or_return
-				node.written = run_pass(editor, &editor.blur, node.image, across, nil, node.slot, {0, 1}) or_return
-			case .Sharpen:
-				node.written = run_pass(editor, &editor.sharpen, node.image, a, nil, node.slot) or_return
-			}
-			node.valid = true
-		case .Mix:
-			a, has_a := image_input(node, 0).?
-			b, has_b := image_input(node, 1).?
-			if !has_a && !has_b {
-				break
-			}
-			if !has_a {
-				a = b
-			} else if !has_b {
-				b = a
-			}
-			ensure_image(&node.image, .R16G16B16A16_SFLOAT, a.extent.xy) or_return
-			node.written = run_pass(editor, &editor.mix, node.image, a, b, node.slot) or_return
-			node.valid = true
-		case .Custom:
-			if node.shader.handle == 0 {
-				break
-			}
-			a := image_input(node, 0)
-			b := image_input(node, 1)
-			size := [2]u32{CUSTOM_SIZE, CUSTOM_SIZE}
-			if image, has := a.?; has {
-				size = image.extent.xy
-			} else if image, has := b.?; has {
-				size = image.extent.xy
-			}
-			ensure_image(&node.image, .R16G16B16A16_SFLOAT, size) or_return
-			node.written = run_pass(editor, &node.shader, node.image, a, b, node.slot) or_return
-			node.valid = true
-		case .Output:
-			a, has_a := image_input(node, 0).?
-			if !has_a || node != first_node(editor, .Output) {
-				break
-			}
-			ensure_display(editor, a.extent.xy) or_return
-			shown := run_pass(editor, &editor.present, editor.display, a) or_return
-			editor.display_shown = Valhalla.workload_produces(&editor.graph, Valhalla.generate_mips(&editor.graph, shown))
-			editor.display_valid = true
+		if node_has_work(editor, node) {
+			record_node(editor, node) or_return
 		}
-
-		node.preview_shown = editor.black
-		if node.valid {
-			extent := node.written.extent
-			width := min(u32(PREVIEW_WIDTH), extent.x)
-			height := max(u32(f32(extent.y) * f32(width) / f32(extent.x)), 1)
-			ensure_image(&node.preview, .R8G8B8A8_UNORM, {width, height}) or_return
-			preview := run_pass(editor, &editor.encode, node.preview, node.written) or_return
-			node.preview_shown = Valhalla.workload_produces(&editor.graph, preview)
-		}
+		node.stale = node.recorded
 	}
 	if !editor.display_valid {
 		editor.display_shown = editor.black
 	}
-	return Valhalla.finalize_workload(&editor.graph)
+	return nil
+}
+
+node_has_work :: proc(editor: ^Editor, node: ^Node) -> bool {
+	switch node.kind {
+	case .Value, .Time:
+		return false
+	case .Image_File:
+		return node.source.handle != 0
+	case .Adjust, .Blur, .Sharpen:
+		return image_input(node, 0) != nil
+	case .Mix:
+		return image_input(node, 0) != nil || image_input(node, 1) != nil
+	case .Custom:
+		return node.shader.handle != 0
+	case .Output:
+		return image_input(node, 0) != nil && node == first_node(editor, .Output)
+	}
+	return false
+}
+
+record_node :: proc(editor: ^Editor, node: ^Node) -> Valhalla.Error {
+	if node.has_workload {
+		Valhalla.reset_workload(&node.workload) or_return
+	} else {
+		node.workload = Valhalla.make_workload(fmt.tprintf("%v %v", NODE_TITLES[node.kind], node.id)) or_return
+		node.has_workload = true
+	}
+	workload := &node.workload
+
+	switch node.kind {
+	case .Value, .Time:
+	case .Image_File:
+		node.written = node.source
+	case .Adjust, .Blur, .Sharpen:
+		a := image_input(node, 0).?
+		ensure_image(&node.image, .R16G16B16A16_SFLOAT, a.extent.xy) or_return
+		#partial switch node.kind {
+		case .Adjust:
+			node.written = run_pass(editor, workload, &editor.adjust, node.image, a, nil, node.slot) or_return
+		case .Blur:
+			ensure_image(&node.temp, .R16G16B16A16_SFLOAT, a.extent.xy) or_return
+			across := run_pass(editor, workload, &editor.blur, node.temp, a, nil, node.slot, {1, 0}) or_return
+			node.written = run_pass(editor, workload, &editor.blur, node.image, across, nil, node.slot, {0, 1}) or_return
+		case .Sharpen:
+			node.written = run_pass(editor, workload, &editor.sharpen, node.image, a, nil, node.slot) or_return
+		}
+	case .Mix:
+		a, has_a := image_input(node, 0).?
+		b, has_b := image_input(node, 1).?
+		if !has_a {
+			a = b
+		} else if !has_b {
+			b = a
+		}
+		ensure_image(&node.image, .R16G16B16A16_SFLOAT, a.extent.xy) or_return
+		node.written = run_pass(editor, workload, &editor.mix, node.image, a, b, node.slot) or_return
+	case .Custom:
+		a := image_input(node, 0)
+		b := image_input(node, 1)
+		size := [2]u32{CUSTOM_SIZE, CUSTOM_SIZE}
+		if image, has := a.?; has {
+			size = image.extent.xy
+		} else if image, has := b.?; has {
+			size = image.extent.xy
+		}
+		ensure_image(&node.image, .R16G16B16A16_SFLOAT, size) or_return
+		node.written = run_pass(editor, workload, &node.shader, node.image, a, b, node.slot) or_return
+	case .Output:
+		a := image_input(node, 0).?
+		ensure_display(editor, a.extent.xy) or_return
+		shown := run_pass(editor, workload, &editor.present, editor.display, a) or_return
+		editor.display_shown = Valhalla.workload_produces(workload, Valhalla.generate_mips(workload, shown))
+		editor.display_valid = true
+	}
+
+	if node.kind != .Output {
+		extent := node.written.extent
+		width := min(u32(PREVIEW_WIDTH), extent.x)
+		height := max(u32(f32(extent.y) * f32(width) / f32(extent.x)), 1)
+		ensure_image(&node.preview, .R8G8B8A8_UNORM, {width, height}) or_return
+		preview := run_pass(editor, workload, &editor.encode, node.preview, node.written) or_return
+		node.preview_shown = Valhalla.workload_produces(workload, preview)
+		if node.kind != .Image_File {
+			node.written = Valhalla.workload_produces(workload, node.written)
+		}
+		node.valid = true
+	}
+	Valhalla.finalize_workload(workload) or_return
+	node.recorded = true
+	return nil
 }
 
 update_params :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
@@ -614,6 +639,7 @@ update_params :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
 		}
 		if node.valid && editor.param_values[node.slot] != params {
 			editor.param_values[node.slot] = params
+			node.stale = true
 			changed = true
 		}
 	}
@@ -623,7 +649,6 @@ update_params :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
 	Valhalla.wait_execution(editor.graph_last) or_return
 	Valhalla.load_memory_to_buffer(raw_bytes(editor.param_values[:]), &editor.params) or_return
 	editor.params_written = true
-	editor.graph_stale = true
 	return nil
 }
 
@@ -1254,8 +1279,6 @@ run :: proc() -> Valhalla.Error {
 	valhalla_imgui.init(&window, surface.format.format) or_return
 	defer valhalla_imgui.shutdown()
 
-	editor.graph = Valhalla.make_workload("graph") or_return
-	defer Valhalla.delete_workload(&editor.graph)
 	for &frame in editor.frames {
 		frame = Valhalla.make_workload("frame") or_return
 	}
@@ -1294,11 +1317,6 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		editor.graph_recorded = true
 	}
 	update_params(editor, order) or_return
-	if editor.graph_stale {
-		execution := Valhalla.execute_workload(&editor.graph) or_return
-		editor.graph_last, editor.last = execution, execution
-		editor.graph_stale = false
-	}
 	if editor.save_path != "" && editor.display_valid {
 		save_output(editor) or_return
 	}
@@ -1322,12 +1340,35 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	drawn := valhalla_imgui.render(frame, cleared) or_return
 	Valhalla.present(frame, drawn)
 	Valhalla.finalize_workload(frame) or_return
-	execution, err := Valhalla.execute_workload(frame)
-	if err != Valhalla.Workload_Error.Swapchain_Changed {
+	if _, err := execute_after_graph(editor, frame); err != Valhalla.Workload_Error.Swapchain_Changed {
 		err or_return
-		editor.last = execution
 	}
 	return delete_doomed_nodes(editor)
+}
+
+execute_after_graph :: proc(editor: ^Editor, workload: ^Valhalla.Workload) -> (execution: Valhalla.Execution, err: Valhalla.Error) {
+	order := ordered_nodes(editor)
+	chain := make([dynamic]^Valhalla.Workload, 0, len(order) + 1, context.temp_allocator)
+	for node in order {
+		for input in node.inputs {
+			if input.link != nil && input.link.stale {
+				node.stale = true
+			}
+		}
+		if node.stale && node.recorded {
+			append(&chain, &node.workload)
+		}
+	}
+	append(&chain, workload)
+	execution = Valhalla.execute_workloads(..chain[:]) or_return
+	editor.last = execution
+	if len(chain) > 1 {
+		editor.graph_last = execution
+	}
+	for node in order {
+		node.stale = false
+	}
+	return
 }
 
 save_output :: proc(editor: ^Editor) -> Valhalla.Error {
@@ -1339,8 +1380,7 @@ save_output :: proc(editor: ^Editor) -> Valhalla.Error {
 	defer Valhalla.delete_workload(&save)
 	shot := Valhalla.readback(&save, editor.display_shown) or_return
 	Valhalla.finalize_workload(&save) or_return
-	execution := Valhalla.execute_workload(&save) or_return
-	editor.last = execution
+	execution := execute_after_graph(editor, &save) or_return
 	Valhalla.wait_execution(execution) or_return
 	if err := Valhalla.write_readback_to_file(shot, editor.save_path); err != nil {
 		editor.status = "Saving failed"

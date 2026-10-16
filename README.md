@@ -126,7 +126,7 @@ Valhalla.bind_shader(&frame, shader) or_return
 Valhalla.present(&frame, drawn)
 Valhalla.finalize_workload(&frame) or_return
 
-execution := Valhalla.execute_workload(&frame) or_return
+execution := Valhalla.execute_workloads(&frame) or_return
 Valhalla.wait_execution(execution) or_return
 ```
 
@@ -136,8 +136,27 @@ Valhalla.wait_execution(execution) or_return
   written in is the order it runs.
 - **Record once, execute often.** A workload can be recorded every frame (`hello_triangle`), or
   recorded once with per-frame data written into host-visible buffers between executions
-  (`textured_cube`). When the swapchain is rebuilt, `execute_workload` returns
+  (`textured_cube`). When the swapchain is rebuilt, `execute_workloads` returns
   `.Swapchain_Changed` and the workload is recorded again.
+- **Chain workloads to make passes optional.** `execute_workloads` submits its workloads in one go, in
+  order, each starting after everything before it has finished. Recording a toggleable pass as its
+  own workload that writes in place, and leaving it out of the chain, turns it off without
+  re-recording anything:
+
+  ```odin
+  chain: [3]^Valhalla.Workload
+  count := 0
+  chain[count] = &scene; count += 1
+  if show_gizmos {
+  	chain[count] = &gizmos; count += 1
+  }
+  chain[count] = &frame; count += 1
+  execution := Valhalla.execute_workloads(..chain[:count]) or_return
+  ```
+
+  The only link between workloads is what `workload_produces` hands over: a workload reads the latest
+  written contents and never makes its producer run again, so a producer executed once can feed a
+  consumer executed every frame.
 - **Wait before reusing.** Wait for an execution before writing, resizing or deleting what it uses.
 - `readback` copies a resource out of a workload for the CPU; `raw_commands` gives the command buffer
   for raw Vulkan.

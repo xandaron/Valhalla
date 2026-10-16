@@ -41,7 +41,7 @@ Workload_State :: enum {
 }
 
 Execution :: struct {
-	fence: vk.Fence,
+	value: u64,
 }
 
 Readback :: struct {
@@ -108,8 +108,15 @@ Acquired_Surface :: struct {
 
 @(private)
 Execution_Slot :: struct {
-	fence:              vk.Fence,
+	value:              u64,
 	acquire_semaphores: [dynamic]vk.Semaphore,
+}
+
+@(private = "file")
+Acquisition :: struct {
+	surface:   ^Surface,
+	semaphore: vk.Semaphore,
+	index:     u32,
 }
 
 Workload :: struct {
@@ -215,9 +222,19 @@ MAX_RETIRED_WORKLOADS :: 8
 retired_workloads: [dynamic]Workload
 
 @(private = "file")
+timeline: vk.Semaphore
+
+@(private = "file")
+submitted_value: u64
+
+@(private = "file")
 workload_idle :: proc(workload: ^Workload) -> bool {
+	completed: u64
+	if timeline != 0 {
+		vk.GetSemaphoreCounterValue(device.handle, timeline, &completed)
+	}
 	for slot in workload.slots {
-		if slot.fence != 0 && vk.GetFenceStatus(device.handle, slot.fence) != .SUCCESS {
+		if slot.value > completed {
 			return false
 		}
 	}
@@ -231,6 +248,11 @@ release_workload_pool :: proc() {
 	}
 	delete(retired_workloads)
 	retired_workloads = nil
+	if timeline != 0 {
+		vk.DestroySemaphore(device.handle, timeline, nil)
+		timeline = 0
+	}
+	submitted_value = 0
 	for _, record in workload_records {
 		delete(record.name)
 	}
@@ -842,30 +864,50 @@ finalize_workload :: proc(workload: ^Workload) -> Error {
 }
 
 @(require_results)
-execute_workload :: proc(workload: ^Workload) -> (execution: Execution, err: Error) {
+execute_workloads :: proc(workloads: ..^Workload) -> (execution: Execution, err: Error) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert(workload.state == .Finalized, "a workload must be finalized before it is executed")
-	for producer in workload.consumed {
-		if record, found := &workload_records[producer]; found && !record.executed && !record.warned {
-			record.warned = true
-			log.warnf("Workload \"%v\" uses an output of workload \"%v\", which has not been executed yet, so it reads whatever the resource held before", workload.name, record.name)
+	assert(len(workloads) > 0, "execute_workloads needs a workload")
+	acquired_count := 0
+	for workload, index in workloads {
+		assert(workload.state == .Finalized, "a workload must be finalized before it is executed")
+		assert(!slice.contains(workloads[:index], workload), "a workload appears once in an execution")
+		for acquired in workload.acquired {
+			for earlier in workloads[:index] {
+				assert(find_acquired(earlier, acquired.surface) == nil, "an execution acquires from each surface once")
+			}
 		}
+		acquired_count += len(workload.acquired)
+		warn_unexecuted_producers(workload, workloads[:index])
 	}
+	create_timeline() or_return
 	flush_staging() or_return
-	slot := take_slot(workload) or_return
+	slots := make([]^Execution_Slot, len(workloads), context.temp_allocator)
+	for workload, index in workloads {
+		slots[index] = take_slot(workload) or_return
+	}
 
-	for acquired in workload.acquired {
-		update_surface(acquired.surface) or_return
-		if acquired.surface.minimised || acquired.surface.generation != acquired.generation {
-			return {}, .Swapchain_Changed
+	acquisitions := make([]Acquisition, acquired_count, context.temp_allocator)
+	semaphores := make([]vk.Semaphore, acquired_count, context.temp_allocator)
+	count := 0
+	for workload, index in workloads {
+		for acquired, acquired_index in workload.acquired {
+			update_surface(acquired.surface) or_return
+			if acquired.surface.minimised || acquired.surface.generation != acquired.generation {
+				return {}, .Swapchain_Changed
+			}
+			semaphores[count] = slots[index].acquire_semaphores[acquired_index]
+			acquisitions[count] = {
+				surface   = acquired.surface,
+				semaphore = semaphores[count],
+			}
+			count += 1
 		}
 	}
-	indices := make([]u32, len(workload.acquired), context.temp_allocator)
-	for &acquired, index in workload.acquired {
+	for &acquisition, index in acquisitions {
 		acquire_err: Error
-		indices[index], acquire_err = acquire_next_image(acquired.surface, slot.acquire_semaphores[index])
+		acquisition.index, acquire_err = acquire_next_image(acquisition.surface, acquisition.semaphore)
 		if acquire_err != nil {
-			release_acquires(slot.acquire_semaphores[:index])
+			release_acquires(semaphores[:index])
 			if acquire_err == Surface_Error.Out_Of_Date {
 				return {}, .Swapchain_Changed
 			}
@@ -873,75 +915,90 @@ execute_workload :: proc(workload: ^Workload) -> (execution: Execution, err: Err
 		}
 	}
 
-	submit_count := 1 + len(workload.acquired)
+	value := submitted_value + 1
+	submit_count := 1 + acquired_count
 	submits := make([]vk.SubmitInfo2, submit_count, context.temp_allocator)
-	command_infos := make([]vk.CommandBufferSubmitInfo, submit_count, context.temp_allocator)
-	wait_infos := make([]vk.SemaphoreSubmitInfo, submit_count, context.temp_allocator)
-	signal_infos := make([]vk.SemaphoreSubmitInfo, submit_count, context.temp_allocator)
-	command_infos[0] = {
-		sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-		commandBuffer = workload.command_buffer,
+	command_infos := make([]vk.CommandBufferSubmitInfo, len(workloads) + acquired_count, context.temp_allocator)
+	wait_infos := make([]vk.SemaphoreSubmitInfo, acquired_count, context.temp_allocator)
+	signal_infos := make([]vk.SemaphoreSubmitInfo, acquired_count + 1, context.temp_allocator)
+	for workload, index in workloads {
+		command_infos[index] = {
+			sType         = .COMMAND_BUFFER_SUBMIT_INFO,
+			commandBuffer = workload.command_buffer,
+		}
+	}
+	signal_infos[acquired_count] = {
+		sType     = .SEMAPHORE_SUBMIT_INFO,
+		semaphore = timeline,
+		value     = value,
+		stageMask = {.ALL_COMMANDS},
 	}
 	submits[0] = {
 		sType                  = .SUBMIT_INFO_2,
-		commandBufferInfoCount = 1,
+		commandBufferInfoCount = u32(len(workloads)),
 		pCommandBufferInfos    = &command_infos[0],
 	}
-	for acquired, index in workload.acquired {
-		submit := index + 1
-		command_infos[submit] = {
+	if acquired_count == 0 {
+		submits[0].signalSemaphoreInfoCount = 1
+		submits[0].pSignalSemaphoreInfos = &signal_infos[0]
+	}
+	for acquisition, index in acquisitions {
+		command := len(workloads) + index
+		command_infos[command] = {
 			sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-			commandBuffer = acquired.surface.copies[indices[index]],
+			commandBuffer = acquisition.surface.copies[acquisition.index],
 		}
-		wait_infos[submit] = {
+		wait_infos[index] = {
 			sType     = .SEMAPHORE_SUBMIT_INFO,
-			semaphore = slot.acquire_semaphores[index],
+			semaphore = acquisition.semaphore,
 			stageMask = {.ALL_TRANSFER},
 		}
-		signal_infos[submit] = {
+		signal_infos[index] = {
 			sType     = .SEMAPHORE_SUBMIT_INFO,
-			semaphore = acquired.surface.present_semaphores[indices[index]],
+			semaphore = acquisition.surface.present_semaphores[acquisition.index],
 			stageMask = {.ALL_COMMANDS},
 		}
-		submits[submit] = {
+		submits[index + 1] = {
 			sType                    = .SUBMIT_INFO_2,
 			waitSemaphoreInfoCount   = 1,
-			pWaitSemaphoreInfos      = &wait_infos[submit],
+			pWaitSemaphoreInfos      = &wait_infos[index],
 			commandBufferInfoCount   = 1,
-			pCommandBufferInfos      = &command_infos[submit],
-			signalSemaphoreInfoCount = 1,
-			pSignalSemaphoreInfos    = &signal_infos[submit],
+			pCommandBufferInfos      = &command_infos[command],
+			signalSemaphoreInfoCount = 2 if index == acquired_count - 1 else 1,
+			pSignalSemaphoreInfos    = &signal_infos[index],
 		}
 	}
 
-	vk.ResetFences(device.handle, 1, &slot.fence)
-	if res := vk.QueueSubmit2(device.graphics_queue, u32(submit_count), raw_data(submits), slot.fence); res != .SUCCESS {
-		log.errorf("Failed to submit workload: %v", res)
-		empty: vk.SubmitInfo2 = {
-			sType = .SUBMIT_INFO_2,
-		}
-		vk.QueueSubmit2(device.graphics_queue, 1, &empty, slot.fence)
+	if res := vk.QueueSubmit2(device.graphics_queue, u32(submit_count), raw_data(submits), 0); res != .SUCCESS {
+		log.errorf("Failed to submit workloads: %v", res)
+		release_acquires(semaphores)
 		return {}, .Submit_Failed
 	}
-	workload.next_slot = (workload.next_slot + 1) % MAX_EXECUTIONS_IN_FLIGHT
-	execution.fence = slot.fence
-	if record, found := &workload_records[workload.id]; found {
-		record.executed = true
+	submitted_value = value
+	execution.value = value
+	for workload, index in workloads {
+		slots[index].value = value
+		workload.next_slot = (workload.next_slot + 1) % MAX_EXECUTIONS_IN_FLIGHT
+		if record, found := &workload_records[workload.id]; found {
+			record.executed = true
+		}
 	}
 
-	if len(workload.acquired) > 0 {
-		swapchains := make([]vk.SwapchainKHR, len(workload.acquired), context.temp_allocator)
-		waits := make([]vk.Semaphore, len(workload.acquired), context.temp_allocator)
-		results := make([]vk.Result, len(workload.acquired), context.temp_allocator)
-		for acquired, index in workload.acquired {
-			swapchains[index] = acquired.surface.swapchain
-			waits[index] = signal_infos[index + 1].semaphore
+	if acquired_count > 0 {
+		swapchains := make([]vk.SwapchainKHR, acquired_count, context.temp_allocator)
+		waits := make([]vk.Semaphore, acquired_count, context.temp_allocator)
+		indices := make([]u32, acquired_count, context.temp_allocator)
+		results := make([]vk.Result, acquired_count, context.temp_allocator)
+		for acquisition, index in acquisitions {
+			swapchains[index] = acquisition.surface.swapchain
+			waits[index] = signal_infos[index].semaphore
+			indices[index] = acquisition.index
 		}
 		present_info: vk.PresentInfoKHR = {
 			sType              = .PRESENT_INFO_KHR,
-			waitSemaphoreCount = u32(len(waits)),
+			waitSemaphoreCount = u32(acquired_count),
 			pWaitSemaphores    = raw_data(waits),
-			swapchainCount     = u32(len(swapchains)),
+			swapchainCount     = u32(acquired_count),
 			pSwapchains        = raw_data(swapchains),
 			pImageIndices      = raw_data(indices),
 			pResults           = raw_data(results),
@@ -951,7 +1008,7 @@ execute_workload :: proc(workload: ^Workload) -> (execution: Execution, err: Err
 			#partial switch result {
 			case .SUCCESS:
 			case .SUBOPTIMAL_KHR, .ERROR_OUT_OF_DATE_KHR:
-				workload.acquired[index].surface.suboptimal = true
+				acquisitions[index].surface.suboptimal = true
 			case:
 				log.errorf("Failed to present: %v", result)
 				err = .Present_Failed
@@ -961,16 +1018,67 @@ execute_workload :: proc(workload: ^Workload) -> (execution: Execution, err: Err
 	return
 }
 
+@(private = "file")
+warn_unexecuted_producers :: proc(workload: ^Workload, earlier: []^Workload) {
+	consumed: for producer in workload.consumed {
+		record, found := &workload_records[producer]
+		if !found || record.executed || record.warned {
+			continue
+		}
+		for other in earlier {
+			if other.id == producer {
+				continue consumed
+			}
+		}
+		record.warned = true
+		log.warnf("Workload \"%v\" uses an output of workload \"%v\", which has not been executed yet, so it reads whatever the resource held before", workload.name, record.name)
+	}
+}
+
 @(require_results)
 wait_execution :: proc(execution: Execution) -> Error {
-	fence := execution.fence
-	if fence == 0 {
+	return wait_value(execution.value)
+}
+
+@(private = "file")
+@(require_results)
+wait_value :: proc(value: u64) -> Error {
+	if value == 0 {
 		return nil
 	}
-	if res := vk.WaitForFences(device.handle, 1, &fence, true, max(u64)); res != .SUCCESS {
+	semaphore, target := timeline, value
+	wait_info: vk.SemaphoreWaitInfo = {
+		sType          = .SEMAPHORE_WAIT_INFO,
+		semaphoreCount = 1,
+		pSemaphores    = &semaphore,
+		pValues        = &target,
+	}
+	if res := vk.WaitSemaphores(device.handle, &wait_info, max(u64)); res != .SUCCESS {
 		log.errorf("Failed to wait for a workload execution: %v", res)
 		return .Wait_Failed
 	}
+	return nil
+}
+
+@(private = "file")
+@(require_results)
+create_timeline :: proc() -> Error {
+	if timeline != 0 {
+		return nil
+	}
+	type_info: vk.SemaphoreTypeCreateInfo = {
+		sType         = .SEMAPHORE_TYPE_CREATE_INFO,
+		semaphoreType = .TIMELINE,
+	}
+	semaphore_info: vk.SemaphoreCreateInfo = {
+		sType = .SEMAPHORE_CREATE_INFO,
+		pNext = &type_info,
+	}
+	if res := vk.CreateSemaphore(device.handle, &semaphore_info, nil, &timeline); res != .SUCCESS {
+		log.errorf("Failed to create the workload timeline: %v", res)
+		return .Sync_Creation_Failed
+	}
+	name_object(.SEMAPHORE, u64(timeline), "workload timeline")
 	return nil
 }
 
@@ -978,7 +1086,7 @@ wait_execution :: proc(execution: Execution) -> Error {
 @(require_results)
 run_workload :: proc(workload: ^Workload) -> Error {
 	finalize_workload(workload) or_return
-	execution := execute_workload(workload) or_return
+	execution := execute_workloads(workload) or_return
 	return wait_execution(execution)
 }
 
@@ -1007,9 +1115,6 @@ destroy_workload :: proc(workload: ^Workload) {
 	unregister_workload(workload)
 	wait_all(workload)
 	for &slot in workload.slots {
-		if slot.fence != 0 {
-			vk.DestroyFence(device.handle, slot.fence, nil)
-		}
 		for semaphore in slot.acquire_semaphores {
 			vk.DestroySemaphore(device.handle, semaphore, nil)
 		}
@@ -2037,16 +2142,6 @@ begin_command_buffer :: proc(workload: ^Workload) -> Error {
 @(require_results)
 take_slot :: proc(workload: ^Workload) -> (slot: ^Execution_Slot, err: Error) {
 	slot = &workload.slots[workload.next_slot]
-	if slot.fence == 0 {
-		fence_info: vk.FenceCreateInfo = {
-			sType = .FENCE_CREATE_INFO,
-			flags = {.SIGNALED},
-		}
-		if res := vk.CreateFence(device.handle, &fence_info, nil, &slot.fence); res != .SUCCESS {
-			log.errorf("Failed to create a workload fence: %v", res)
-			return nil, .Sync_Creation_Failed
-		}
-	}
 	for len(slot.acquire_semaphores) < len(workload.acquired) {
 		semaphore_info: vk.SemaphoreCreateInfo = {
 			sType = .SEMAPHORE_CREATE_INFO,
@@ -2058,10 +2153,7 @@ take_slot :: proc(workload: ^Workload) -> (slot: ^Execution_Slot, err: Error) {
 		}
 		append(&slot.acquire_semaphores, semaphore)
 	}
-	if res := vk.WaitForFences(device.handle, 1, &slot.fence, true, max(u64)); res != .SUCCESS {
-		log.errorf("Failed to wait for an earlier execution: %v", res)
-		return nil, .Wait_Failed
-	}
+	wait_value(slot.value) or_return
 	return
 }
 
@@ -2088,10 +2180,8 @@ release_acquires :: proc(semaphores: []vk.Semaphore) {
 
 @(private = "file")
 wait_all :: proc(workload: ^Workload) {
-	for &slot in workload.slots {
-		if slot.fence != 0 {
-			vk.WaitForFences(device.handle, 1, &slot.fence, true, max(u64))
-		}
+	for slot in workload.slots {
+		_ = wait_value(slot.value)
 	}
 }
 

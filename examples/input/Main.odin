@@ -184,7 +184,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	}
 	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&disc), &state.disc) or_return
 
-	execution, err := Valhalla.execute_workload(&state.frame)
+	execution, err := Valhalla.execute_workloads(&state.frame)
 	if err == Valhalla.Workload_Error.Swapchain_Changed {
 		state.recorded = false
 		return nil

@@ -122,7 +122,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 			return nil
 		}
 	}
-	execution, err := Valhalla.execute_workload(&scene.frame)
+	execution, err := Valhalla.execute_workloads(&scene.frame)
 	if err == Valhalla.Workload_Error.Swapchain_Changed {
 		scene.recorded = false
 		return nil

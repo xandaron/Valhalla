@@ -289,7 +289,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	Valhalla.load_memory_to_buffer(raw_bytes(lights[:]), scene.light_buffer) or_return
 	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&view), scene.view_buffer) or_return
 
-	execution, err := Valhalla.execute_workload(&scene.frame)
+	execution, err := Valhalla.execute_workloads(&scene.frame)
 	if err == Valhalla.Workload_Error.Swapchain_Changed {
 		scene.recorded = false
 		return nil

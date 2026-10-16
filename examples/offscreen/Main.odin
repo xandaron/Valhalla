@@ -40,7 +40,7 @@ run :: proc() -> Valhalla.Error {
 	picture := Valhalla.readback(&work, drawn) or_return
 	Valhalla.finalize_workload(&work) or_return
 
-	execution := Valhalla.execute_workload(&work) or_return
+	execution := Valhalla.execute_workloads(&work) or_return
 	Valhalla.wait_execution(execution) or_return
 	Valhalla.write_readback_to_file(picture, OUTPUT) or_return
 	log.infof("Wrote %v", OUTPUT)

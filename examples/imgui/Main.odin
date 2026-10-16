@@ -147,7 +147,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 
 	Valhalla.present(&frame, drawn)
 	Valhalla.finalize_workload(&frame) or_return
-	execution := Valhalla.execute_workload(&frame) or_return
+	execution := Valhalla.execute_workloads(&frame) or_return
 	Valhalla.wait_execution(execution) or_return
 	return nil
 }
