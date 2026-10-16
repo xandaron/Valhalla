@@ -12,6 +12,7 @@ config/*
 *.settings
 
 Creature Builder/
+xr/
 
 // Misc
 docs/

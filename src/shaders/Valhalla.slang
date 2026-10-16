@@ -60,6 +60,14 @@ public SamplerComparisonState valhalla_comparison_sampler(ValhallaHeader header,
 	return handle;
 }
 
+public RaytracingAccelerationStructure valhalla_acceleration_structure(uint2 address) {
+	return spirv_asm {
+		OpCapability RayQueryKHR;
+		OpExtension "SPV_KHR_ray_query";
+		result: $$RaytracingAccelerationStructure = OpConvertUToAccelerationStructureKHR $address
+	};
+}
+
 public float3 valhalla_srgb_to_linear(float3 colour) {
 	return select(colour <= 0.04045, colour / 12.92, pow((colour + 0.055) / 1.055, 2.4));
 }

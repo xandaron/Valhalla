@@ -106,6 +106,7 @@ Push_Leaf_Kind :: enum u8 {
 	Image,
 	Buffer,
 	Sampler,
+	Acceleration_Structure,
 }
 
 @(private = "file")
@@ -1585,6 +1586,9 @@ flatten_odin :: proc(info: ^runtime.Type_Info, offset: int, name: string, leaves
 	case Sampler:
 		append(leaves, Push_Leaf{offset = offset, kind = .Sampler, name = name})
 		return
+	case Acceleration_Structure:
+		append(leaves, Push_Leaf{offset = offset, kind = .Acceleration_Structure, name = name})
+		return
 	}
 	base := runtime.type_info_base(info)
 	#partial switch variant in base.variant {
@@ -1649,7 +1653,7 @@ leaf_type :: proc(leaf: Push_Leaf) -> string {
 		return fmt.tprintf("%v-byte bool", leaf.width)
 	case .Pointer:
 		return "8-byte pointer"
-	case .Image, .Buffer, .Sampler:
+	case .Image, .Buffer, .Sampler, .Acceleration_Structure:
 		return fmt.tprintf("%v", leaf.kind)
 	case .Other:
 	}
@@ -1719,7 +1723,7 @@ make_push_plan :: proc(push_type: typeid, push_size: int, shader_leaves: []Push_
 			odin_side = fmt.tprintf("%v `%v`", leaf_type(leaf), leaf.name)
 		}
 		fmt.panicf(
-			"Push data mismatch between the shader's push struct and %v: the shader has %v where %v has %v. Declare the same fields in the same order; an Image, Buffer or Sampler field matches a DescriptorHandle (or uint) in the shader.",
+			"Push data mismatch between the shader's push struct and %v: the shader has %v where %v has %v. Declare the same fields in the same order; an Image, Buffer or Sampler field matches a DescriptorHandle (or uint) in the shader, and an Acceleration_Structure matches a uint2 passed to valhalla_acceleration_structure.",
 			T,
 			shader_side,
 			T,
@@ -1735,7 +1739,7 @@ make_push_plan :: proc(push_type: typeid, push_size: int, shader_leaves: []Push_
 			mismatch(T, nil, odin_leaf)
 		}
 		first := gpu_leaves[next]
-		if odin_leaf.kind == .Image || odin_leaf.kind == .Buffer || odin_leaf.kind == .Sampler {
+		if odin_leaf.kind == .Image || odin_leaf.kind == .Buffer || odin_leaf.kind == .Sampler || odin_leaf.kind == .Acceleration_Structure {
 			count := 0
 			for next < len(gpu_leaves) && gpu_leaves[next].group == first.group {
 				leaf := gpu_leaves[next]
@@ -1745,7 +1749,7 @@ make_push_plan :: proc(push_type: typeid, push_size: int, shader_leaves: []Push_
 				count += 1
 				next += 1
 			}
-			if count > 2 {
+			if count > 2 || odin_leaf.kind == .Acceleration_Structure && count != 2 {
 				mismatch(T, first, odin_leaf)
 			}
 			append(&slots, Push_Slot{from = odin_leaf.offset, to = first.offset, width = 4 * count, kind = odin_leaf.kind, name = strings.clone(odin_leaf.name)})
@@ -1825,6 +1829,11 @@ pack_push_data :: proc(shader: Shader, reads: ^[dynamic]Shader_Resource) {
 		case .Sampler:
 			sampler := (^Sampler)(&source[slot.from])^
 			index = sampler.heap_index if sampler.heap_index != 0 else null_sampler_index()
+		case .Acceleration_Structure:
+			structure := (^Acceleration_Structure)(&source[slot.from])^
+			fmt.assertf(structure.address != 0, "push field `%v`: the acceleration structure has not been built; make it with make_top_level", slot.name)
+			(^u64)(&data[slot.to])^ = u64(structure.address)
+			continue
 		}
 		(^u32)(&data[slot.to])^ = index
 		if slot.width == 8 {

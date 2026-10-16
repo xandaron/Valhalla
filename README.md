@@ -29,6 +29,8 @@ odin run examples/hello_triangle
 | `offscreen` | No window: renders into an image and writes it to `triangle.png` |
 | `hdr` | An HDR surface with a PQ-encoding pass, falling back to SDR |
 | `lighting` | Shadow maps for a sun and four point lights, using multiview for cube maps |
+| `raytracing` | Hardware ray queries from a compute shader: acceleration structures, shadows and mirror bounces |
+| `vr` | Stereo rendering: both eyes in one multiview pass into a two-layer image, shown side by side with an optional lens preview |
 | `two_windows` | One workload drawing to two windows, input in one driving the other |
 | `input` | Keyboard, mouse, gamepad, clipboard, cursors, file drops and fullscreen |
 | `imgui` | Dear ImGui through `Valhalla_ImGui` |

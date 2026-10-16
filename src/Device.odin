@@ -67,6 +67,7 @@ Optional_Features :: struct {
 	mesh_shader:           bool,
 	task_shader:           bool,
 	multiview_mesh_shader: bool,
+	ray_query:             bool,
 }
 
 Device :: struct {
@@ -701,6 +702,43 @@ create_logical_device :: proc(settings: Device_Settings) -> Error {
 			device.optional.mesh_shader = true
 			device.optional.task_shader = bool(mesh_features.taskShader)
 			device.optional.multiview_mesh_shader = bool(mesh_features.multiviewMeshShader)
+		}
+	}
+
+	ray_extensions := []cstring{vk.KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, vk.KHR_RAY_QUERY_EXTENSION_NAME, vk.KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME}
+	acceleration_features: vk.PhysicalDeviceAccelerationStructureFeaturesKHR
+	ray_query_features: vk.PhysicalDeviceRayQueryFeaturesKHR
+	if supports_extensions(device.physical_device, ray_extensions) {
+		acceleration_support: vk.PhysicalDeviceAccelerationStructureFeaturesKHR = {
+			sType = .PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+		}
+		ray_query_support: vk.PhysicalDeviceRayQueryFeaturesKHR = {
+			sType = .PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+			pNext = &acceleration_support,
+		}
+		query: vk.PhysicalDeviceFeatures2 = {
+			sType = .PHYSICAL_DEVICE_FEATURES_2,
+			pNext = &ray_query_support,
+		}
+		vk.GetPhysicalDeviceFeatures2(device.physical_device, &query)
+		if acceleration_support.accelerationStructure && ray_query_support.rayQuery {
+			ray_query_features = {
+				sType    = .PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+				pNext    = features.unified_layouts.pNext,
+				rayQuery = true,
+			}
+			acceleration_features = {
+				sType                 = .PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+				pNext                 = &ray_query_features,
+				accelerationStructure = true,
+			}
+			features.unified_layouts.pNext = &acceleration_features
+			for name in ray_extensions {
+				if !slice.contains(extensions[:], name) {
+					append(&extensions, name)
+				}
+			}
+			device.optional.ray_query = true
 		}
 	}
 
