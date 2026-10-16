@@ -43,9 +43,9 @@
       independent: a consumer waits on the timeline value of its producer's latest execution, if
       it has one, and never makes the producer run again or waits for a future run of it.
 - [ ] GPU timing.
-- [ ] Acceleration structure updates and rebuilds inside a workload, so instances can move; today
-      `make_bottom_level` and `make_top_level` build once on the staging queue. Compaction and AABB
-      geometry too.
+- [ ] Acceleration structure builds inside a workload. `update_top_level` moves instances by
+      rebuilding in place on the staging queue, which waits on the CPU and allocates a scratch and an
+      instance buffer each call. Compaction and AABB geometry too.
 - [ ] The Slang bindings mark `Global_Session` and `Module` `@(private)`, so `Shader.odin` names them
       through `intrinsics.type_proc_return_type`. Export them from `src/slang`.
 
@@ -66,7 +66,12 @@
   in the mesh shader when both entry points are in one SPIR-V module, which is how every pipeline is
   built. Valid SPIR-V; separate per-stage modules work. Not worked around; if needed, compile the task
   entry point into its own module.
-- NVIDIA acceleration structures through the descriptor heap (driver 616.92): a
-  `DescriptorHandle<RaytracingAccelerationStructure>` whose heap slot holds the right descriptor at
-  the driver's acceleration structure stride still loses the device when traced. Valhalla passes the
-  structure's device address instead (`valhalla_acceleration_structure`), which works.
+- NVIDIA acceleration structures through the descriptor heap (drivers 610.x to 617.42): tracing an
+  acceleration structure that a shader reads from the resource heap loses the device or hangs. It
+  fails with both lowerings: Slang 2026.8's typed `OpLoad` of `OpTypeAccelerationStructureKHR`, and
+  Slang 2026.17 onwards' 64-bit address load plus `OpConvertUToAccelerationStructureKHR` (Slang
+  #10671, #11494; that form also needs `shaderInt64`). Reported with GLSL and Slang on RTX 4070 Ti
+  SUPER, 4090 and Linux (NVIDIA developer forum thread 376527); storage images and buffers in the
+  same heap work. Valhalla passes the structure's device address in push data instead
+  (`valhalla_acceleration_structure`), which never touches the heap and works. Revisit when NVIDIA
+  fixes it.

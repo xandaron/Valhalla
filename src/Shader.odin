@@ -1831,7 +1831,6 @@ pack_push_data :: proc(shader: Shader, reads: ^[dynamic]Shader_Resource) {
 			index = sampler.heap_index if sampler.heap_index != 0 else null_sampler_index()
 		case .Acceleration_Structure:
 			structure := (^Acceleration_Structure)(&source[slot.from])^
-			fmt.assertf(structure.address != 0, "push field `%v`: the acceleration structure has not been built; make it with make_top_level", slot.name)
 			(^u64)(&data[slot.to])^ = u64(structure.address)
 			continue
 		}

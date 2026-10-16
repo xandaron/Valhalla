@@ -411,7 +411,8 @@ make_bottom_level :: proc(
 		}
 		counts[index] = u32(geometry.triangle_count)
 	}
-	return build_acceleration_structure(.BOTTOM_LEVEL, described, ranges, counts, name)
+	err = build_acceleration_structure(&structure, .BOTTOM_LEVEL, described, ranges, counts, name)
+	return
 }
 
 @(require_results)
@@ -422,6 +423,23 @@ make_top_level :: proc(
 	structure: Acceleration_Structure,
 	err: Error,
 ) {
+	err = build_top_level(&structure, instances, name)
+	return
+}
+
+@(require_results)
+update_top_level :: proc(structure: ^Acceleration_Structure, instances: []Acceleration_Instance) -> Error {
+	assert(structure.handle != 0, "update_top_level needs a structure made by make_top_level")
+	return build_top_level(structure, instances, "")
+}
+
+@(private = "file")
+@(require_results)
+build_top_level :: proc(
+	structure: ^Acceleration_Structure,
+	instances: []Acceleration_Instance,
+	name: string,
+) -> Error {
 	assert(
 		device.optional.ray_query,
 		"acceleration structures need a device with ray queries (device.optional.ray_query)",
@@ -466,7 +484,7 @@ make_top_level :: proc(
 	}
 	ranges := []vk.AccelerationStructureBuildRangeInfoKHR{{primitiveCount = u32(len(instances))}}
 	counts := []u32{u32(len(instances))}
-	return build_acceleration_structure(.TOP_LEVEL, described, ranges, counts, name)
+	return build_acceleration_structure(structure, .TOP_LEVEL, described, ranges, counts, name)
 }
 
 delete_acceleration_structure :: proc(structure: ^Acceleration_Structure) {
@@ -481,13 +499,13 @@ delete_acceleration_structure :: proc(structure: ^Acceleration_Structure) {
 @(private = "file")
 @(require_results)
 build_acceleration_structure :: proc(
+	structure: ^Acceleration_Structure,
 	type: vk.AccelerationStructureTypeKHR,
 	geometries: []vk.AccelerationStructureGeometryKHR,
 	ranges: []vk.AccelerationStructureBuildRangeInfoKHR,
 	counts: []u32,
 	name: string,
 ) -> (
-	structure: Acceleration_Structure,
 	err: Error,
 ) {
 	build_info: vk.AccelerationStructureBuildGeometryInfoKHR = {
@@ -509,35 +527,43 @@ build_acceleration_structure :: proc(
 		&sizes,
 	)
 
-	defer if err != nil {
-		delete_acceleration_structure(&structure)
+	created := structure.handle == 0
+	defer if err != nil && created {
+		delete_acceleration_structure(structure)
 	}
-	structure.storage = make_owned_buffer(
-		sizes.accelerationStructureSize,
-		{name = name},
-		{.ACCELERATION_STRUCTURE_STORAGE_KHR},
-	) or_return
-	create_info: vk.AccelerationStructureCreateInfoKHR = {
-		sType  = .ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
-		buffer = structure.storage.handle,
-		size   = sizes.accelerationStructureSize,
-		type   = type,
+	if !created {
+		assert(
+			sizes.accelerationStructureSize <= structure.storage.size,
+			"update_top_level cannot grow a structure; make a new one with make_top_level",
+		)
+	} else {
+		structure.storage = make_owned_buffer(
+			sizes.accelerationStructureSize,
+			{name = name},
+			{.ACCELERATION_STRUCTURE_STORAGE_KHR},
+		) or_return
+		create_info: vk.AccelerationStructureCreateInfoKHR = {
+			sType  = .ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+			buffer = structure.storage.handle,
+			size   = sizes.accelerationStructureSize,
+			type   = type,
+		}
+		if res := vk.CreateAccelerationStructureKHR(
+			device.handle,
+			&create_info,
+			nil,
+			&structure.handle,
+		); res != .SUCCESS {
+			log.errorf("Failed to create an acceleration structure: %v", res)
+			return .Buffer_Creation_Failed
+		}
+		name_object(.ACCELERATION_STRUCTURE_KHR, u64(structure.handle), name)
+		address_info: vk.AccelerationStructureDeviceAddressInfoKHR = {
+			sType                 = .ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+			accelerationStructure = structure.handle,
+		}
+		structure.address = vk.GetAccelerationStructureDeviceAddressKHR(device.handle, &address_info)
 	}
-	if res := vk.CreateAccelerationStructureKHR(
-		device.handle,
-		&create_info,
-		nil,
-		&structure.handle,
-	); res != .SUCCESS {
-		log.errorf("Failed to create an acceleration structure: %v", res)
-		return structure, .Buffer_Creation_Failed
-	}
-	name_object(.ACCELERATION_STRUCTURE_KHR, u64(structure.handle), name)
-	address_info: vk.AccelerationStructureDeviceAddressInfoKHR = {
-		sType                 = .ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
-		accelerationStructure = structure.handle,
-	}
-	structure.address = vk.GetAccelerationStructureDeviceAddressKHR(device.handle, &address_info)
 
 	properties: vk.PhysicalDeviceAccelerationStructurePropertiesKHR = {
 		sType = .PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
