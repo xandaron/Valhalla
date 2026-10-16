@@ -11,9 +11,7 @@ config/*
 *.dbg
 *.settings
 
-// Generated Files
-demo/components/*
-demo/assets/*
+Creature Builder/
 
 // Misc
 docs/
