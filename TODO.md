@@ -1,5 +1,40 @@
 # TODO
 
+## API direction
+
+- [ ] Acquire and present stop being commands recorded into a workload. A workload only records that
+      its output goes to a surface; `execute_workloads` adds the acquire, any scaling or format
+      conversion, and the present each time it runs, so the surface's size and format can change
+      between executions and a swapchain rebuild never forces a re-record (`Swapchain_Changed` goes
+      away for resizes). Open: what a workload draws into when it does not know the swapchain's size
+      (an image the user sizes, scaled onto the swapchain at present), how shaders' attachment formats
+      follow a surface whose format changes (an HDR toggle), and minimised windows (skip the present,
+      keep the workload valid).
+- [ ] Clean up the public API: it is often unclear which procedure does a job, and some names need
+      to change. Audit every public procedure for overlaps and naming. Already seen: a resource can
+      reach a shader as a push field or through the binding table, with nothing saying which to
+      prefer; `bind_shader_input`/`bind_shader_output` return a table index on every call although
+      most callers pass resources as push fields and discard it; binding the same resource twice adds
+      a second table entry instead of returning the first (imgui deduplicates by hand); and
+      `bind_shader_output` both declares a write and adds a table entry.
+- [ ] Executions run in parallel, ordered only by dependencies. Today `execute_workloads` runs its
+      workloads in order because `begin_command_buffer` opens every workload with a full
+      all-commands barrier; that barrier is not the design and goes. A workload synchronises only
+      with the workloads it depends on: dependencies stated between workloads (or derived from
+      `workload_produces`), timeline semaphores between them, and multiple queues (graphics, async
+      compute, transfer). See the `workload_produces`/`workload_discards` item below.
+
+## Examples
+
+- [ ] Rewrite the examples for readability; they are the documentation, and today they are hard to
+      follow. Each should read top to bottom as the steps of the one thing it shows, with setup,
+      per-frame work and teardown easy to tell apart. Seen so far: `lighting` threads ~25 fields
+      through a `Scene` struct of pointers and splits a frame across `draw_frame`/`record_frame` with
+      a `recorded` flag; the same helpers are copied between examples (`raw_bytes` five times,
+      `add_cube`/`add_plane`/`add_sphere` and `projection` three times, orbit-camera input callbacks
+      in four or five); `image_editor` is 1391 lines in one file. Copies of `raw_bytes` suggest
+      something the API should offer itself.
+
 ## HDR
 
 - [ ] `hdr_available` is only refreshed when the swapchain is rebuilt, so moving the window to another

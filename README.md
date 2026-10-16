@@ -102,6 +102,10 @@ struct Push {
 // push.vertices[vertex_id], push.albedo.Sample(push.linear, uv)
 ```
 
+A single struct the shader reads whole (a camera, a block of settings) goes in a `.Uniform` buffer,
+declared as `DescriptorHandle<ConstantBuffer<View>> view` and read as `push.view->view_projection`. A
+buffer is `.Storage` or `.Uniform`, never both, and the shader's handle type must agree with it.
+
 The second return value is the compiler's diagnostics. Everything Vulkan allows to be dynamic (depth
 test, blending, culling, viewport, ...) is set per draw with `set_*` procedures, not baked into the
 shader. Shaders work in linear light: sRGB textures decode when sampled and SDR surfaces encode on

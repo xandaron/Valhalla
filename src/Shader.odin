@@ -109,13 +109,21 @@ Push_Leaf_Kind :: enum u8 {
 	Acceleration_Structure,
 }
 
+@(private)
+Buffer_Descriptor :: enum u8 {
+	Unknown,
+	Storage,
+	Uniform,
+}
+
 @(private = "file")
 Push_Leaf :: struct {
-	offset: int,
-	width:  int,
-	kind:   Push_Leaf_Kind,
-	name:   string,
-	group:  int,
+	offset:     int,
+	width:      int,
+	kind:       Push_Leaf_Kind,
+	name:       string,
+	group:      int,
+	descriptor: Buffer_Descriptor,
 }
 
 @(private)
@@ -128,6 +136,7 @@ Push_Slot :: struct {
 	from, to, width: int,
 	kind:            Push_Leaf_Kind,
 	name:            string,
+	descriptor:      Buffer_Descriptor,
 }
 
 @(private)
@@ -306,25 +315,42 @@ SPIRV_EXECUTION_MODE_LOCAL_SIZE :: 17
 
 @(private = "file")
 Spirv_Op :: enum u32 {
-	Type_Bool            = 20,
-	Type_Int             = 21,
-	Type_Float           = 22,
-	Type_Vector          = 23,
-	Type_Matrix          = 24,
-	Type_Array           = 28,
-	Type_Struct          = 30,
-	Type_Pointer         = 32,
-	Constant             = 43,
-	Variable             = 59,
-	Decorate             = 71,
-	Member_Decorate      = 72,
-	Member_Name          = 6,
-	Type_Untyped_Pointer = 4417,
-	Untyped_Variable     = 4418,
+	Type_Bool                      = 20,
+	Type_Int                       = 21,
+	Type_Float                     = 22,
+	Type_Vector                    = 23,
+	Type_Matrix                    = 24,
+	Type_Array                     = 28,
+	Type_Runtime_Array             = 29,
+	Type_Struct                    = 30,
+	Type_Pointer                   = 32,
+	Constant                       = 43,
+	Variable                       = 59,
+	Load                           = 61,
+	Store                          = 62,
+	Access_Chain                   = 65,
+	In_Bounds_Access_Chain         = 66,
+	Decorate                       = 71,
+	Member_Decorate                = 72,
+	Composite_Extract              = 81,
+	Copy_Object                    = 83,
+	Bitcast                        = 124,
+	Member_Name                    = 6,
+	Type_Untyped_Pointer           = 4417,
+	Untyped_Variable               = 4418,
+	Untyped_Access_Chain           = 4419,
+	Untyped_In_Bounds_Access_Chain = 4420,
+	Type_Buffer                    = 5115,
 }
 
 @(private = "file")
+SPIRV_STORAGE_UNIFORM :: 2
+
+@(private = "file")
 SPIRV_STORAGE_PUSH_CONSTANT :: 9
+
+@(private = "file")
+SPIRV_STORAGE_STORAGE_BUFFER :: 12
 
 @(private = "file")
 SPIRV_DECORATION_ROW_MAJOR :: 4
@@ -735,6 +761,7 @@ bind_shader_image_output :: proc(shader: ^Shader, image: Image) -> (written: Ima
 
 @(require_results)
 bind_shader_buffer_output :: proc(shader: ^Shader, buffer: Buffer) -> (written: Buffer, index: u32, err: Error) {
+	assert(.UNIFORM_BUFFER not_in buffer.usage, "bind_shader_output writes through a storage descriptor; a .Uniform buffer is read-only to shaders")
 	index = add_binding(shader, {resource = buffer, written = true}) or_return
 	return next_version(buffer), index, nil
 }
@@ -1151,7 +1178,7 @@ add_binding :: proc(shader: ^Shader, binding: Shader_Binding) -> (index: u32, er
 		}
 	case Buffer:
 		if resource.heap_index == 0 {
-			log.error("The buffer has no descriptor: it must be made by Valhalla with .Storage usage")
+			log.error("The buffer has no descriptor: it must be made by Valhalla with .Storage or .Uniform usage")
 			return 0, .Resource_Not_In_Heap
 		}
 	case Sampler:
@@ -1363,6 +1390,12 @@ parse_spirv :: proc(code: []u32) -> (entry_points: []Spirv_Entry_Point, ok: bool
 		member_names   = make(map[Spirv_Member]string, context.temp_allocator),
 	}
 	push_variables := make(map[u32]u32, context.temp_allocator)
+	trace := Spirv_Push_Trace {
+		pointers    = make(map[u32]Spirv_Push_Reference, context.temp_allocator),
+		values      = make(map[u32]Spirv_Push_Reference, context.temp_allocator),
+		locals      = make(map[u32]Spirv_Push_Reference, context.temp_allocator),
+		descriptors = make(map[int]Buffer_Descriptor, context.temp_allocator),
+	}
 	for i := 5; i < len(code); {
 		word_count := int(code[i] >> 16)
 		opcode := code[i] & 0xffff
@@ -1393,10 +1426,11 @@ parse_spirv :: proc(code: []u32) -> (entry_points: []Spirv_Entry_Point, ok: bool
 			}
 		case:
 			collect_layout(&layout, &push_variables, Spirv_Op(opcode), code[i + 1:i + word_count])
+			trace_push_handles(&trace, &layout, push_variables, Spirv_Op(opcode), code[i + 1:i + word_count])
 		}
 		i += word_count
 	}
-	push_sizes(&layout, push_variables, found[:])
+	push_sizes(&layout, push_variables, trace.descriptors, found[:])
 	return found[:], true
 }
 
@@ -1423,9 +1457,23 @@ Spirv_Layout :: struct {
 }
 
 @(private = "file")
+Spirv_Push_Reference :: struct {
+	type:   u32,
+	offset: int,
+}
+
+@(private = "file")
+Spirv_Push_Trace :: struct {
+	pointers:    map[u32]Spirv_Push_Reference,
+	values:      map[u32]Spirv_Push_Reference,
+	locals:      map[u32]Spirv_Push_Reference,
+	descriptors: map[int]Buffer_Descriptor,
+}
+
+@(private = "file")
 collect_layout :: proc(layout: ^Spirv_Layout, push_variables: ^map[u32]u32, op: Spirv_Op, operands: []u32) {
 	#partial switch op {
-	case .Type_Bool, .Type_Int, .Type_Float, .Type_Vector, .Type_Matrix, .Type_Array, .Type_Struct, .Type_Pointer, .Type_Untyped_Pointer:
+	case .Type_Bool, .Type_Int, .Type_Float, .Type_Vector, .Type_Matrix, .Type_Array, .Type_Runtime_Array, .Type_Struct, .Type_Pointer, .Type_Untyped_Pointer, .Type_Buffer:
 		if len(operands) >= 1 {
 			layout.types[operands[0]] = {op, operands[1:]}
 		}
@@ -1471,7 +1519,131 @@ collect_layout :: proc(layout: ^Spirv_Layout, push_variables: ^map[u32]u32, op: 
 }
 
 @(private = "file")
-push_sizes :: proc(layout: ^Spirv_Layout, push_variables: map[u32]u32, entry_points: []Spirv_Entry_Point) {
+walk_push :: proc(layout: ^Spirv_Layout, reference: Spirv_Push_Reference, indices: []u32, constant_ids: bool) -> (Spirv_Push_Reference, bool) {
+	reference := reference
+	for id in indices {
+		index := id
+		if constant_ids {
+			value, constant := layout.constants[id]
+			if !constant {
+				return {}, false
+			}
+			index = value
+		}
+		type, known := layout.types[reference.type]
+		if !known {
+			return {}, false
+		}
+		#partial switch type.op {
+		case .Type_Struct:
+			if int(index) >= len(type.operands) {
+				return {}, false
+			}
+			reference = {type.operands[index], reference.offset + int(layout.offsets[{reference.type, index}])}
+		case .Type_Array:
+			stride := int(layout.array_strides[reference.type]) if reference.type in layout.array_strides else type_size(layout, type.operands[0])
+			reference = {type.operands[0], reference.offset + int(index) * stride}
+		case .Type_Vector:
+			reference = {type.operands[0], reference.offset + int(index) * type_size(layout, type.operands[0])}
+		case:
+			return {}, false
+		}
+	}
+	return reference, true
+}
+
+@(private = "file")
+trace_push_handles :: proc(trace: ^Spirv_Push_Trace, layout: ^Spirv_Layout, push_variables: map[u32]u32, op: Spirv_Op, operands: []u32) {
+	#partial switch op {
+	case .Access_Chain, .In_Bounds_Access_Chain:
+		if len(operands) < 3 {
+			return
+		}
+		base, traced := trace.pointers[operands[2]]
+		if pointee, is_push := push_variables[operands[2]]; is_push {
+			base, traced = {type = pointee}, true
+		}
+		if !traced {
+			return
+		}
+		if reference, ok := walk_push(layout, base, operands[3:], true); ok {
+			trace.pointers[operands[1]] = reference
+		}
+	case .Untyped_Access_Chain, .Untyped_In_Bounds_Access_Chain:
+		if len(operands) < 5 {
+			return
+		}
+		if _, is_push := push_variables[operands[3]]; is_push {
+			if reference, ok := walk_push(layout, {type = operands[2]}, operands[4:], true); ok {
+				trace.pointers[operands[1]] = reference
+			}
+			return
+		}
+		array, is_array := layout.types[operands[2]]
+		if !is_array || array.op != .Type_Runtime_Array && array.op != .Type_Array || len(array.operands) == 0 {
+			return
+		}
+		buffer, is_buffer := layout.types[array.operands[0]]
+		if !is_buffer || buffer.op != .Type_Buffer || len(buffer.operands) == 0 {
+			return
+		}
+		handle, from_push := trace.values[operands[4]]
+		if !from_push {
+			return
+		}
+		descriptor: Buffer_Descriptor
+		switch buffer.operands[0] {
+		case SPIRV_STORAGE_UNIFORM:
+			descriptor = .Uniform
+		case SPIRV_STORAGE_STORAGE_BUFFER:
+			descriptor = .Storage
+		case:
+			return
+		}
+		if previous, seen := trace.descriptors[handle.offset]; !seen {
+			trace.descriptors[handle.offset] = descriptor
+		} else if previous != descriptor {
+			trace.descriptors[handle.offset] = .Unknown
+		}
+	case .Load:
+		if len(operands) < 3 {
+			return
+		}
+		if pointee, is_push := push_variables[operands[2]]; is_push {
+			trace.values[operands[1]] = {type = pointee}
+		} else if reference, traced := trace.pointers[operands[2]]; traced {
+			trace.values[operands[1]] = reference
+		} else if reference, stored := trace.locals[operands[2]]; stored {
+			trace.values[operands[1]] = reference
+		}
+	case .Store:
+		if len(operands) < 2 {
+			return
+		}
+		if reference, traced := trace.values[operands[1]]; traced {
+			trace.locals[operands[0]] = reference
+		}
+	case .Composite_Extract:
+		if len(operands) < 3 {
+			return
+		}
+		if composite, traced := trace.values[operands[2]]; traced {
+			if reference, ok := walk_push(layout, composite, operands[3:], false); ok {
+				trace.values[operands[1]] = reference
+			}
+		}
+	case .Copy_Object, .Bitcast:
+		if len(operands) < 3 {
+			return
+		}
+		if reference, traced := trace.values[operands[2]]; traced {
+			trace.values[operands[1]] = reference
+		}
+	}
+}
+
+@(private = "file")
+push_sizes :: proc(layout: ^Spirv_Layout, push_variables: map[u32]u32, descriptors: map[int]Buffer_Descriptor, entry_points: []Spirv_Entry_Point) {
 	for &entry_point in entry_points {
 		for id in entry_point.interface {
 			if pointee, is_push := push_variables[id]; is_push {
@@ -1492,7 +1664,9 @@ push_sizes :: proc(layout: ^Spirv_Layout, push_variables: map[u32]u32, entry_poi
 		kept := make([dynamic]Push_Leaf, 0, len(leaves), context.temp_allocator)
 		for leaf in leaves {
 			if leaf.offset >= PUSH_HEADER_SIZE {
-				append(&kept, leaf)
+				kept_leaf := leaf
+				kept_leaf.descriptor = descriptors[leaf.offset]
+				append(&kept, kept_leaf)
 			}
 		}
 		entry_point.push_leaves = kept[:]
@@ -1752,7 +1926,17 @@ make_push_plan :: proc(push_type: typeid, push_size: int, shader_leaves: []Push_
 			if count > 2 || odin_leaf.kind == .Acceleration_Structure && count != 2 {
 				mismatch(T, first, odin_leaf)
 			}
-			append(&slots, Push_Slot{from = odin_leaf.offset, to = first.offset, width = 4 * count, kind = odin_leaf.kind, name = strings.clone(odin_leaf.name)})
+			append(
+				&slots,
+				Push_Slot {
+					from = odin_leaf.offset,
+					to = first.offset,
+					width = 4 * count,
+					kind = odin_leaf.kind,
+					name = strings.clone(odin_leaf.name),
+					descriptor = first.descriptor,
+				},
+			)
 			continue
 		}
 		if !leaves_match(first, odin_leaf) {
@@ -1818,10 +2002,13 @@ pack_push_data :: proc(shader: Shader, reads: ^[dynamic]Shader_Resource) {
 		case .Buffer:
 			buffer := (^Buffer)(&source[slot.from])^
 			if buffer.handle == 0 {
-				index = null_buffer_index()
+				index = null_uniform_index() if slot.descriptor == .Uniform else null_buffer_index()
 				break
 			}
-			fmt.assertf(buffer.heap_index != 0, "push field `%v`: the buffer has no descriptor; it must be made by Valhalla with .Storage usage", slot.name)
+			fmt.assertf(buffer.heap_index != 0, "push field `%v`: the buffer has no descriptor; it must be made by Valhalla with .Storage or .Uniform usage", slot.name)
+			uniform := .UNIFORM_BUFFER in buffer.usage
+			fmt.assertf(slot.descriptor != .Uniform || uniform, "push field `%v`: the shader reads it as a ConstantBuffer, so the buffer must be made with .Uniform usage", slot.name)
+			fmt.assertf(slot.descriptor != .Storage || !uniform, "push field `%v`: the shader reads it as a structured buffer, so the buffer must be made with .Storage usage, not .Uniform", slot.name)
 			index = buffer.heap_index
 			if !written_binding(recording, buffer.heap_index, .Buffer) {
 				append(reads, buffer)

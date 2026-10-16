@@ -2,8 +2,9 @@ module Valhalla;
 
 public static const uint VALHALLA_IMAGE_TAG = 0x80000000u;
 public static const uint VALHALLA_SAMPLER_TAG = 0x40000000u;
+public static const uint VALHALLA_UNIFORM_TAG = VALHALLA_IMAGE_TAG | VALHALLA_SAMPLER_TAG;
 static const uint VALHALLA_TAGS = VALHALLA_IMAGE_TAG | VALHALLA_SAMPLER_TAG;
-static const uint VALHALLA_HEADER_WORDS = 4;
+static const uint VALHALLA_HEADER_WORDS = 5;
 
 public struct ValhallaHeader {
 	public uint* table;
@@ -22,6 +23,10 @@ public uint valhalla_buffer_index(ValhallaHeader header, uint index) {
 	return valhalla_entry(header, index, 0, 1);
 }
 
+public uint valhalla_constant_buffer_index(ValhallaHeader header, uint index) {
+	return valhalla_entry(header, index, VALHALLA_UNIFORM_TAG, 4);
+}
+
 public uint valhalla_image_index(ValhallaHeader header, uint index) {
 	return valhalla_entry(header, index, VALHALLA_IMAGE_TAG, 2);
 }
@@ -37,6 +42,11 @@ public StructuredBuffer<T> valhalla_buffer<T>(ValhallaHeader header, uint index)
 
 public RWStructuredBuffer<T> valhalla_rw_buffer<T>(ValhallaHeader header, uint index) {
 	DescriptorHandle<RWStructuredBuffer<T>> handle = { valhalla_buffer_index(header, index) };
+	return handle;
+}
+
+public DescriptorHandle<ConstantBuffer<T>> valhalla_constant_buffer<T>(ValhallaHeader header, uint index) {
+	DescriptorHandle<ConstantBuffer<T>> handle = { valhalla_constant_buffer_index(header, index) };
 	return handle;
 }
 

@@ -30,7 +30,7 @@ PUSH_HEADER_SIZE :: 16
 MAX_EXECUTIONS_IN_FLIGHT :: 3
 
 @(private)
-TABLE_HEADER_WORDS :: 4
+TABLE_HEADER_WORDS :: 5
 
 @(private)
 TABLE_CHUNK_SIZE :: 16 * 1024
@@ -2078,13 +2078,14 @@ write_table :: proc(workload: ^Workload, recording: Shader_Recording) -> (addres
 	words[1] = null_buffer_index()
 	words[2] = null_image_index() | HEAP_IMAGE_TAG
 	words[3] = null_sampler_index() | HEAP_SAMPLER_TAG
+	words[4] = null_uniform_index() | HEAP_UNIFORM_TAG
 	for binding, index in recording.bindings {
 		entry: u32
 		switch resource in binding.resource {
 		case Image:
 			entry = resource.heap_index | HEAP_IMAGE_TAG
 		case Buffer:
-			entry = resource.heap_index
+			entry = resource.heap_index | HEAP_UNIFORM_TAG if .UNIFORM_BUFFER in resource.usage else resource.heap_index
 		case Sampler:
 			entry = resource.heap_index | HEAP_SAMPLER_TAG
 		}

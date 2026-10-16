@@ -17,7 +17,7 @@ struct Light {
 };
 
 struct View {
-	float4x4 view_projection;
+	float4 view_projection[4];
 	float4 camera;
 };
 
@@ -34,7 +34,7 @@ struct Push {
 	DescriptorHandle<StructuredBuffer<float4x4>> faces;
 	DescriptorHandle<TextureCube<float>> point_shadow_maps[4];
 	uint shadow_light;
-	DescriptorHandle<StructuredBuffer<View>> view;
+	DescriptorHandle<ConstantBuffer<View>> view;
 };
 
 [[vk::push_constant]]
@@ -85,7 +85,12 @@ float4 point_shadow_vertex(
 Varyings lit_vertex(
 	uint vertex_id : SV_VertexID,
 	uint base_vertex : SV_StartVertexLocation) {
-	return transform(vertex_id, base_vertex, push.header.draw_data, push.view[0].view_projection);
+	const float4x4 view_projection = transpose(float4x4(
+		push.view->view_projection[0],
+		push.view->view_projection[1],
+		push.view->view_projection[2],
+		push.view->view_projection[3]));
+	return transform(vertex_id, base_vertex, push.header.draw_data, view_projection);
 }
 
 float sun_visibility(float3 world, float3 normal) {
@@ -144,7 +149,7 @@ float4 lit_fragment(Varyings input) : SV_Target {
 		colour = albedo * emission;
 	} else {
 		float3 normal = normalize(input.normal);
-		float3 to_camera = normalize(push.view[0].camera.xyz - input.world);
+		float3 to_camera = normalize(push.view->camera.xyz - input.world);
 		colour = albedo * lerp(GROUND_AMBIENT, SKY_AMBIENT, normal.y * 0.5 + 0.5);
 
 		float3 to_sun = -normalize(push.sun.xyz);

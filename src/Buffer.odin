@@ -102,8 +102,16 @@ make_owned_buffer :: proc(
 		.Acceleration_Input not_in settings.usage || device.optional.ray_query,
 		"acceleration structure inputs need a device with ray queries (device.optional.ray_query)",
 	)
+	assert(
+		settings.usage & {.Storage, .Uniform} != {.Storage, .Uniform},
+		"a buffer reaches shaders as either a StructuredBuffer (.Storage) or a ConstantBuffer (.Uniform), not both",
+	)
 	if size <= 0 {
 		log.errorf("A buffer needs a positive size, got %v", size)
+		return {}, .Invalid_Buffer_Size
+	}
+	if .Uniform in settings.usage && size > int(device.properties.limits.maxUniformBufferRange) {
+		log.errorf("A uniform buffer can hold at most %v bytes, got %v", device.properties.limits.maxUniformBufferRange, size)
 		return {}, .Invalid_Buffer_Size
 	}
 

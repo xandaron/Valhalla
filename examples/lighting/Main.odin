@@ -145,7 +145,7 @@ run :: proc() -> Valhalla.Error {
 	defer Valhalla.delete_image(&shadow_map)
 	faces_buffer := Valhalla.make_buffer(LIGHT_COUNT * 6 * size_of(matrix[4, 4]f32), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
 	defer Valhalla.delete_buffer(&faces_buffer)
-	view_buffer := Valhalla.make_buffer(size_of(View), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	view_buffer := Valhalla.make_buffer(size_of(View), Valhalla.Buffer_Settings{usage = {.Uniform}, memory = .Host_Visible}) or_return
 	defer Valhalla.delete_buffer(&view_buffer)
 	point_shadow_maps: [LIGHT_COUNT]Valhalla.Image
 	for &point_shadow_map in point_shadow_maps {

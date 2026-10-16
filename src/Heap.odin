@@ -17,6 +17,9 @@ HEAP_IMAGE_TAG :: u32(1) << 31
 @(private)
 HEAP_SAMPLER_TAG :: u32(1) << 30
 
+@(private)
+HEAP_UNIFORM_TAG :: HEAP_IMAGE_TAG | HEAP_SAMPLER_TAG
+
 @(private = "file")
 MAX_HEAP_BUFFERS :: 16384
 
@@ -47,6 +50,7 @@ Descriptor_Heap :: struct {
 	images:       Slot_Pool,
 	samplers:     Slot_Pool,
 	null_buffer:  Buffer,
+	null_uniform: Buffer,
 	null_image:   Image,
 	null_view:    vk.ImageViewCreateInfo,
 	null_sampler: Sampler,
@@ -58,6 +62,11 @@ heap: Descriptor_Heap
 @(private)
 null_buffer_index :: proc() -> u32 {
 	return heap.buffers.first
+}
+
+@(private)
+null_uniform_index :: proc() -> u32 {
+	return heap.null_uniform.heap_index
 }
 
 @(private)
@@ -89,7 +98,12 @@ bind_descriptor_heaps :: proc(command_buffer: vk.CommandBuffer) {
 @(private)
 @(require_results)
 acquire_buffer_slot :: proc(buffer: ^Buffer) -> Error {
-	if .STORAGE_BUFFER not_in buffer.usage {
+	type: vk.DescriptorType
+	if .UNIFORM_BUFFER in buffer.usage {
+		type = .UNIFORM_BUFFER
+	} else if .STORAGE_BUFFER in buffer.usage {
+		type = .STORAGE_BUFFER
+	} else {
 		return nil
 	}
 	slot := take_slot(&heap.buffers, "buffer") or_return
@@ -100,7 +114,7 @@ acquire_buffer_slot :: proc(buffer: ^Buffer) -> Error {
 	}
 	info: vk.ResourceDescriptorInfoEXT = {
 		sType = .RESOURCE_DESCRIPTOR_INFO_EXT,
-		type = .STORAGE_BUFFER,
+		type = type,
 		data = {pAddressRange = &range},
 	}
 	if !write_resource_descriptor(&info, index, device.heap_properties.bufferDescriptorSize) {
@@ -262,6 +276,9 @@ open_descriptor_heap :: proc() -> (err: Error) {
 
 	heap.null_buffer = make_empty_buffer(16, Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
 	runtime.mem_zero(heap.null_buffer.mapped, 16)
+	null_uniform_size := int(min(device.properties.limits.maxUniformBufferRange, 64 * 1024))
+	heap.null_uniform = make_empty_buffer(null_uniform_size, Buffer_Settings{usage = {.Uniform}, memory = .Host_Visible}) or_return
+	runtime.mem_zero(heap.null_uniform.mapped, null_uniform_size)
 	heap.null_image = make_empty_image(.R8G8B8A8_UNORM, {1, 1, 1}, kind = .Generic) or_return
 	heap.null_view = {
 		sType = .IMAGE_VIEW_CREATE_INFO,
@@ -283,6 +300,7 @@ close_descriptor_heap :: proc() {
 		return
 	}
 	delete_image(&heap.null_image)
+	delete_buffer(&heap.null_uniform)
 	delete_buffer(&heap.null_buffer)
 	destroy_host_buffer(&heap.resource.buffer)
 	destroy_host_buffer(&heap.sampler.buffer)
