@@ -12,6 +12,10 @@ import "core:strings"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
+Format :: vk.Format
+
+Image_Aspect :: vk.ImageAspectFlags
+
 Image_Error :: enum {
 	None,
 	Invalid_Settings,
@@ -25,11 +29,12 @@ Image_Error :: enum {
 	No_Mip_Levels,
 }
 
-Image_Kind :: enum {
-	Colour,
-	Depth,
-	Generic,
+Image_Usage :: enum {
+	Attachment,
+	Storage,
 }
+
+Image_Usages :: bit_set[Image_Usage]
 
 Image_Shape :: enum {
 	D1,
@@ -43,28 +48,29 @@ Image_Shape :: enum {
 
 MAX_VIEW_FORMATS :: 4
 
+@(private)
 Image_Settings :: struct {
-	kind:         Image_Kind,
+	usage:        Image_Usages,
 	shape:      Image_Shape,
-	format:     vk.Format,
+	format:     Format,
 	size:       [3]u32,
 	layers:     u32,
 	mip_levels: u32,
 	samples:    u32,
 	name:       string,
-	view_formats: [MAX_VIEW_FORMATS]vk.Format,
+	view_formats: [MAX_VIEW_FORMATS]Format,
 }
 
 Image :: struct {
 	handle:          vk.Image,
 	view:            vk.ImageView,
 	attachment_view: vk.ImageView,
-	format:          vk.Format,
+	format:          Format,
 	extent:          [3]u32,
 	layers:          u32,
 	mip_levels:      u32,
 	samples:         vk.SampleCountFlags,
-	aspect:          vk.ImageAspectFlags,
+	aspect:          Image_Aspect,
 	usage:           vk.ImageUsageFlags,
 	layout:          vk.ImageLayout,
 	heap_index:      u32,
@@ -73,17 +79,15 @@ Image :: struct {
 	variant:    union {
 		Owned_Image,
 		External_Image,
-		Swapchain_Image,
 		View_Image,
 	},
 }
 
 Owned_Image :: struct {
 	allocation:   Allocation,
-	kind:         Image_Kind,
 	shape:        Image_Shape,
 	name:         string,
-	view_formats: [MAX_VIEW_FORMATS]vk.Format,
+	view_formats: [MAX_VIEW_FORMATS]Format,
 }
 
 External_Image :: struct {}
@@ -92,17 +96,6 @@ View_Image :: struct {
 	mip_level:   u32,
 	first_layer: u32,
 	shape:       Image_Shape,
-}
-
-Swapchain_Image :: struct {
-	surface: ^Surface,
-}
-
-@(private = "file")
-IMAGE_USAGE := [Image_Kind]vk.ImageUsageFlags {
-	.Colour  = {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-	.Depth   = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-	.Generic = {.STORAGE, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
 }
 
 @(private = "file")
@@ -128,22 +121,22 @@ VIEW_TYPES := [Image_Shape]vk.ImageViewType {
 }
 
 @(require_results)
-make_empty_image :: proc(
-	format: vk.Format,
+make_image :: proc(
+	format: Format,
 	size: [3]u32,
-	kind := Image_Kind.Colour,
+	usage := Image_Usages{},
 	shape := Image_Shape.D2,
 	layers: u32 = 1,
 	mip_levels: u32 = 1,
 	samples: u32 = 1,
 	name := "",
-	view_formats := [MAX_VIEW_FORMATS]vk.Format{},
+	view_formats := [MAX_VIEW_FORMATS]Format{},
 ) -> (
 	image: Image,
 	err: Error,
 ) {
 	settings := Image_Settings {
-		kind         = kind,
+		usage        = usage,
 		shape        = shape,
 		format       = format,
 		size         = size,
@@ -153,19 +146,18 @@ make_empty_image :: proc(
 		name         = name,
 		view_formats = view_formats,
 	}
-	return make_owned_image(settings, {})
+	return make_owned_image(settings)
 }
 
 @(private)
 @(require_results)
-make_owned_image :: proc(settings: Image_Settings, extra_usage: vk.ImageUsageFlags) -> (image: Image, err: Error) {
+make_owned_image :: proc(settings: Image_Settings) -> (image: Image, err: Error) {
 	assert(initialised, "Valhalla.init must be called before make_image")
 	image = describe_image(settings) or_return
-	image.usage += extra_usage
 	owned := &image.variant.(Owned_Image)
 
 	flags: vk.ImageCreateFlags = {.CUBE_COMPATIBLE} if is_cube(settings.shape) else {}
-	listed := make([dynamic]vk.Format, 0, MAX_VIEW_FORMATS + 1, context.temp_allocator)
+	listed := make([dynamic]Format, 0, MAX_VIEW_FORMATS + 1, context.temp_allocator)
 	for view_format in settings.view_formats {
 		if view_format == .UNDEFINED {
 			break
@@ -201,7 +193,7 @@ make_owned_image :: proc(settings: Image_Settings, extra_usage: vk.ImageUsageFla
 	}
 	if res := vk.GetPhysicalDeviceImageFormatProperties2(device.physical_device, &format_info, &format_properties);
 	   res != .SUCCESS {
-		log.errorf("Image format %v is not supported for %v %v images: %v", image.format, owned.kind, owned.shape, res)
+		log.errorf("Image format %v is not supported for %v %v images: %v", image.format, image.usage, owned.shape, res)
 		return {}, .Unsupported_Format
 	}
 	limits := format_properties.imageFormatProperties
@@ -269,9 +261,9 @@ make_owned_image :: proc(settings: Image_Settings, extra_usage: vk.ImageUsageFla
 @(require_results)
 make_image_from_file :: proc(
 	filename: string,
-	kind := Image_Kind.Colour,
+	usage := Image_Usages{},
 	srgb := true,
-	view_formats := [MAX_VIEW_FORMATS]vk.Format{},
+	view_formats := [MAX_VIEW_FORMATS]Format{},
 ) -> (
 	image: Image,
 	err: Error,
@@ -279,7 +271,7 @@ make_image_from_file :: proc(
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	data := read_image_file(filename) or_return
 	length := i32(len(data))
-	format: vk.Format = .R8G8B8A8_SRGB if srgb else .R8G8B8A8_UNORM
+	format: Format = .R8G8B8A8_SRGB if srgb else .R8G8B8A8_UNORM
 	if stbi.is_hdr_from_memory(raw_data(data), length) != 0 {
 		format = .R32G32B32A32_SFLOAT
 	} else if !srgb && stbi.is_16_bit_from_memory(raw_data(data), length) != 0 {
@@ -290,7 +282,7 @@ make_image_from_file :: proc(
 		log.errorf("Failed to read the header of %v: %v", filename, stbi.failure_reason())
 		return {}, .Image_Decode_Failed
 	}
-	image = make_empty_image(format, {u32(width), u32(height), 1}, kind, name = filepath.base(filename), view_formats = view_formats) or_return
+	image = make_image(format, {u32(width), u32(height), 1}, usage, name = filepath.base(filename), view_formats = view_formats) or_return
 	if err = load_encoded_to_image(filename, data, &image, 0, 0); err != nil {
 		delete_image(&image)
 		return {}, err
@@ -299,9 +291,23 @@ make_image_from_file :: proc(
 }
 
 @(require_results)
-make_image_from_memory :: proc(memory: []u8, settings: Image_Settings) -> (image: Image, err: Error) {
-	image = make_owned_image(settings, {}) or_return
-	if err = load_memory_to_image(memory, &image); err != nil {
+make_image_from_memory :: proc(
+	data: []u8,
+	format: Format,
+	size: [3]u32,
+	usage := Image_Usages{},
+	shape := Image_Shape.D2,
+	layers: u32 = 1,
+	mip_levels: u32 = 1,
+	samples: u32 = 1,
+	name := "",
+	view_formats := [MAX_VIEW_FORMATS]Format{},
+) -> (
+	image: Image,
+	err: Error,
+) {
+	image = make_image(format, size, usage, shape, layers, mip_levels, samples, name, view_formats) or_return
+	if err = load_memory_to_image(data, &image); err != nil {
 		delete_image(&image)
 		return {}, err
 	}
@@ -309,38 +315,6 @@ make_image_from_memory :: proc(memory: []u8, settings: Image_Settings) -> (image
 }
 
 @(require_results)
-make_image_from_image :: proc(source: ^Image, settings: Image_Settings) -> (image: Image, err: Error) {
-	image = make_owned_image(settings, {}) or_return
-	defer if err != nil {
-		delete_image(&image)
-	}
-	region := Image_Region {
-		layers = min(source.layers, image.layers),
-	}
-	if source.extent == image.extent && same_texel_size(source.format, image.format) && source.samples == image.samples {
-		return image, load_image_to_image(source, &image, region, region)
-	}
-	return image, blit_image_to_image(source, &image, region, region)
-}
-
-@(require_results)
-make_image_from_buffer :: proc(source: ^Buffer, settings: Image_Settings) -> (image: Image, err: Error) {
-	image = make_owned_image(settings, {}) or_return
-	if err = load_buffer_to_image(source, &image); err != nil {
-		delete_image(&image)
-		return {}, err
-	}
-	return
-}
-
-make_image :: proc {
-	make_empty_image,
-	make_image_from_file,
-	make_image_from_memory,
-	make_image_from_image,
-	make_image_from_buffer,
-}
-
 resize_image :: proc(image: ^Image, size: [3]u32) -> (resized: bool, err: Error) {
 	owned, is_owned := image.variant.(Owned_Image)
 	assert(is_owned && image.handle != 0, "resize_image needs an image made by make_image")
@@ -350,7 +324,7 @@ resize_image :: proc(image: ^Image, size: [3]u32) -> (resized: bool, err: Error)
 	settings := image_settings(image^)
 	settings.size = size
 	settings.mip_levels = min(image.mip_levels, max_mip_levels(size))
-	replacement := make_owned_image(settings, {}) or_return
+	replacement := make_owned_image(settings) or_return
 	delete_image(image)
 	image^ = replacement
 	return true, nil
@@ -437,75 +411,54 @@ load_memory_to_image :: proc(
 }
 
 @(require_results)
-load_image_to_image :: proc(source, image: ^Image, source_region := Image_Region{}, region := Image_Region{}) -> Error {
-	assert(source.layout == .GENERAL && image.layout == .GENERAL, "immediate copies need images in GENERAL, as every image Valhalla makes is")
-	resolved := image_copy_region(source^, image^, source_region, region)
+load_image_to_image :: proc(source, image: Image, source_region := Image_Region{}, region := Image_Region{}) -> Error {
+	assert_general(source)
+	assert_general(image)
+	resolved := image_copy_region(source, image, source_region, region)
 	cmd := staging_commands() or_return
 	emit_image_copy(cmd, source.handle, image.handle, resolved)
 	return nil
 }
 
 @(require_results)
-blit_image_to_image :: proc(source, image: ^Image, source_region := Image_Region{}, region := Image_Region{}, filter := vk.Filter.LINEAR) -> Error {
-	assert(source.layout == .GENERAL && image.layout == .GENERAL, "immediate copies need images in GENERAL, as every image Valhalla makes is")
-	resolved := image_blit_region(source^, image^, source_region, region, filter)
+blit_image_to_image :: proc(source, image: Image, source_region := Image_Region{}, region := Image_Region{}, filter := Filter.LINEAR) -> Error {
+	assert_general(source)
+	assert_general(image)
+	resolved := image_blit_region(source, image, source_region, region, filter)
 	cmd := staging_commands() or_return
 	emit_image_blit(cmd, source.handle, image.handle, resolved, filter)
 	return nil
 }
 
 @(require_results)
-load_buffer_to_image :: proc(source: ^Buffer, image: ^Image, #any_int source_offset: int = 0, region := Image_Region{}) -> Error {
-	assert(image.layout == .GENERAL, "immediate copies need an image in GENERAL, as every image Valhalla makes is")
-	resolved := buffer_image_region(source^, image^, source_offset, region, to_image = true)
+load_buffer_to_image :: proc(source: Buffer, image: Image, #any_int source_offset: int = 0, region := Image_Region{}) -> Error {
+	assert_general(image)
+	resolved := buffer_image_region(source, image, source_offset, region, to_image = true)
 	cmd := staging_commands() or_return
 	emit_buffer_to_image(cmd, source.handle, image.handle, resolved)
 	return nil
 }
 
-load_to_image :: proc {
-	load_file_to_image,
-	load_memory_to_image,
-	load_image_to_image,
-	load_buffer_to_image,
-}
-
 @(require_results)
-write_image_to_file :: proc(source: ^Image, filename: string, encoded := true) -> Error {
+write_image_to_file :: proc(source: Image, filename: string, encoded := true) -> Error {
 	workload := make_workload() or_return
 	defer delete_workload(&workload)
-	shot := readback_image(&workload, source^) or_return
+	shot := readback_image(&workload, source) or_return
 	run_workload(&workload) or_return
 	return write_readback_to_file(shot, filename, encoded)
 }
 
-write_image_to_image :: load_image_to_image
-
-write_image_to_buffer :: load_image_to_buffer
-
 @(require_results)
-write_image_to_surface :: proc(source: ^Image, surface: ^Surface, source_region := Image_Region{}, filter := vk.Filter.LINEAR) -> Error {
+write_image_to_surface :: proc(source: Image, surface: ^Surface) -> Error {
 	workload := make_workload() or_return
 	defer delete_workload(&workload)
-	image := acquire(&workload, surface) or_return
-	region := source_region
-	region.layers = max(region.layers, 1)
-	shown := blit_image(&workload, source^, image, region, {}, filter)
-	present(&workload, shown)
+	present(&workload, source, surface)
 	return run_workload(&workload)
 }
 
-write_image :: proc {
-	write_image_to_file,
-	write_image_to_image,
-	write_image_to_buffer,
-	write_image_to_surface,
-}
-
 @(require_results)
-generate_image_mips :: proc(image: ^Image) -> Error {
+generate_image_mips :: proc(image: Image) -> Error {
 	assert(image.handle != 0, "generate_mips needs an image")
-	assert(image.layout == .GENERAL, "generate_mips needs an image in GENERAL, as every image Valhalla makes is")
 	if image.mip_levels < 2 {
 		log.error("The image has one mip level, so there are no mips to generate; make it with mip_levels")
 		return .No_Mip_Levels
@@ -516,18 +469,12 @@ generate_image_mips :: proc(image: ^Image) -> Error {
 		return .Unsupported_Format
 	}
 	for mip in 1 ..< image.mip_levels {
-		region := image_blit_region(image^, image^, {mip_level = mip - 1}, {mip_level = mip}, .LINEAR)
-		cmd := staging_commands() or_return
-		emit_image_blit(cmd, image.handle, image.handle, region, .LINEAR)
+		blit_image_to_image(image, image, {mip_level = mip - 1}, {mip_level = mip}) or_return
 	}
 	return nil
 }
 
-generate_mips :: proc {
-	generate_image_mips,
-	generate_workload_mips,
-}
-
+@(private)
 image_settings :: proc(image: Image) -> Image_Settings {
 	owned, is_owned := image.variant.(Owned_Image)
 	settings := Image_Settings {
@@ -538,7 +485,7 @@ image_settings :: proc(image: Image) -> Image_Settings {
 		samples    = transmute(u32)image.samples,
 	}
 	if is_owned {
-		settings.kind = owned.kind
+		settings.usage = image_usages(image)
 		settings.shape = owned.shape
 		settings.name = owned.name
 		settings.view_formats = owned.view_formats
@@ -557,14 +504,13 @@ make_image_view :: proc(
 	first_layer: u32 = 0,
 	layers: u32 = 0,
 	shape: Maybe(Image_Shape) = nil,
-	format := vk.Format.UNDEFINED,
-	aspect := vk.ImageAspectFlags{},
+	format := Format.UNDEFINED,
+	aspect := Image_Aspect{},
 ) -> (
 	view: Image,
 	err: Error,
 ) {
-	_, is_swapchain := image.variant.(Swapchain_Image)
-	assert(image.handle != 0 && !is_swapchain, "views are made of images that outlive a workload, not of acquired surface images")
+	assert(image.handle != 0, "views need an image")
 	assert(mip_level < image.mip_levels, "the view's first mip is past the image's last mip")
 	assert(first_layer < image.layers, "the view's first layer is past the image's last layer")
 	mips := mip_levels if mip_levels > 0 else image.mip_levels - mip_level
@@ -715,11 +661,19 @@ default_view_shape :: proc(parent: Image_Shape, layers: u32) -> Image_Shape {
 }
 
 delete_image :: proc(image: ^Image) {
+	#partial switch variant in image.variant {
+	case View_Image, Owned_Image:
+		bury(image^)
+	}
+	image^ = {}
+}
+
+@(private)
+destroy_image :: proc(image: ^Image) {
 	#partial switch &variant in image.variant {
 	case View_Image:
 		destroy_views(image)
 	case Owned_Image:
-		settle_staging()
 		destroy_views(image)
 		if image.handle != 0 {
 			vk.DestroyImage(device.handle, image.handle, nil)
@@ -727,7 +681,6 @@ delete_image :: proc(image: ^Image) {
 		free_memory(&variant.allocation)
 		delete(variant.name)
 	}
-	image^ = {}
 }
 
 @(private = "file")
@@ -777,7 +730,7 @@ mip_extent :: proc(image: Image, mip_level: u32) -> [3]u32 {
 	return {max(image.extent.x >> mip_level, 1), max(image.extent.y >> mip_level, 1), max(image.extent.z >> mip_level, 1)}
 }
 
-is_srgb_format :: proc(format: vk.Format) -> bool {
+is_srgb_format :: proc(format: Format) -> bool {
 	#partial switch format {
 	case .R8_SRGB, .R8G8_SRGB, .R8G8B8_SRGB, .B8G8R8_SRGB, .R8G8B8A8_SRGB, .B8G8R8A8_SRGB, .A8B8G8R8_SRGB_PACK32,
 	     .BC1_RGB_SRGB_BLOCK, .BC1_RGBA_SRGB_BLOCK, .BC2_SRGB_BLOCK, .BC3_SRGB_BLOCK, .BC7_SRGB_BLOCK,
@@ -806,16 +759,12 @@ linear_to_srgb :: proc(colour: [4]f32) -> (encoded: [4]f32) {
 }
 
 @(private = "file")
-is_depth_format :: proc(format: vk.Format) -> bool {
-	#partial switch format {
-	case .D16_UNORM, .X8_D24_UNORM_PACK32, .D32_SFLOAT, .S8_UINT, .D16_UNORM_S8_UINT, .D24_UNORM_S8_UINT, .D32_SFLOAT_S8_UINT:
-		return true
-	}
-	return false
+is_depth_format :: proc(format: Format) -> bool {
+	return format_aspect(format) != {.COLOR}
 }
 
 @(private = "file")
-format_aspect :: proc(format: vk.Format) -> vk.ImageAspectFlags {
+format_aspect :: proc(format: Format) -> Image_Aspect {
 	#partial switch format {
 	case .S8_UINT:
 		return {.STENCIL}
@@ -834,8 +783,8 @@ describe_image :: proc(settings: Image_Settings) -> (image: Image, err: Error) {
 		log.error("Image settings need a format")
 		return {}, .Invalid_Settings
 	}
-	if (settings.kind == .Depth) != is_depth_format(settings.format) {
-		log.errorf("A %v image cannot use format %v", settings.kind, settings.format)
+	if .Storage in settings.usage && is_depth_format(settings.format) {
+		log.errorf("A storage image cannot use depth format %v", settings.format)
 		return {}, .Invalid_Settings
 	}
 
@@ -878,7 +827,7 @@ describe_image :: proc(settings: Image_Settings) -> (image: Image, err: Error) {
 		log.errorf("Image sample count must be a power of two up to 64, got %v", samples)
 		return {}, .Invalid_Settings
 	}
-	if samples > 1 && (settings.shape != .D2 || image.mip_levels > 1 || settings.kind == .Generic) {
+	if samples > 1 && (settings.shape != .D2 || image.mip_levels > 1 || .Storage in settings.usage) {
 		log.error("Multisampled images must be single-mip 2D colour or depth images")
 		return {}, .Invalid_Settings
 	}
@@ -886,11 +835,16 @@ describe_image :: proc(settings: Image_Settings) -> (image: Image, err: Error) {
 
 	image.format = settings.format
 	image.variant = Owned_Image {
-		kind  = settings.kind,
 		shape = settings.shape,
 	}
 	image.aspect = format_aspect(settings.format)
-	image.usage = IMAGE_USAGE[settings.kind]
+	image.usage = {.SAMPLED, .TRANSFER_SRC, .TRANSFER_DST}
+	if .Attachment in settings.usage {
+		image.usage += {.DEPTH_STENCIL_ATTACHMENT} if is_depth_format(settings.format) else {.COLOR_ATTACHMENT}
+	}
+	if .Storage in settings.usage {
+		image.usage += {.STORAGE}
+	}
 	if samples > 1 {
 		image.usage -= {.SAMPLED, .STORAGE}
 	}
@@ -909,14 +863,14 @@ max_mip_levels :: proc(extent: [3]u32) -> u32 {
 }
 
 @(private)
-same_texel_size :: proc(a, b: vk.Format) -> bool {
+same_texel_size :: proc(a, b: Format) -> bool {
 	a_size, a_known := format_texel_size(a)
 	b_size, b_known := format_texel_size(b)
 	return a_known && b_known && a_size == b_size
 }
 
 @(private)
-format_texel_size :: proc(format: vk.Format) -> (size: u32, known: bool) {
+format_texel_size :: proc(format: Format) -> (size: u32, known: bool) {
 	#partial switch format {
 	case .R8_UNORM, .R8_SNORM, .R8_UINT, .R8_SINT, .R8_SRGB, .S8_UINT:
 		return 1, true
@@ -930,4 +884,20 @@ format_texel_size :: proc(format: vk.Format) -> (size: u32, known: bool) {
 		return 16, true
 	}
 	return 0, false
+}
+
+@(private)
+assert_general :: proc(image: Image, loc := #caller_location) {
+	assert(image.layout == .GENERAL, "immediate copies need an image in GENERAL, as every image Valhalla makes is", loc)
+}
+
+@(private = "file")
+image_usages :: proc(image: Image) -> (usages: Image_Usages) {
+	if image.usage & {.COLOR_ATTACHMENT, .DEPTH_STENCIL_ATTACHMENT} != {} {
+		usages += {.Attachment}
+	}
+	if .STORAGE in image.usage {
+		usages += {.Storage}
+	}
+	return
 }

@@ -20,41 +20,39 @@ run :: proc() -> Valhalla.Error {
 	window := Valhalla.make_window(title = "Hello Triangle") or_return
 	defer Valhalla.delete_window(&window)
 
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
-	triangle, _ := Valhalla.make_shader(
+	triangle := Valhalla.make_shader(
 		#load("Triangle.slang"),
 		[]string{"vertex_main", "fragment_main"},
-		{},
-		{colour_formats = {0 = surface.format.format}},
+		push_type = nil, colour_formats = {0 = surface.format},
 	) or_return
 	defer Valhalla.delete_shader(&triangle)
 
-	for !Valhalla.should_close(&window) {
+	target := Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&target)
+
+	for !Valhalla.should_close(window) {
 		Valhalla.poll_events()
+		_ = Valhalla.resize_image(&target, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}) or_return
 
 		frame := Valhalla.make_workload() or_return
 		defer Valhalla.delete_workload(&frame)
 
-		image, acquire_err := Valhalla.acquire(&frame, &surface)
-		if acquire_err == Valhalla.Surface_Error.Surface_Minimised {
-			Valhalla.wait_events()
-			continue
-		} else if acquire_err != nil {
-			return acquire_err
-		}
-
-		cleared := Valhalla.clear_image(&frame, image, {})
+		cleared := Valhalla.clear_image(&frame, target)
 		Valhalla.reset_shader(&triangle)
 		drawn := Valhalla.bind_shader_colour(&triangle, cleared)
-		Valhalla.draw(&triangle, 3, 1, 0, 0)
+		Valhalla.draw(&triangle, 3)
 		Valhalla.bind_shader(&frame, triangle) or_return
 
-		Valhalla.present(&frame, drawn)
+		Valhalla.present(&frame, drawn, &surface)
 		Valhalla.finalize_workload(&frame) or_return
 		execution := Valhalla.execute_workloads(&frame) or_return
 		Valhalla.wait_execution(execution) or_return
+		if surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }

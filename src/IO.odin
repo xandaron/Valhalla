@@ -13,68 +13,16 @@ Input_Error :: enum {
 
 // ===[ Events ]================================================================
 
-Frame_Proc :: #type proc(user_data: rawptr) -> Error
-
-@(private = "file")
-frame_callback: Frame_Proc
-
-@(private = "file")
-frame_user_data: rawptr
-
-@(private = "file")
-frame_error: Error
-
-@(private = "file")
-in_frame: bool
-
-@(private)
-polling_events: bool
-
-set_frame_callback :: proc(callback: Frame_Proc, user_data: rawptr = nil) -> (previous: Frame_Proc, previous_user_data: rawptr) {
-	previous, previous_user_data = frame_callback, frame_user_data
-	frame_callback, frame_user_data = callback, user_data
-	return
-}
-
-@(private)
-request_frame :: proc() {
-	if frame_callback == nil || !polling_events || in_frame || frame_error != nil {
-		return
-	}
-	in_frame = true
-	defer in_frame = false
-	frame_error = frame_callback(frame_user_data)
-}
-
-@(private = "file")
-begin_pumping :: proc() {
-	assert(!polling_events, "events cannot be pumped from inside a callback")
-	polling_events = true
-}
-
-@(private = "file")
-end_pumping :: proc() -> (err: Error) {
-	polling_events = false
-	err, frame_error = frame_error, nil
-	return
-}
-
-poll_events :: proc() -> Error {
-	begin_pumping()
+poll_events :: proc() {
 	glfw.PollEvents()
-	return end_pumping()
 }
 
-wait_events :: proc() -> Error {
-	begin_pumping()
+wait_events :: proc() {
 	glfw.WaitEvents()
-	return end_pumping()
 }
 
-wait_events_timeout :: proc(timeout: f64) -> Error {
-	begin_pumping()
+wait_events_timeout :: proc(timeout: f64) {
 	glfw.WaitEventsTimeout(timeout)
-	return end_pumping()
 }
 
 wake_events :: proc() {
@@ -89,101 +37,100 @@ set_time :: proc(time: f64) {
 	glfw.SetTime(time)
 }
 
-Key_Proc :: #type proc(window: ^Window, key: Key, scancode: i32, action: Action, modifiers: Modifiers)
-Text_Proc :: #type proc(window: ^Window, codepoint: rune)
-Mouse_Button_Proc :: #type proc(window: ^Window, button: Mouse_Button, action: Action, modifiers: Modifiers)
-Cursor_Position_Proc :: #type proc(window: ^Window, position: [2]f64)
-Cursor_Enter_Proc :: #type proc(window: ^Window, entered: bool)
-Scroll_Proc :: #type proc(window: ^Window, offset: [2]f64)
-Drop_Proc :: #type proc(window: ^Window, paths: []string)
-Window_Position_Proc :: #type proc(window: ^Window, position: [2]i32)
-Window_Size_Proc :: #type proc(window: ^Window, size: [2]i32)
-Window_Close_Proc :: #type proc(window: ^Window)
-Window_Refresh_Proc :: #type proc(window: ^Window)
-Window_Focus_Proc :: #type proc(window: ^Window, focused: bool)
-Window_Minimise_Proc :: #type proc(window: ^Window, minimised: bool)
-Window_Maximise_Proc :: #type proc(window: ^Window, maximised: bool)
-Framebuffer_Size_Proc :: #type proc(window: ^Window, size: [2]i32)
-Window_Content_Scale_Proc :: #type proc(window: ^Window, scale: [2]f32)
-Joystick_Proc :: #type proc(joystick: int, event: Connection_Event)
+Key_Proc :: #type proc(window: Window, key: Key, scancode: i32, action: Action, modifiers: Modifiers)
+Text_Proc :: #type proc(window: Window, codepoint: rune)
+Mouse_Button_Proc :: #type proc(window: Window, button: Mouse_Button, action: Action, modifiers: Modifiers)
+Cursor_Position_Proc :: #type proc(window: Window, position: [2]f64)
+Cursor_Enter_Proc :: #type proc(window: Window, entered: bool)
+Scroll_Proc :: #type proc(window: Window, offset: [2]f64)
+Drop_Proc :: #type proc(window: Window, paths: []string)
+Window_Position_Proc :: #type proc(window: Window, position: [2]i32)
+Window_Size_Proc :: #type proc(window: Window, size: [2]i32)
+Window_Close_Proc :: #type proc(window: Window)
+Window_Refresh_Proc :: #type proc(window: Window)
+Window_Focus_Proc :: #type proc(window: Window, focused: bool)
+Window_Minimise_Proc :: #type proc(window: Window, minimised: bool)
+Window_Maximise_Proc :: #type proc(window: Window, maximised: bool)
+Framebuffer_Size_Proc :: #type proc(window: Window, size: [2]i32)
+Window_Content_Scale_Proc :: #type proc(window: Window, scale: [2]f32)
 
-set_key_callback :: proc(window: ^Window, callback: Key_Proc) -> (previous: Key_Proc) {
+set_key_callback :: proc(window: Window, callback: Key_Proc) -> (previous: Key_Proc) {
 	previous, window.data.key = window.data.key, callback
 	return
 }
 
-set_text_callback :: proc(window: ^Window, callback: Text_Proc) -> (previous: Text_Proc) {
+set_text_callback :: proc(window: Window, callback: Text_Proc) -> (previous: Text_Proc) {
 	previous, window.data.text = window.data.text, callback
 	return
 }
 
-set_mouse_button_callback :: proc(window: ^Window, callback: Mouse_Button_Proc) -> (previous: Mouse_Button_Proc) {
+set_mouse_button_callback :: proc(window: Window, callback: Mouse_Button_Proc) -> (previous: Mouse_Button_Proc) {
 	previous, window.data.mouse_button = window.data.mouse_button, callback
 	return
 }
 
-set_cursor_position_callback :: proc(window: ^Window, callback: Cursor_Position_Proc) -> (previous: Cursor_Position_Proc) {
+set_cursor_position_callback :: proc(window: Window, callback: Cursor_Position_Proc) -> (previous: Cursor_Position_Proc) {
 	previous, window.data.cursor_position = window.data.cursor_position, callback
 	return
 }
 
-set_cursor_enter_callback :: proc(window: ^Window, callback: Cursor_Enter_Proc) -> (previous: Cursor_Enter_Proc) {
+set_cursor_enter_callback :: proc(window: Window, callback: Cursor_Enter_Proc) -> (previous: Cursor_Enter_Proc) {
 	previous, window.data.cursor_enter = window.data.cursor_enter, callback
 	return
 }
 
-set_scroll_callback :: proc(window: ^Window, callback: Scroll_Proc) -> (previous: Scroll_Proc) {
+set_scroll_callback :: proc(window: Window, callback: Scroll_Proc) -> (previous: Scroll_Proc) {
 	previous, window.data.scroll = window.data.scroll, callback
 	return
 }
 
-set_drop_callback :: proc(window: ^Window, callback: Drop_Proc) -> (previous: Drop_Proc) {
+set_drop_callback :: proc(window: Window, callback: Drop_Proc) -> (previous: Drop_Proc) {
 	previous, window.data.drop = window.data.drop, callback
 	return
 }
 
-set_window_position_callback :: proc(window: ^Window, callback: Window_Position_Proc) -> (previous: Window_Position_Proc) {
+set_window_position_callback :: proc(window: Window, callback: Window_Position_Proc) -> (previous: Window_Position_Proc) {
 	previous, window.data.window_position = window.data.window_position, callback
 	return
 }
 
-set_window_size_callback :: proc(window: ^Window, callback: Window_Size_Proc) -> (previous: Window_Size_Proc) {
+set_window_size_callback :: proc(window: Window, callback: Window_Size_Proc) -> (previous: Window_Size_Proc) {
 	previous, window.data.window_size = window.data.window_size, callback
 	return
 }
 
-set_window_close_callback :: proc(window: ^Window, callback: Window_Close_Proc) -> (previous: Window_Close_Proc) {
+set_window_close_callback :: proc(window: Window, callback: Window_Close_Proc) -> (previous: Window_Close_Proc) {
 	previous, window.data.window_close = window.data.window_close, callback
 	return
 }
 
-set_window_refresh_callback :: proc(window: ^Window, callback: Window_Refresh_Proc) -> (previous: Window_Refresh_Proc) {
+set_window_refresh_callback :: proc(window: Window, callback: Window_Refresh_Proc) -> (previous: Window_Refresh_Proc) {
 	previous, window.data.window_refresh = window.data.window_refresh, callback
 	return
 }
 
-set_window_focus_callback :: proc(window: ^Window, callback: Window_Focus_Proc) -> (previous: Window_Focus_Proc) {
+set_window_focus_callback :: proc(window: Window, callback: Window_Focus_Proc) -> (previous: Window_Focus_Proc) {
 	previous, window.data.window_focus = window.data.window_focus, callback
 	return
 }
 
-set_window_minimise_callback :: proc(window: ^Window, callback: Window_Minimise_Proc) -> (previous: Window_Minimise_Proc) {
+set_window_minimise_callback :: proc(window: Window, callback: Window_Minimise_Proc) -> (previous: Window_Minimise_Proc) {
 	previous, window.data.window_minimise = window.data.window_minimise, callback
 	return
 }
 
-set_window_maximise_callback :: proc(window: ^Window, callback: Window_Maximise_Proc) -> (previous: Window_Maximise_Proc) {
+set_window_maximise_callback :: proc(window: Window, callback: Window_Maximise_Proc) -> (previous: Window_Maximise_Proc) {
 	previous, window.data.window_maximise = window.data.window_maximise, callback
 	return
 }
 
-set_framebuffer_size_callback :: proc(window: ^Window, callback: Framebuffer_Size_Proc) -> (previous: Framebuffer_Size_Proc) {
+set_framebuffer_size_callback :: proc(window: Window, callback: Framebuffer_Size_Proc) -> (previous: Framebuffer_Size_Proc) {
 	previous, window.data.framebuffer_size = window.data.framebuffer_size, callback
 	return
 }
 
 set_window_content_scale_callback :: proc(
-	window: ^Window,
+	window: Window,
 	callback: Window_Content_Scale_Proc,
 ) -> (
 	previous: Window_Content_Scale_Proc,
@@ -192,13 +139,20 @@ set_window_content_scale_callback :: proc(
 	return
 }
 
-set_joystick_callback :: proc(callback: Joystick_Proc) -> (previous: Joystick_Proc) {
-	previous, joystick_callback = joystick_callback, callback
-	return
+Input_Observer :: struct {
+	key:             Key_Proc,
+	text:            Text_Proc,
+	mouse_button:    Mouse_Button_Proc,
+	cursor_position: Cursor_Position_Proc,
+	cursor_enter:    Cursor_Enter_Proc,
+	scroll:          Scroll_Proc,
+	window_focus:    Window_Focus_Proc,
 }
 
-@(private = "file")
-joystick_callback: Joystick_Proc
+set_input_observer :: proc(window: Window, observer: Input_Observer) -> (previous: Input_Observer) {
+	previous, window.data.observer = window.data.observer, observer
+	return
+}
 
 @(private = "file")
 window_data :: proc "contextless" (handle: glfw.WindowHandle) -> ^Window_Data {
@@ -217,41 +171,66 @@ install_error_callback :: proc() {
 }
 
 @(private)
-install_joystick_callback :: proc() {
-	glfw.SetJoystickCallback(proc "c" (joystick, event: i32) {
-		context = runtime_context
-		if joystick_callback != nil {
-			joystick_callback(int(joystick), Connection_Event(event))
-		}
-	})
-}
-
-@(private)
 install_window_callbacks :: proc(handle: glfw.WindowHandle) {
-	install_modal_loop_timer(handle)
 	glfw.SetKeyCallback(handle, proc "c" (handle: glfw.WindowHandle, key, scancode, action, mods: i32) {
 		context = runtime_context
-		inject_key(&window_data(handle).window, Key(key), scancode, Action(action), transmute(Modifiers)u8(mods))
+		data := window_data(handle)
+		if data.observer.key != nil {
+			data.observer.key(data.window, Key(key), scancode, Action(action), transmute(Modifiers)u8(mods))
+		}
+		if data.key != nil {
+			data.key(data.window, Key(key), scancode, Action(action), transmute(Modifiers)u8(mods))
+		}
 	})
 	glfw.SetCharCallback(handle, proc "c" (handle: glfw.WindowHandle, codepoint: rune) {
 		context = runtime_context
-		inject_text(&window_data(handle).window, codepoint)
+		data := window_data(handle)
+		if data.observer.text != nil {
+			data.observer.text(data.window, codepoint)
+		}
+		if data.text != nil {
+			data.text(data.window, codepoint)
+		}
 	})
 	glfw.SetMouseButtonCallback(handle, proc "c" (handle: glfw.WindowHandle, button, action, mods: i32) {
 		context = runtime_context
-		inject_mouse_button(&window_data(handle).window, Mouse_Button(button), Action(action), transmute(Modifiers)u8(mods))
+		data := window_data(handle)
+		if data.observer.mouse_button != nil {
+			data.observer.mouse_button(data.window, Mouse_Button(button), Action(action), transmute(Modifiers)u8(mods))
+		}
+		if data.mouse_button != nil {
+			data.mouse_button(data.window, Mouse_Button(button), Action(action), transmute(Modifiers)u8(mods))
+		}
 	})
 	glfw.SetCursorPosCallback(handle, proc "c" (handle: glfw.WindowHandle, x, y: f64) {
 		context = runtime_context
-		inject_cursor_position(&window_data(handle).window, {x, y})
+		data := window_data(handle)
+		if data.observer.cursor_position != nil {
+			data.observer.cursor_position(data.window, {x, y})
+		}
+		if data.cursor_position != nil {
+			data.cursor_position(data.window, {x, y})
+		}
 	})
 	glfw.SetCursorEnterCallback(handle, proc "c" (handle: glfw.WindowHandle, entered: i32) {
 		context = runtime_context
-		inject_cursor_enter(&window_data(handle).window, entered != 0)
+		data := window_data(handle)
+		if data.observer.cursor_enter != nil {
+			data.observer.cursor_enter(data.window, entered != 0)
+		}
+		if data.cursor_enter != nil {
+			data.cursor_enter(data.window, entered != 0)
+		}
 	})
 	glfw.SetScrollCallback(handle, proc "c" (handle: glfw.WindowHandle, x, y: f64) {
 		context = runtime_context
-		inject_scroll(&window_data(handle).window, {x, y})
+		data := window_data(handle)
+		if data.observer.scroll != nil {
+			data.observer.scroll(data.window, {x, y})
+		}
+		if data.scroll != nil {
+			data.scroll(data.window, {x, y})
+		}
 	})
 	glfw.SetDropCallback(handle, proc "c" (handle: glfw.WindowHandle, count: i32, paths: [^]cstring) {
 		context = runtime_context
@@ -264,62 +243,64 @@ install_window_callbacks :: proc(handle: glfw.WindowHandle) {
 		for index in 0 ..< int(count) {
 			dropped[index] = string(paths[index])
 		}
-		data.drop(&data.window, dropped)
+		data.drop(data.window, dropped)
 	})
 	glfw.SetWindowPosCallback(handle, proc "c" (handle: glfw.WindowHandle, x, y: i32) {
 		context = runtime_context
 		if data := window_data(handle); data.window_position != nil {
-			data.window_position(&data.window, {x, y})
+			data.window_position(data.window, {x, y})
 		}
 	})
 	glfw.SetWindowSizeCallback(handle, proc "c" (handle: glfw.WindowHandle, width, height: i32) {
 		context = runtime_context
 		if data := window_data(handle); data.window_size != nil {
-			data.window_size(&data.window, {width, height})
+			data.window_size(data.window, {width, height})
 		}
 	})
 	glfw.SetWindowCloseCallback(handle, proc "c" (handle: glfw.WindowHandle) {
 		context = runtime_context
 		if data := window_data(handle); data.window_close != nil {
-			data.window_close(&data.window)
+			data.window_close(data.window)
 		}
 	})
 	glfw.SetWindowRefreshCallback(handle, proc "c" (handle: glfw.WindowHandle) {
 		context = runtime_context
 		if data := window_data(handle); data.window_refresh != nil {
-			data.window_refresh(&data.window)
+			data.window_refresh(data.window)
 		}
-		request_frame()
 	})
 	glfw.SetWindowFocusCallback(handle, proc "c" (handle: glfw.WindowHandle, focused: i32) {
 		context = runtime_context
-		inject_focus(&window_data(handle).window, focused != 0)
+		data := window_data(handle)
+		if data.observer.window_focus != nil {
+			data.observer.window_focus(data.window, focused != 0)
+		}
+		if data.window_focus != nil {
+			data.window_focus(data.window, focused != 0)
+		}
 	})
 	glfw.SetWindowIconifyCallback(handle, proc "c" (handle: glfw.WindowHandle, minimised: i32) {
 		context = runtime_context
 		if data := window_data(handle); data.window_minimise != nil {
-			data.window_minimise(&data.window, minimised != 0)
+			data.window_minimise(data.window, minimised != 0)
 		}
 	})
 	glfw.SetWindowMaximizeCallback(handle, proc "c" (handle: glfw.WindowHandle, maximised: i32) {
 		context = runtime_context
 		if data := window_data(handle); data.window_maximise != nil {
-			data.window_maximise(&data.window, maximised != 0)
+			data.window_maximise(data.window, maximised != 0)
 		}
 	})
 	glfw.SetFramebufferSizeCallback(handle, proc "c" (handle: glfw.WindowHandle, width, height: i32) {
 		context = runtime_context
 		if data := window_data(handle); data.framebuffer_size != nil {
-			data.framebuffer_size(&data.window, {width, height})
-		}
-		if width > 0 && height > 0 {
-			request_frame()
+			data.framebuffer_size(data.window, {width, height})
 		}
 	})
 	glfw.SetWindowContentScaleCallback(handle, proc "c" (handle: glfw.WindowHandle, x, y: f32) {
 		context = runtime_context
 		if data := window_data(handle); data.window_content_scale != nil {
-			data.window_content_scale(&data.window, {x, y})
+			data.window_content_scale(data.window, {x, y})
 		}
 	})
 }
@@ -505,7 +486,7 @@ Cursor :: struct {
 	handle: glfw.CursorHandle,
 }
 
-key_down :: proc(window: ^Window, key: Key) -> bool {
+key_down :: proc(window: Window, key: Key) -> bool {
 	assert(key != .Unknown, "key_down needs a known key")
 	return glfw.GetKey(window.handle, i32(key)) == glfw.PRESS
 }
@@ -519,36 +500,36 @@ key_scancode :: proc(key: Key) -> i32 {
 	return glfw.GetKeyScancode(i32(key))
 }
 
-mouse_button_down :: proc(window: ^Window, button: Mouse_Button) -> bool {
+mouse_button_down :: proc(window: Window, button: Mouse_Button) -> bool {
 	return glfw.GetMouseButton(window.handle, i32(button)) == glfw.PRESS
 }
 
-cursor_position :: proc(window: ^Window) -> [2]f64 {
+cursor_position :: proc(window: Window) -> [2]f64 {
 	x, y := glfw.GetCursorPos(window.handle)
 	return {x, y}
 }
 
-set_cursor_position :: proc(window: ^Window, position: [2]f64) {
+set_cursor_position :: proc(window: Window, position: [2]f64) {
 	glfw.SetCursorPos(window.handle, position.x, position.y)
 }
 
-cursor_mode :: proc(window: ^Window) -> Cursor_Mode {
+cursor_mode :: proc(window: Window) -> Cursor_Mode {
 	return Cursor_Mode(glfw.GetInputMode(window.handle, glfw.CURSOR))
 }
 
-set_cursor_mode :: proc(window: ^Window, mode: Cursor_Mode) {
+set_cursor_mode :: proc(window: Window, mode: Cursor_Mode) {
 	glfw.SetInputMode(window.handle, glfw.CURSOR, i32(mode))
 }
 
-set_sticky_keys :: proc(window: ^Window, enabled: bool) {
+set_sticky_keys :: proc(window: Window, enabled: bool) {
 	glfw.SetInputMode(window.handle, glfw.STICKY_KEYS, i32(enabled))
 }
 
-set_sticky_mouse_buttons :: proc(window: ^Window, enabled: bool) {
+set_sticky_mouse_buttons :: proc(window: Window, enabled: bool) {
 	glfw.SetInputMode(window.handle, glfw.STICKY_MOUSE_BUTTONS, i32(enabled))
 }
 
-set_lock_key_modifiers :: proc(window: ^Window, enabled: bool) {
+set_lock_key_modifiers :: proc(window: Window, enabled: bool) {
 	glfw.SetInputMode(window.handle, glfw.LOCK_KEY_MODS, i32(enabled))
 }
 
@@ -556,7 +537,8 @@ raw_mouse_motion_supported :: proc() -> bool {
 	return bool(glfw.RawMouseMotionSupported())
 }
 
-set_raw_mouse_motion :: proc(window: ^Window, enabled: bool) -> Error {
+@(require_results)
+set_raw_mouse_motion :: proc(window: Window, enabled: bool) -> Error {
 	if !glfw.RawMouseMotionSupported() {
 		return .Unsupported_On_Platform
 	}
@@ -599,7 +581,7 @@ delete_cursor :: proc(cursor: ^Cursor) {
 	cursor^ = {}
 }
 
-set_cursor :: proc(window: ^Window, cursor: Maybe(Cursor)) {
+set_cursor :: proc(window: Window, cursor: Maybe(Cursor)) {
 	handle: glfw.CursorHandle
 	if cursor, set := cursor.?; set {
 		handle = cursor.handle
@@ -619,163 +601,4 @@ clipboard_text :: proc() -> string {
 set_clipboard_text :: proc(text: string) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	glfw.SetClipboardString(nil, strings.clone_to_cstring(text, context.temp_allocator))
-}
-
-// ===[ Injected Input ]========================================================
-
-inject_key :: proc(window: ^Window, key: Key, scancode: i32, action: Action, modifiers: Modifiers) {
-	if window.data.key != nil {
-		window.data.key(window, key, scancode, action, modifiers)
-	}
-}
-
-inject_text :: proc(window: ^Window, codepoint: rune) {
-	if window.data.text != nil {
-		window.data.text(window, codepoint)
-	}
-}
-
-inject_mouse_button :: proc(window: ^Window, button: Mouse_Button, action: Action, modifiers: Modifiers) {
-	if window.data.mouse_button != nil {
-		window.data.mouse_button(window, button, action, modifiers)
-	}
-}
-
-inject_cursor_position :: proc(window: ^Window, position: [2]f64) {
-	if window.data.cursor_position != nil {
-		window.data.cursor_position(window, position)
-	}
-}
-
-inject_cursor_enter :: proc(window: ^Window, entered: bool) {
-	if window.data.cursor_enter != nil {
-		window.data.cursor_enter(window, entered)
-	}
-}
-
-inject_scroll :: proc(window: ^Window, offset: [2]f64) {
-	if window.data.scroll != nil {
-		window.data.scroll(window, offset)
-	}
-}
-
-inject_focus :: proc(window: ^Window, focused: bool) {
-	if window.data.window_focus != nil {
-		window.data.window_focus(window, focused)
-	}
-}
-
-// ===[ Joysticks and Gamepads ]================================================
-
-MAX_JOYSTICKS :: glfw.JOYSTICK_LAST + 1
-
-Connection_Event :: enum i32 {
-	Connected    = glfw.CONNECTED,
-	Disconnected = glfw.DISCONNECTED,
-}
-
-Hat_Direction :: enum {
-	Up,
-	Right,
-	Down,
-	Left,
-}
-
-Hat :: bit_set[Hat_Direction;u8]
-
-#assert(1 << uint(Hat_Direction.Up) == glfw.HAT_UP)
-#assert(1 << uint(Hat_Direction.Left) == glfw.HAT_LEFT)
-
-Gamepad_Button :: enum i32 {
-	A            = glfw.GAMEPAD_BUTTON_A,
-	B            = glfw.GAMEPAD_BUTTON_B,
-	X            = glfw.GAMEPAD_BUTTON_X,
-	Y            = glfw.GAMEPAD_BUTTON_Y,
-	Left_Bumper  = glfw.GAMEPAD_BUTTON_LEFT_BUMPER,
-	Right_Bumper = glfw.GAMEPAD_BUTTON_RIGHT_BUMPER,
-	Back         = glfw.GAMEPAD_BUTTON_BACK,
-	Start        = glfw.GAMEPAD_BUTTON_START,
-	Guide        = glfw.GAMEPAD_BUTTON_GUIDE,
-	Left_Thumb   = glfw.GAMEPAD_BUTTON_LEFT_THUMB,
-	Right_Thumb  = glfw.GAMEPAD_BUTTON_RIGHT_THUMB,
-	Dpad_Up      = glfw.GAMEPAD_BUTTON_DPAD_UP,
-	Dpad_Right   = glfw.GAMEPAD_BUTTON_DPAD_RIGHT,
-	Dpad_Down    = glfw.GAMEPAD_BUTTON_DPAD_DOWN,
-	Dpad_Left    = glfw.GAMEPAD_BUTTON_DPAD_LEFT,
-}
-
-Gamepad_Axis :: enum i32 {
-	Left_X        = glfw.GAMEPAD_AXIS_LEFT_X,
-	Left_Y        = glfw.GAMEPAD_AXIS_LEFT_Y,
-	Right_X       = glfw.GAMEPAD_AXIS_RIGHT_X,
-	Right_Y       = glfw.GAMEPAD_AXIS_RIGHT_Y,
-	Left_Trigger  = glfw.GAMEPAD_AXIS_LEFT_TRIGGER,
-	Right_Trigger = glfw.GAMEPAD_AXIS_RIGHT_TRIGGER,
-}
-
-Gamepad_State :: struct {
-	buttons: [Gamepad_Button]Action,
-	axes:    [Gamepad_Axis]f32,
-}
-
-#assert(size_of(Gamepad_State) == size_of(glfw.GamepadState))
-#assert(offset_of(Gamepad_State, axes) == offset_of(glfw.GamepadState, axes))
-
-@(private = "file")
-joystick_id :: proc(joystick: int, loc := #caller_location) -> i32 {
-	assert(joystick >= 0 && joystick < MAX_JOYSTICKS, "joystick out of range", loc)
-	return i32(joystick)
-}
-
-joystick_present :: proc(joystick: int) -> bool {
-	return bool(glfw.JoystickPresent(joystick_id(joystick)))
-}
-
-joystick_axes :: proc(joystick: int) -> []f32 {
-	return glfw.GetJoystickAxes(joystick_id(joystick))
-}
-
-joystick_buttons :: proc(joystick: int) -> []Action {
-	return transmute([]Action)glfw.GetJoystickButtons(joystick_id(joystick))
-}
-
-joystick_hats :: proc(joystick: int) -> []Hat {
-	return transmute([]Hat)glfw.GetJoystickHats(joystick_id(joystick))
-}
-
-joystick_name :: proc(joystick: int) -> string {
-	return glfw.GetJoystickName(joystick_id(joystick))
-}
-
-joystick_guid :: proc(joystick: int) -> string {
-	return glfw.GetJoystickGUID(joystick_id(joystick))
-}
-
-set_joystick_user_pointer :: proc(joystick: int, pointer: rawptr) {
-	glfw.SetJoystickUserPointer(joystick_id(joystick), pointer)
-}
-
-joystick_user_pointer :: proc(joystick: int) -> rawptr {
-	return glfw.GetJoystickUserPointer(joystick_id(joystick))
-}
-
-joystick_is_gamepad :: proc(joystick: int) -> bool {
-	return bool(glfw.JoystickIsGamepad(joystick_id(joystick)))
-}
-
-gamepad_name :: proc(joystick: int) -> string {
-	return glfw.GetGamepadName(joystick_id(joystick))
-}
-
-gamepad_state :: proc(joystick: int) -> (state: Gamepad_State, ok: bool) {
-	ok = bool(glfw.GetGamepadState(joystick_id(joystick), (^glfw.GamepadState)(&state)))
-	return
-}
-
-update_gamepad_mappings :: proc(mappings: string) -> Error {
-	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	if !glfw.UpdateGamepadMappings(strings.clone_to_cstring(mappings, context.temp_allocator)) {
-		return .Gamepad_Mappings_Rejected
-	}
-	return nil
 }

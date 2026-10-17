@@ -97,7 +97,7 @@ run :: proc() -> Valhalla.Error {
 	window := Valhalla.make_window(title = "Lighting: drag to orbit, scroll to zoom") or_return
 	defer Valhalla.delete_window(&window)
 
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
 	vertices: [dynamic]Vertex
@@ -132,24 +132,24 @@ run :: proc() -> Valhalla.Error {
 		append(&meshes, sphere)
 	}
 
-	vertex_buffer := Valhalla.make_buffer(raw_bytes(vertices[:]), Valhalla.Buffer_Settings{usage = {.Storage}}) or_return
+	vertex_buffer := Valhalla.make_buffer_from_memory(raw_bytes(vertices[:]), {.Storage}) or_return
 	defer Valhalla.delete_buffer(&vertex_buffer)
-	index_buffer := Valhalla.make_buffer(raw_bytes(indices[:]), Valhalla.Buffer_Settings{usage = {.Index}}) or_return
+	index_buffer := Valhalla.make_buffer_from_memory(raw_bytes(indices[:]), {.Index}) or_return
 	defer Valhalla.delete_buffer(&index_buffer)
-	object_buffer := Valhalla.make_buffer(len(objects) * size_of(Object), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	object_buffer := Valhalla.make_buffer(len(objects) * size_of(Object), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&object_buffer)
-	light_buffer := Valhalla.make_buffer(LIGHT_COUNT * size_of(Light), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	light_buffer := Valhalla.make_buffer(LIGHT_COUNT * size_of(Light), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&light_buffer)
 
-	shadow_map := Valhalla.make_image(.D32_SFLOAT, {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 1}, kind = .Depth) or_return
+	shadow_map := Valhalla.make_image(.D32_SFLOAT, {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 1}, usage = {.Attachment}) or_return
 	defer Valhalla.delete_image(&shadow_map)
-	faces_buffer := Valhalla.make_buffer(LIGHT_COUNT * 6 * size_of(matrix[4, 4]f32), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	faces_buffer := Valhalla.make_buffer(LIGHT_COUNT * 6 * size_of(matrix[4, 4]f32), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&faces_buffer)
-	view_buffer := Valhalla.make_buffer(size_of(View), Valhalla.Buffer_Settings{usage = {.Uniform}, memory = .Host_Visible}) or_return
+	view_buffer := Valhalla.make_buffer(size_of(View), {.Uniform}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&view_buffer)
 	point_shadow_maps: [LIGHT_COUNT]Valhalla.Image
 	for &point_shadow_map in point_shadow_maps {
-		point_shadow_map = Valhalla.make_image(.D32_SFLOAT, {POINT_SHADOW_SIZE, POINT_SHADOW_SIZE, 1}, kind = .Depth, shape = .Cube) or_return
+		point_shadow_map = Valhalla.make_image(.D32_SFLOAT, {POINT_SHADOW_SIZE, POINT_SHADOW_SIZE, 1}, usage = {.Attachment}, shape = .Cube) or_return
 	}
 	defer for &point_shadow_map in point_shadow_maps {
 		Valhalla.delete_image(&point_shadow_map)
@@ -157,23 +157,18 @@ run :: proc() -> Valhalla.Error {
 	shadow_sampler := Valhalla.make_sampler(address_mode = .CLAMP_TO_BORDER, compare_op = .LESS_OR_EQUAL, border_colour = .FLOAT_OPAQUE_WHITE) or_return
 	defer Valhalla.delete_sampler(&shadow_sampler)
 
-	settings := Valhalla.Compiler_Settings {
-		search_paths = {#directory + "/../../src/shaders"},
-	}
-	shadow, _ := Valhalla.make_shader(#load("Lighting.slang"), []string{"shadow_vertex"}, settings, {push_type = Push, depth_format = .D32_SFLOAT}) or_return
+	shadow := Valhalla.make_shader(#load("Lighting.slang"), []string{"shadow_vertex"}, push_type = Push, depth_format = .D32_SFLOAT) or_return
 	defer Valhalla.delete_shader(&shadow)
-	point_shadow, _ := Valhalla.make_shader(
+	point_shadow := Valhalla.make_shader(
 		#load("Lighting.slang"),
 		[]string{"point_shadow_vertex"},
-		settings,
-		{push_type = Push, depth_format = .D32_SFLOAT, view_mask = 0b111111},
+		push_type = Push, depth_format = .D32_SFLOAT, view_mask = 0b111111,
 	) or_return
 	defer Valhalla.delete_shader(&point_shadow)
-	lit, _ := Valhalla.make_shader(
+	lit := Valhalla.make_shader(
 		#load("Lighting.slang"),
 		[]string{"lit_vertex", "lit_fragment"},
-		settings,
-		{push_type = Push, colour_formats = {0 = surface.format.format}, depth_format = .D32_SFLOAT},
+		push_type = Push, colour_formats = {0 = surface.format}, depth_format = .D32_SFLOAT,
 	) or_return
 	defer Valhalla.delete_shader(&lit)
 
@@ -200,27 +195,25 @@ run :: proc() -> Valhalla.Error {
 		light_view_projection = orthographic(10, 0.5, 30) * linalg.matrix4_look_at_f32(-sun * 14, {0, 0, 0}, {0, 0, 1}),
 		start                 = time.now(),
 	}
-	scene.depth = Valhalla.make_image(.D32_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, kind = .Depth, name = "depth") or_return
+	scene.depth = Valhalla.make_image(.D32_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, usage = {.Attachment}, name = "depth") or_return
 	defer Valhalla.delete_image(&scene.depth)
+	scene.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&scene.target)
 	scene.frame = Valhalla.make_workload("frame") or_return
 	defer Valhalla.delete_workload(&scene.frame)
 	defer _ = Valhalla.wait_execution(scene.last)
 
-	Valhalla.set_window_user_pointer(&window, rawptr(&scene.camera))
-	Valhalla.set_mouse_button_callback(&window, on_mouse_button)
-	Valhalla.set_cursor_position_callback(&window, on_cursor_pos)
-	Valhalla.set_scroll_callback(&window, on_scroll)
-	Valhalla.set_key_callback(&window, on_key)
-	Valhalla.set_frame_callback(draw_frame, rawptr(&scene))
-	defer Valhalla.set_frame_callback(nil)
-
-	for !Valhalla.should_close(&window) {
-		if scene.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	Valhalla.set_window_user_pointer(window, rawptr(&scene.camera))
+	Valhalla.set_mouse_button_callback(window, on_mouse_button)
+	Valhalla.set_cursor_position_callback(window, on_cursor_pos)
+	Valhalla.set_scroll_callback(window, on_scroll)
+	Valhalla.set_key_callback(window, on_key)
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(&scene) or_return
+		if scene.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -250,16 +243,16 @@ Scene :: struct {
 	sun:                   [3]f32,
 	light_view_projection: matrix[4, 4]f32,
 	start:                 time.Time,
-	minimised:             bool,
+	target:             Valhalla.Image,
 }
 
 draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	scene := (^Scene)(user_data)
+	if scene.target.extent.xy != scene.surface.extent {
+		scene.recorded = false
+	}
 	if !scene.recorded {
 		record_frame(scene) or_return
-		if !scene.recorded {
-			return nil
-		}
 	}
 
 	Valhalla.wait_execution(scene.last) or_return
@@ -284,18 +277,13 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		view_projection = projection(1 / math.tan(f32(math.PI) / 8), f32(extent.x) / f32(extent.y), 0.1, 100) * linalg.matrix4_look_at_f32(eye, {0, 0.5, 0}, {0, 1, 0}),
 		camera          = {eye.x, eye.y, eye.z, 1},
 	}
-	Valhalla.load_memory_to_buffer(raw_bytes(faces[:]), scene.faces_buffer) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(scene.objects), scene.object_buffer) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(lights[:]), scene.light_buffer) or_return
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&view), scene.view_buffer) or_return
+	Valhalla.load_memory_to_buffer(raw_bytes(faces[:]), scene.faces_buffer^) or_return
+	Valhalla.load_memory_to_buffer(raw_bytes(scene.objects), scene.object_buffer^) or_return
+	Valhalla.load_memory_to_buffer(raw_bytes(lights[:]), scene.light_buffer^) or_return
+	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&view), scene.view_buffer^) or_return
 
-	execution, err := Valhalla.execute_workloads(&scene.frame)
-	if err == Valhalla.Workload_Error.Swapchain_Changed {
-		scene.recorded = false
-		return nil
-	}
-	scene.last = execution
-	return err
+	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
+	return nil
 }
 
 record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
@@ -303,14 +291,9 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	frame := &scene.frame
 	Valhalla.reset_workload(frame) or_return
 
-	image, acquire_err := Valhalla.acquire(frame, scene.surface)
-	scene.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if scene.minimised {
-		return nil
-	} else if acquire_err != nil {
-		return acquire_err
-	}
-	Valhalla.resize_image(&scene.depth, image.extent) or_return
+	_ = Valhalla.resize_image(&scene.target, {max(scene.surface.extent.x, 1), max(scene.surface.extent.y, 1), 1}) or_return
+	image := scene.target
+	_ = Valhalla.resize_image(&scene.depth, image.extent) or_return
 
 	sun := scene.sun
 	push := Push {
@@ -321,7 +304,7 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 		objects               = scene.object_buffer^,
 	}
 
-	shadow_cleared := Valhalla.clear_image(frame, scene.shadow_map, {depthStencil = {depth = 1}})
+	shadow_cleared := Valhalla.clear_depth(frame, scene.shadow_map)
 	Valhalla.reset_shader(shadow)
 	Valhalla.bind_shader_index_buffer(shadow, scene.index_buffer)
 	shadowed := Valhalla.bind_shader_depth(shadow, shadow_cleared)
@@ -330,7 +313,7 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	Valhalla.set_depth_bias(shadow, true, constant = 1.5, slope = 2)
 	Valhalla.set_push_data(shadow, push)
 	for mesh, index in scene.meshes[:scene.scene_count] {
-		Valhalla.draw_indexed(shadow, mesh.base_vertex, mesh.first_index, mesh.index_count, 0, 1, draw_data = u32(index))
+		Valhalla.draw_indexed(shadow, mesh.index_count, first_index = mesh.first_index, vertex_offset = mesh.base_vertex, draw_data = u32(index))
 	}
 	Valhalla.bind_shader(frame, shadow^) or_return
 
@@ -339,11 +322,11 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	Valhalla.set_depth_write(point_shadow, true)
 	Valhalla.set_depth_bias(point_shadow, true, constant = 1.5, slope = 2)
 	for mesh, index in scene.meshes[:scene.scene_count] {
-		Valhalla.draw_indexed(point_shadow, mesh.base_vertex, mesh.first_index, mesh.index_count, 0, 1, draw_data = u32(index))
+		Valhalla.draw_indexed(point_shadow, mesh.index_count, first_index = mesh.first_index, vertex_offset = mesh.base_vertex, draw_data = u32(index))
 	}
 	point_shadows: [LIGHT_COUNT]Valhalla.Image
 	for point_shadow_map, light in scene.point_shadow_maps {
-		cube_cleared := Valhalla.clear_image(frame, point_shadow_map, {depthStencil = {depth = 1}})
+		cube_cleared := Valhalla.clear_depth(frame, point_shadow_map)
 		Valhalla.reset_shader_bindings(point_shadow)
 		point_push := push
 		point_push.faces = scene.faces_buffer^
@@ -354,8 +337,8 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 		Valhalla.bind_shader(frame, point_shadow^) or_return
 	}
 
-	cleared := Valhalla.clear_image(frame, image, {color = {float32 = {0.1, 0.12, 0.18, 1}}})
-	depth_cleared := Valhalla.clear_image(frame, scene.depth, {depthStencil = {depth = 1}})
+	cleared := Valhalla.clear_image(frame, image, {0.1, 0.12, 0.18, 1})
+	depth_cleared := Valhalla.clear_depth(frame, scene.depth)
 	Valhalla.reset_shader(lit)
 	push.lights = scene.light_buffer^
 	push.view = scene.view_buffer^
@@ -364,23 +347,23 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	push.point_shadow_maps = point_shadows
 	Valhalla.bind_shader_index_buffer(lit, scene.index_buffer)
 	drawn := Valhalla.bind_shader_colour(lit, cleared)
-	Valhalla.bind_shader_depth(lit, depth_cleared)
+	_ = Valhalla.bind_shader_depth(lit, depth_cleared)
 	Valhalla.set_depth_test(lit, true)
 	Valhalla.set_depth_write(lit, true)
 	Valhalla.set_push_data(lit, push)
 	for mesh, index in scene.meshes {
-		Valhalla.draw_indexed(lit, mesh.base_vertex, mesh.first_index, mesh.index_count, 0, 1, draw_data = u32(index))
+		Valhalla.draw_indexed(lit, mesh.index_count, first_index = mesh.first_index, vertex_offset = mesh.base_vertex, draw_data = u32(index))
 	}
 	Valhalla.bind_shader(frame, lit^) or_return
 
 	Valhalla.workload_discards(frame, scene.depth)
-	Valhalla.present(frame, drawn)
+	Valhalla.present(frame, drawn, scene.surface)
 	Valhalla.finalize_workload(frame) or_return
 	scene.recorded = true
 	return nil
 }
 
-on_mouse_button :: proc(window: ^Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_mouse_button :: proc(window: Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	camera := (^Camera)(Valhalla.window_user_pointer(window))
 	if button == .Left {
 		camera.dragging = action == .Press
@@ -388,7 +371,7 @@ on_mouse_button :: proc(window: ^Valhalla.Window, button: Valhalla.Mouse_Button,
 	}
 }
 
-on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
+on_cursor_pos :: proc(window: Valhalla.Window, position: [2]f64) {
 	camera := (^Camera)(Valhalla.window_user_pointer(window))
 	if camera.dragging {
 		delta := position - camera.last_mouse
@@ -398,12 +381,12 @@ on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
 	}
 }
 
-on_scroll :: proc(window: ^Valhalla.Window, offset: [2]f64) {
+on_scroll :: proc(window: Valhalla.Window, offset: [2]f64) {
 	camera := (^Camera)(Valhalla.window_user_pointer(window))
 	camera.orbit.distance = clamp(camera.orbit.distance - f32(offset.y) * 0.75, 4, 25)
 }
 
-on_key :: proc(window: ^Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_key :: proc(window: Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	if key == .Escape && action == .Press {
 		Valhalla.request_close(window)
 	}

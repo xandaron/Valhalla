@@ -19,23 +19,22 @@ run :: proc() -> Valhalla.Error {
 	Valhalla.init() or_return
 	defer Valhalla.shutdown()
 
-	target := Valhalla.make_image(.R8G8B8A8_UNORM, {512, 512, 1}) or_return
+	target := Valhalla.make_image(.R8G8B8A8_UNORM, {512, 512, 1}, usage = {.Attachment}) or_return
 	defer Valhalla.delete_image(&target)
 
-	triangle, _ := Valhalla.make_shader(
+	triangle := Valhalla.make_shader(
 		#load("Triangle.slang"),
 		[]string{"vertex_main", "fragment_main"},
-		{},
-		{colour_formats = {0 = target.format}},
+		push_type = nil, colour_formats = {0 = target.format},
 	) or_return
 	defer Valhalla.delete_shader(&triangle)
 
 	work := Valhalla.make_workload() or_return
 	defer Valhalla.delete_workload(&work)
 
-	cleared := Valhalla.clear_image(&work, target, {color = {float32 = {0, 0, 0, 1}}})
+	cleared := Valhalla.clear_image(&work, target, {0, 0, 0, 1})
 	drawn := Valhalla.bind_shader_colour(&triangle, cleared)
-	Valhalla.draw(&triangle, 3, 1, 0, 0)
+	Valhalla.draw(&triangle, 3)
 	Valhalla.bind_shader(&work, triangle) or_return
 	picture := Valhalla.readback(&work, drawn) or_return
 	Valhalla.finalize_workload(&work) or_return

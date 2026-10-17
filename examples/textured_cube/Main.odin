@@ -54,27 +54,26 @@ run :: proc() -> Valhalla.Error {
 	window := Valhalla.make_window(title = "Textured Cube") or_return
 	defer Valhalla.delete_window(&window)
 
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
 	cube_vertices, cube_indices := make_cube()
-	vertices := Valhalla.make_buffer(raw_bytes(cube_vertices[:]), Valhalla.Buffer_Settings{usage = {.Storage}}) or_return
+	vertices := Valhalla.make_buffer_from_memory(raw_bytes(cube_vertices[:]), {.Storage}) or_return
 	defer Valhalla.delete_buffer(&vertices)
-	indices := Valhalla.make_buffer(raw_bytes(cube_indices[:]), Valhalla.Buffer_Settings{usage = {.Index}}) or_return
+	indices := Valhalla.make_buffer_from_memory(raw_bytes(cube_indices[:]), {.Index}) or_return
 	defer Valhalla.delete_buffer(&indices)
 
 	texture := Valhalla.make_image_from_file(#directory + "/Cube.png") or_return
 	defer Valhalla.delete_image(&texture)
 	linear_sampler := Valhalla.make_sampler() or_return
 	defer Valhalla.delete_sampler(&linear_sampler)
-	frame_data := Valhalla.make_empty_buffer(size_of(Frame), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	frame_data := Valhalla.make_buffer(size_of(Frame), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&frame_data)
 
-	cube, _ := Valhalla.make_shader(
+	cube := Valhalla.make_shader(
 		#load("Cube.slang"),
 		[]string{"vertex_main", "fragment_main"},
-		{search_paths = {#directory + "/../../src/shaders"}},
-		{push_type = Push, colour_formats = {0 = surface.format.format}, depth_format = .D32_SFLOAT},
+		push_type = Push, colour_formats = {0 = surface.format}, depth_format = .D32_SFLOAT,
 	) or_return
 	defer Valhalla.delete_shader(&cube)
 
@@ -89,21 +88,20 @@ run :: proc() -> Valhalla.Error {
 		linear_sampler = linear_sampler,
 		start          = time.now(),
 	}
-	scene.depth = Valhalla.make_image(.D32_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, kind = .Depth, name = "depth") or_return
+	scene.depth = Valhalla.make_image(.D32_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, usage = {.Attachment}, name = "depth") or_return
 	defer Valhalla.delete_image(&scene.depth)
+	scene.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&scene.target)
 	scene.frame = Valhalla.make_workload("frame") or_return
 	defer Valhalla.delete_workload(&scene.frame)
 	defer _ = Valhalla.wait_execution(scene.last)
 
-	Valhalla.set_frame_callback(draw_frame, rawptr(&scene))
-	defer Valhalla.set_frame_callback(nil)
-	for !Valhalla.should_close(&window) {
-		if scene.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(&scene) or_return
+		if scene.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -122,16 +120,16 @@ Scene :: struct {
 	linear_sampler: Valhalla.Sampler,
 	depth:          Valhalla.Image,
 	start:          time.Time,
-	minimised:      bool,
+	target:      Valhalla.Image,
 }
 
 draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	scene := (^Scene)(user_data)
+	if scene.target.extent.xy != scene.surface.extent {
+		scene.recorded = false
+	}
 	if !scene.recorded {
 		record_frame(scene) or_return
-		if !scene.recorded {
-			return nil
-		}
 	}
 
 	Valhalla.wait_execution(scene.last) or_return
@@ -139,45 +137,35 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	frame := Frame {
 		transform = view_projection(scene.depth.extent.xy) * linalg.matrix4_rotate_f32(seconds * 0.5, {0, 1, 0}),
 	}
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&frame), &scene.frame_data) or_return
+	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&frame), scene.frame_data) or_return
 
-	execution, err := Valhalla.execute_workloads(&scene.frame)
-	if err == Valhalla.Workload_Error.Swapchain_Changed {
-		scene.recorded = false
-		return nil
-	}
-	scene.last = execution
-	return err
+	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
+	return nil
 }
 
 record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	Valhalla.reset_workload(&scene.frame) or_return
-	image, acquire_err := Valhalla.acquire(&scene.frame, scene.surface)
-	scene.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if scene.minimised {
-		return nil
-	} else if acquire_err != nil {
-		return acquire_err
-	}
+	_ = Valhalla.resize_image(&scene.target, {max(scene.surface.extent.x, 1), max(scene.surface.extent.y, 1), 1}) or_return
+	image := scene.target
 
-	Valhalla.resize_image(&scene.depth, image.extent) or_return
+	_ = Valhalla.resize_image(&scene.depth, image.extent) or_return
 
-	cleared := Valhalla.clear_image(&scene.frame, image, {color = {float32 = {0.1, 0.1, 0.12, 1}}})
-	depth_cleared := Valhalla.clear_image(&scene.frame, scene.depth, {depthStencil = {depth = 1}})
+	cleared := Valhalla.clear_image(&scene.frame, image, {0.1, 0.1, 0.12, 1})
+	depth_cleared := Valhalla.clear_depth(&scene.frame, scene.depth)
 
 	cube := scene.cube
 	Valhalla.reset_shader(cube)
 	Valhalla.set_push_data(cube, Push{frame = scene.frame_data, vertices = scene.vertices, albedo = scene.texture, linear_sampler = scene.linear_sampler})
 	Valhalla.bind_shader_index_buffer(cube, scene.indices, .U16)
 	drawn := Valhalla.bind_shader_colour(cube, cleared)
-	Valhalla.bind_shader_depth(cube, depth_cleared)
+	_ = Valhalla.bind_shader_depth(cube, depth_cleared)
 	Valhalla.set_depth_test(cube, true)
 	Valhalla.set_depth_write(cube, true)
-	Valhalla.draw_indexed(cube, 0, 0, scene.index_count, 0, 1)
+	Valhalla.draw_indexed(cube, scene.index_count)
 	Valhalla.bind_shader(&scene.frame, cube^) or_return
 
 	Valhalla.workload_discards(&scene.frame, scene.depth)
-	Valhalla.present(&scene.frame, drawn)
+	Valhalla.present(&scene.frame, drawn, scene.surface)
 	Valhalla.finalize_workload(&scene.frame) or_return
 	scene.recorded = true
 	return nil

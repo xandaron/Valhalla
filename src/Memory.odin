@@ -406,9 +406,6 @@ release_block_range :: proc(block: ^Memory_Block, offset, size: vk.DeviceSize) {
 
 Staging_Error :: enum {
 	None,
-	Staging_Semaphore_Creation_Failed,
-	Staging_Pool_Creation_Failed,
-	Staging_Recording_Failed,
 	Staging_Submit_Failed,
 }
 
@@ -477,25 +474,9 @@ staging_commands :: proc() -> (command_buffer: vk.CommandBuffer, err: Error) {
 	if len(staging.idle) > 0 {
 		staging.command_buffer = pop(&staging.idle)
 	} else {
-		allocate_info: vk.CommandBufferAllocateInfo = {
-			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-			commandPool        = staging.command_pool,
-			level              = .PRIMARY,
-			commandBufferCount = 1,
-		}
-		if res := vk.AllocateCommandBuffers(device.handle, &allocate_info, &staging.command_buffer); res != .SUCCESS {
-			log.errorf("Failed to allocate a staging command buffer: %v", res)
-			return nil, .Staging_Recording_Failed
-		}
+		staging.command_buffer = allocate_command_buffer(staging.command_pool, "staging") or_return
 	}
-	begin_info: vk.CommandBufferBeginInfo = {
-		sType = .COMMAND_BUFFER_BEGIN_INFO,
-		flags = {.ONE_TIME_SUBMIT},
-	}
-	if res := vk.BeginCommandBuffer(staging.command_buffer, &begin_info); res != .SUCCESS {
-		log.errorf("Failed to begin a staging command buffer: %v", res)
-		return nil, .Staging_Recording_Failed
-	}
+	begin_commands(staging.command_buffer, {.ONE_TIME_SUBMIT}) or_return
 	memory_barrier(staging.command_buffer, {.ALL_COMMANDS}, {.MEMORY_READ, .MEMORY_WRITE}, {.ALL_TRANSFER}, {.TRANSFER_READ, .TRANSFER_WRITE})
 	staging.recording = true
 	return staging.command_buffer, nil
@@ -510,7 +491,7 @@ flush_staging :: proc() -> Error {
 	memory_barrier(staging.command_buffer, {.ALL_TRANSFER}, {.TRANSFER_WRITE}, {.ALL_COMMANDS}, {.MEMORY_READ, .MEMORY_WRITE})
 	if res := vk.EndCommandBuffer(staging.command_buffer); res != .SUCCESS {
 		log.errorf("Failed to end a staging command buffer: %v", res)
-		return .Staging_Recording_Failed
+		return .Recording_Failed
 	}
 	staging.recording = false
 	staging.submitted += 1
@@ -564,27 +545,8 @@ open_staging :: proc() -> Error {
 	if staging.command_pool != 0 {
 		return nil
 	}
-	pool_info: vk.CommandPoolCreateInfo = {
-		sType            = .COMMAND_POOL_CREATE_INFO,
-		flags            = {.TRANSIENT, .RESET_COMMAND_BUFFER},
-		queueFamilyIndex = device.queue_families.graphics,
-	}
-	if res := vk.CreateCommandPool(device.handle, &pool_info, nil, &staging.command_pool); res != .SUCCESS {
-		log.errorf("Failed to create the staging command pool: %v", res)
-		return .Staging_Pool_Creation_Failed
-	}
-	type_info: vk.SemaphoreTypeCreateInfo = {
-		sType         = .SEMAPHORE_TYPE_CREATE_INFO,
-		semaphoreType = .TIMELINE,
-	}
-	semaphore_info: vk.SemaphoreCreateInfo = {
-		sType = .SEMAPHORE_CREATE_INFO,
-		pNext = &type_info,
-	}
-	if res := vk.CreateSemaphore(device.handle, &semaphore_info, nil, &staging.timeline); res != .SUCCESS {
-		log.errorf("Failed to create the staging timeline semaphore: %v", res)
-		return .Staging_Semaphore_Creation_Failed
-	}
+	staging.command_pool = make_command_pool({.TRANSIENT, .RESET_COMMAND_BUFFER}, "staging") or_return
+	staging.timeline = make_semaphore(true, "staging timeline") or_return
 	return nil
 }
 
@@ -603,16 +565,6 @@ close_staging :: proc() {
 	delete(staging.idle)
 	delete(staging.oversized)
 	staging = {}
-}
-
-@(private)
-settle_staging :: proc() {
-	if !staging.recording && len(staging.pending) > 0 {
-		retire_staging()
-	}
-	if staging.recording || len(staging.pending) > 0 {
-		wait_staging()
-	}
 }
 
 @(private = "file")
@@ -707,14 +659,20 @@ retire_oldest_batch :: proc() {
 
 @(private = "file")
 retire_staging :: proc() {
-	completed: u64
-	if res := vk.GetSemaphoreCounterValue(device.handle, staging.timeline, &completed); res != .SUCCESS {
-		log.errorf("Failed to read the staging timeline: %v", res)
-		return
-	}
+	completed := staging_completed_value()
 	for len(staging.pending) > 0 && staging.pending[0].value <= completed {
 		retire_oldest_batch()
 	}
+}
+
+@(private)
+staging_pending_value :: proc() -> u64 {
+	return staging.submitted + (1 if staging.recording else 0)
+}
+
+@(private)
+staging_completed_value :: proc() -> u64 {
+	return semaphore_value(staging.timeline)
 }
 
 @(private = "file")
@@ -722,15 +680,6 @@ wait_staging_batch :: proc() {
 	if len(staging.pending) == 0 {
 		return
 	}
-	value := staging.pending[0].value
-	wait_info: vk.SemaphoreWaitInfo = {
-		sType          = .SEMAPHORE_WAIT_INFO,
-		semaphoreCount = 1,
-		pSemaphores    = &staging.timeline,
-		pValues        = &value,
-	}
-	if res := vk.WaitSemaphores(device.handle, &wait_info, max(u64)); res != .SUCCESS {
-		log.errorf("Failed to wait on the staging timeline: %v", res)
-	}
+	_ = wait_semaphore(staging.timeline, staging.pending[0].value)
 	retire_oldest_batch()
 }

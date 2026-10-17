@@ -8,7 +8,6 @@ package slang
 // Not thread-safe: a global session and the objects created from it should be
 // externally synchronized when shared across threads. Distinct global
 // sessions may be used from different threads in parallel.
-@(private)
 Global_Session :: struct #raw_union {
 	#subtype unknown: Unknown,
 	using vtable:     ^Global_Session_VTable,

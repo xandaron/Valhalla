@@ -4,7 +4,6 @@ import "base:runtime"
 import "core:c"
 import "core:log"
 import "core:mem"
-import vk "vendor:vulkan"
 
 import imgui "../../deps/imgui"
 import Valhalla "../"
@@ -23,9 +22,10 @@ DECODED_TEXTURE :: u32(1) << 31
 NEAREST_TEXTURE :: u32(1) << 30
 
 @(private = "file")
-NEAREST_TAG :: uintptr(1)
+NEAREST_TAG :: u64(1) << 62
 
-#assert(align_of(Valhalla.Image) > 1)
+@(private = "file")
+USER_TEXTURE :: u64(1) << 63
 
 Filter :: enum {
 	Linear,
@@ -54,13 +54,8 @@ Backend :: struct {
 	shown_cursor:     imgui.GuiMouseCursor,
 	last_mouse:       imgui.Vec2,
 	mouse_in_window:  bool,
-	previous_key:     Valhalla.Key_Proc,
-	previous_char:    Valhalla.Text_Proc,
-	previous_button:  Valhalla.Mouse_Button_Proc,
-	previous_cursor:  Valhalla.Cursor_Position_Proc,
-	previous_enter:   Valhalla.Cursor_Enter_Proc,
-	previous_scroll:  Valhalla.Scroll_Proc,
-	previous_focus:   Valhalla.Window_Focus_Proc,
+	previous_observer: Valhalla.Input_Observer,
+	textures:         [dynamic]Valhalla.Image,
 	shader:           Valhalla.Shader,
 	sampler:          Valhalla.Sampler,
 	nearest_sampler:  Valhalla.Sampler,
@@ -74,9 +69,10 @@ Backend :: struct {
 @(private = "file")
 backend: Backend
 
-init :: proc(window: ^Valhalla.Window, target_format: vk.Format, linear_output := false) -> (err: Valhalla.Error) {
+@(require_results)
+init :: proc(window: Valhalla.Window, target_format: Valhalla.Format, linear_output := false) -> (err: Valhalla.Error) {
 	backend = {
-		window          = window^,
+		window          = window,
 		runtime_context = context,
 		shown_cursor    = .COUNT,
 		srgb_target     = Valhalla.is_srgb_format(target_format) || linear_output,
@@ -118,19 +114,15 @@ init :: proc(window: ^Valhalla.Window, target_format: vk.Format, linear_output :
 		}
 	}
 
-	backend.previous_key = Valhalla.set_key_callback(window, on_key)
-	backend.previous_char = Valhalla.set_text_callback(window, on_char)
-	backend.previous_button = Valhalla.set_mouse_button_callback(window, on_mouse_button)
-	backend.previous_cursor = Valhalla.set_cursor_position_callback(window, on_cursor_pos)
-	backend.previous_enter = Valhalla.set_cursor_enter_callback(window, on_cursor_enter)
-	backend.previous_scroll = Valhalla.set_scroll_callback(window, on_scroll)
-	backend.previous_focus = Valhalla.set_window_focus_callback(window, on_focus)
+	backend.previous_observer = Valhalla.set_input_observer(
+		window,
+		{key = on_key, text = on_char, mouse_button = on_mouse_button, cursor_position = on_cursor_pos, cursor_enter = on_cursor_enter, scroll = on_scroll, window_focus = on_focus},
+	)
 
-	backend.shader, _ = Valhalla.make_shader(
+	backend.shader = Valhalla.make_shader(
 		#load("ImGui.slang"),
 		[]string{"imgui_vertex", "imgui_fragment"},
-		{search_paths = {#directory + "/../shaders"}},
-		{push_type = Push, colour_formats = {0 = target_format}},
+		push_type = Push, colour_formats = {0 = target_format},
 	) or_return
 	backend.sampler = Valhalla.make_sampler(address_mode = .CLAMP_TO_EDGE) or_return
 	backend.nearest_sampler = Valhalla.make_sampler(filter = .NEAREST, mipmap_mode = .NEAREST, address_mode = .CLAMP_TO_EDGE) or_return
@@ -153,26 +145,23 @@ shutdown :: proc() {
 		Valhalla.delete_cursor(&cursor)
 	}
 
-	window := &backend.window
-	Valhalla.set_key_callback(window, backend.previous_key)
-	Valhalla.set_text_callback(window, backend.previous_char)
-	Valhalla.set_mouse_button_callback(window, backend.previous_button)
-	Valhalla.set_cursor_position_callback(window, backend.previous_cursor)
-	Valhalla.set_cursor_enter_callback(window, backend.previous_enter)
-	Valhalla.set_scroll_callback(window, backend.previous_scroll)
-	Valhalla.set_window_focus_callback(window, backend.previous_focus)
+	Valhalla.set_input_observer(backend.window, backend.previous_observer)
+	delete(backend.textures)
 
 	imgui.DestroyContext()
 	backend = {}
 }
 
-texture :: proc(image: ^Valhalla.Image, filter := Filter.Linear) -> imgui.TextureRef {
-	return {_TexID = imgui.TextureID(uintptr(image) | (NEAREST_TAG if filter == .Nearest else 0))}
+texture :: proc(image: Valhalla.Image, filter := Filter.Linear) -> imgui.TextureRef {
+	append(&backend.textures, image)
+	id := USER_TEXTURE | u64(len(backend.textures) - 1) | (NEAREST_TAG if filter == .Nearest else 0)
+	return {_TexID = imgui.TextureID(id)}
 }
 
-new_frame :: proc() {
+begin_frame :: proc() {
+	clear(&backend.textures)
 	io := imgui.GetIO()
-	window := &backend.window
+	window := backend.window
 
 	size := Valhalla.window_size(window)
 	framebuffer := Valhalla.window_framebuffer_size(window)
@@ -205,6 +194,7 @@ new_frame :: proc() {
 		update_cursor(io)
 	}
 	update_gamepad(io)
+	imgui.NewFrame()
 }
 
 @(private = "file")
@@ -218,15 +208,15 @@ update_cursor :: proc(io: ^imgui.GuiIO) {
 	}
 	backend.shown_cursor = cursor
 	if cursor == .None {
-		Valhalla.set_cursor_mode(&backend.window, .Hidden)
+		Valhalla.set_cursor_mode(backend.window, .Hidden)
 		return
 	}
 	shown := backend.cursors[cursor]
 	if shown.handle == nil {
 		shown = backend.cursors[.Arrow]
 	}
-	Valhalla.set_cursor(&backend.window, shown)
-	Valhalla.set_cursor_mode(&backend.window, .Normal)
+	Valhalla.set_cursor(backend.window, shown)
+	Valhalla.set_cursor_mode(backend.window, .Normal)
 }
 
 @(private = "file")
@@ -280,50 +270,38 @@ update_gamepad :: proc(io: ^imgui.GuiIO) {
 }
 
 @(private = "file")
-on_key :: proc(window: ^Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_key :: proc(window: Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	if action != .Repeat {
 		io := imgui.GetIO()
 		update_modifiers(window, io, mods)
 		imgui.AddKeyEvent(io, imgui_key(translate_key(key, scancode)), action == .Press)
 	}
-	if backend.previous_key != nil {
-		backend.previous_key(window, key, scancode, action, mods)
-	}
 }
 
 @(private = "file")
-on_char :: proc(window: ^Valhalla.Window, codepoint: rune) {
+on_char :: proc(window: Valhalla.Window, codepoint: rune) {
 	imgui.AddInputCharacter(imgui.GetIO(), u32(codepoint))
-	if backend.previous_char != nil {
-		backend.previous_char(window, codepoint)
-	}
 }
 
 @(private = "file")
-on_mouse_button :: proc(window: ^Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_mouse_button :: proc(window: Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	if i32(button) < i32(imgui.GuiMouseButton.COUNT) {
 		io := imgui.GetIO()
 		update_modifiers(window, io, mods)
 		imgui.AddMouseButtonEvent(io, i32(button), action == .Press)
 	}
-	if backend.previous_button != nil {
-		backend.previous_button(window, button, action, mods)
-	}
 }
 
 @(private = "file")
-on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
+on_cursor_pos :: proc(window: Valhalla.Window, position: [2]f64) {
 	if Valhalla.cursor_mode(window) != .Disabled {
 		backend.last_mouse = {f32(position.x), f32(position.y)}
 		imgui.AddMousePosEvent(imgui.GetIO(), backend.last_mouse.x, backend.last_mouse.y)
 	}
-	if backend.previous_cursor != nil {
-		backend.previous_cursor(window, position)
-	}
 }
 
 @(private = "file")
-on_cursor_enter :: proc(window: ^Valhalla.Window, entered: bool) {
+on_cursor_enter :: proc(window: Valhalla.Window, entered: bool) {
 	io := imgui.GetIO()
 	if entered {
 		backend.mouse_in_window = true
@@ -333,30 +311,21 @@ on_cursor_enter :: proc(window: ^Valhalla.Window, entered: bool) {
 		backend.mouse_in_window = false
 		imgui.AddMousePosEvent(io, -max(f32), -max(f32))
 	}
-	if backend.previous_enter != nil {
-		backend.previous_enter(window, entered)
-	}
 }
 
 @(private = "file")
-on_scroll :: proc(window: ^Valhalla.Window, offset: [2]f64) {
+on_scroll :: proc(window: Valhalla.Window, offset: [2]f64) {
 	imgui.AddMouseWheelEvent(imgui.GetIO(), f32(offset.x), f32(offset.y))
-	if backend.previous_scroll != nil {
-		backend.previous_scroll(window, offset)
-	}
 }
 
 @(private = "file")
-on_focus :: proc(window: ^Valhalla.Window, focused: bool) {
+on_focus :: proc(window: Valhalla.Window, focused: bool) {
 	imgui.AddFocusEvent(imgui.GetIO(), focused)
-	if backend.previous_focus != nil {
-		backend.previous_focus(window, focused)
-	}
 }
 
 @(private = "file")
-update_modifiers :: proc(window: ^Valhalla.Window, io: ^imgui.GuiIO, mods: Valhalla.Modifiers) {
-	held :: proc(window: ^Valhalla.Window, left, right: Valhalla.Key) -> bool {
+update_modifiers :: proc(window: Valhalla.Window, io: ^imgui.GuiIO, mods: Valhalla.Modifiers) {
+	held :: proc(window: Valhalla.Window, left, right: Valhalla.Key) -> bool {
 		return Valhalla.key_down(window, left) || Valhalla.key_down(window, right)
 	}
 	imgui.AddKeyEvent(io, .Mod_Ctrl, .Control in mods || held(window, .Left_Control, .Right_Control))
@@ -521,8 +490,10 @@ cursor_shape :: proc(cursor: imgui.GuiMouseCursor) -> (Valhalla.Cursor_Shape, bo
 
 // ===[ Renderer ]==============================================================
 
-render :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (written: Valhalla.Image, err: Valhalla.Error) {
+@(require_results)
+end_frame :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (written: Valhalla.Image, err: Valhalla.Error) {
 	written = target
+	imgui.Render()
 	draw_data := imgui.GetDrawData()
 	if draw_data.Textures != nil {
 		for texture in draw_data.Textures.Data[:draw_data.Textures.Size] {
@@ -546,13 +517,12 @@ render :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (written
 	for list in draw_data.CmdLists.Data[:draw_data.CmdLists.Size] {
 		vertices := ([^]u8)(list.VtxBuffer.Data)[:int(list.VtxBuffer.Size) * size_of(imgui.DrawVert)]
 		indices := ([^]u8)(list.IdxBuffer.Data)[:int(list.IdxBuffer.Size) * size_of(imgui.DrawIdx)]
-		Valhalla.load_memory_to_buffer(vertices, &backend.vertices[set], vertex_bytes) or_return
-		Valhalla.load_memory_to_buffer(indices, &backend.indices[set], index_bytes) or_return
+		Valhalla.load_memory_to_buffer(vertices, backend.vertices[set], vertex_bytes) or_return
+		Valhalla.load_memory_to_buffer(indices, backend.indices[set], index_bytes) or_return
 		vertex_bytes += len(vertices)
 		index_bytes += len(indices)
 	}
 
-	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	shader := &backend.shader
 	Valhalla.reset_shader(shader)
 	scale := [2]f32{2 / draw_data.DisplaySize.x, 2 / draw_data.DisplaySize.y}
@@ -569,17 +539,16 @@ render :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (written
 	written = Valhalla.bind_shader_colour(shader, target)
 	Valhalla.set_blend(shader, Valhalla.BLEND_ALPHA)
 
-	bound := make([dynamic]Bound_Texture, 0, 16, context.temp_allocator)
 	clip: [2][2]f32
+	last_id := imgui.TextureID_Invalid
+	texture: u32
 	clip_offset := draw_data.DisplayPos
 	clip_scale := draw_data.FramebufferScale
 	global_vertex, global_index: int
 	for list in draw_data.CmdLists.Data[:draw_data.CmdLists.Size] {
 		for &command in list.CmdBuffer.Data[:list.CmdBuffer.Size] {
 			if command.UserCallback != nil {
-				if transmute(uintptr)command.UserCallback != imgui.DrawCallback_ResetRenderState {
-					command.UserCallback(list, &command)
-				}
+				assert(transmute(uintptr)command.UserCallback == imgui.DrawCallback_ResetRenderState, "ImGui draw callbacks are not supported")
 				continue
 			}
 			texture_id := imgui.DrawCmd_GetTexID(&command)
@@ -594,17 +563,17 @@ render :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (written
 			if clip_max.x <= clip_min.x || clip_max.y <= clip_min.y {
 				continue
 			}
-			texture, already_bound := find_bound(bound[:], texture_id)
-			if !already_bound {
-				image := (^Valhalla.Image)(uintptr(texture_id) &~ NEAREST_TAG)^
-				texture = Valhalla.bind_shader_input(shader, image) or_return
+			if texture_id != last_id {
+				id := u64(texture_id)
+				image := backend.textures[id & ~(USER_TEXTURE | NEAREST_TAG)] if id & USER_TEXTURE != 0 else (^Valhalla.Image)(uintptr(id))^
+				texture = Valhalla.bind_table_input(shader, image) or_return
 				if Valhalla.is_srgb_format(image.format) {
 					texture |= DECODED_TEXTURE
 				}
-				if uintptr(texture_id) & NEAREST_TAG != 0 {
+				if id & NEAREST_TAG != 0 {
 					texture |= NEAREST_TEXTURE
 				}
-				append(&bound, Bound_Texture{texture_id, texture})
+				last_id = texture_id
 			}
 			if clip != {clip_min, clip_max} {
 				clip = {clip_min, clip_max}
@@ -612,11 +581,9 @@ render :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (written
 			}
 			Valhalla.draw_indexed(
 				shader,
-				vertex_offset = global_vertex + int(command.VtxOffset),
+				command.ElemCount,
 				first_index = global_index + int(command.IdxOffset),
-				index_count = command.ElemCount,
-				first_instance = 0,
-				instances = 1,
+				vertex_offset = global_vertex + int(command.VtxOffset),
 				draw_data = texture,
 			)
 		}
@@ -625,22 +592,6 @@ render :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (written
 	}
 	Valhalla.bind_shader(workload, shader^) or_return
 	return
-}
-
-@(private = "file")
-Bound_Texture :: struct {
-	id:      imgui.TextureID,
-	binding: u32,
-}
-
-@(private = "file")
-find_bound :: proc(bound: []Bound_Texture, id: imgui.TextureID) -> (u32, bool) {
-	for entry in bound {
-		if entry.id == id {
-			return entry.binding, true
-		}
-	}
-	return 0, false
 }
 
 @(private = "file")
@@ -653,7 +604,7 @@ reserve_geometry :: proc(buffer: ^Valhalla.Buffer, size: int, usage: Valhalla.Bu
 		capacity *= 2
 	}
 	Valhalla.delete_buffer(buffer)
-	buffer^ = Valhalla.make_buffer(capacity, Valhalla.Buffer_Settings{usage = usage, memory = .Host_Visible}) or_return
+	buffer^ = Valhalla.make_buffer(capacity, usage, .Host_Visible) or_return
 	return nil
 }
 

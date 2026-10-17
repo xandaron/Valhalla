@@ -28,44 +28,38 @@ run :: proc() -> Valhalla.Error {
 	window := Valhalla.make_window(title = "HDR") or_return
 	defer Valhalla.delete_window(&window)
 
-	surface := Valhalla.make_surface(&window, {prefer_hdr = true, manual_encoding = true}) or_return
+	surface := Valhalla.make_surface(window, prefer_hdr = true, encode_srgb = false) or_return
 	defer Valhalla.delete_surface(&surface)
 	if !surface.hdr_available {
 		log.info("This display offers no HDR format, so the example runs in SDR")
 	}
 
-	settings := Valhalla.Compiler_Settings {
-		search_paths = {#directory + "/../../src/shaders"},
-	}
-	ramps, _ := Valhalla.make_shader(#load("Hdr.slang"), []string{"fullscreen", "ramps"}, settings, {push_type = Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}}) or_return
+	ramps := Valhalla.make_shader(#load("Hdr.slang"), []string{"fullscreen", "ramps"}, push_type = Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}) or_return
 	defer Valhalla.delete_shader(&ramps)
 
 	scene := Scene {
-		window   = &window,
+		window   = window,
 		surface  = &surface,
 		ramps    = &ramps,
-		settings = settings,
 		controls = {paper_white = 200},
 	}
 	defer Valhalla.delete_shader(&scene.encode)
-	scene.lit = Valhalla.make_image(.R16G16B16A16_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}) or_return
+	scene.lit = Valhalla.make_image(.R16G16B16A16_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, usage = {.Attachment}) or_return
 	defer Valhalla.delete_image(&scene.lit)
+	scene.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&scene.target)
 	scene.frame = Valhalla.make_workload() or_return
 	defer Valhalla.delete_workload(&scene.frame)
 	defer _ = Valhalla.wait_execution(scene.last)
 
-	Valhalla.set_window_user_pointer(&window, rawptr(&scene.controls))
-	Valhalla.set_key_callback(&window, on_key)
-	Valhalla.set_frame_callback(draw_frame, rawptr(&scene))
-	defer Valhalla.set_frame_callback(nil)
-
-	for !Valhalla.should_close(&window) {
-		if scene.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	Valhalla.set_window_user_pointer(window, rawptr(&scene.controls))
+	Valhalla.set_key_callback(window, on_key)
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(&scene) or_return
+		if scene.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -76,15 +70,14 @@ Title :: struct {
 }
 
 Scene :: struct {
-	window:    ^Valhalla.Window,
+	window:    Valhalla.Window,
 	surface:   ^Valhalla.Surface,
 	ramps:     ^Valhalla.Shader,
-	settings:  Valhalla.Compiler_Settings,
 	encode:    Valhalla.Shader,
 	lit:       Valhalla.Image,
 	controls:  Controls,
 	shown:     Maybe(Title),
-	minimised: bool,
+	target: Valhalla.Image,
 	frame:     Valhalla.Workload,
 	recorded:  bool,
 	last:      Valhalla.Execution,
@@ -116,19 +109,14 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		scene.controls.changed = false
 		scene.recorded = false
 	}
+	if scene.target.extent.xy != surface.extent || scene.target.format != surface.format {
+		scene.recorded = false
+	}
 	if !scene.recorded {
 		record_frame(scene) or_return
-		if !scene.recorded {
-			return nil
-		}
 	}
-	execution, err := Valhalla.execute_workloads(&scene.frame)
-	if err == Valhalla.Workload_Error.Swapchain_Changed {
-		scene.recorded = false
-		return nil
-	}
-	scene.last = execution
-	return err
+	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
+	return nil
 }
 
 record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
@@ -136,19 +124,19 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	frame := &scene.frame
 	Valhalla.reset_workload(frame) or_return
 
-	image, acquire_err := Valhalla.acquire(frame, surface)
-	scene.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if scene.minimised {
-		return nil
-	} else if acquire_err != nil {
-		return acquire_err
+	size := [3]u32{max(surface.extent.x, 1), max(surface.extent.y, 1), 1}
+	if scene.target.format != surface.format {
+		Valhalla.delete_image(&scene.target)
+		scene.target = Valhalla.make_image(surface.format, size, {.Attachment}, name = "target") or_return
 	}
+	_ = Valhalla.resize_image(&scene.target, size) or_return
+	image := scene.target
 
 	if scene.encode.handle == 0 || scene.encode.variant.(Valhalla.Graphics_Shader).config.colour_formats[0] != image.format {
 		Valhalla.delete_shader(&scene.encode)
-		scene.encode, _ = Valhalla.make_shader(#load("Hdr.slang"), []string{"fullscreen", "encode"}, scene.settings, {push_type = Push, colour_formats = {0 = image.format}}) or_return
+		scene.encode = Valhalla.make_shader(#load("Hdr.slang"), []string{"fullscreen", "encode"}, push_type = Push, colour_formats = {0 = image.format}) or_return
 	}
-	Valhalla.resize_image(&scene.lit, image.extent) or_return
+	_ = Valhalla.resize_image(&scene.lit, image.extent) or_return
 
 	push := Push {
 		size        = {f32(image.extent.x), f32(image.extent.y)},
@@ -159,17 +147,17 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	Valhalla.reset_shader(scene.ramps)
 	lit := Valhalla.bind_shader_colour(scene.ramps, scene.lit)
 	Valhalla.set_push_data(scene.ramps, push)
-	Valhalla.draw(scene.ramps, 3, 1, 0, 0)
+	Valhalla.draw(scene.ramps, 3)
 	Valhalla.bind_shader(frame, scene.ramps^) or_return
 
 	Valhalla.reset_shader(&scene.encode)
 	push.scene = lit
 	encoded := Valhalla.bind_shader_colour(&scene.encode, image)
 	Valhalla.set_push_data(&scene.encode, push)
-	Valhalla.draw(&scene.encode, 3, 1, 0, 0)
+	Valhalla.draw(&scene.encode, 3)
 	Valhalla.bind_shader(frame, scene.encode) or_return
 
-	Valhalla.present(frame, encoded)
+	Valhalla.present(frame, encoded, scene.surface)
 	Valhalla.finalize_workload(frame) or_return
 	scene.recorded = true
 	return nil
@@ -181,7 +169,7 @@ Controls :: struct {
 	changed:     bool,
 }
 
-on_key :: proc(window: ^Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_key :: proc(window: Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	controls := (^Controls)(Valhalla.window_user_pointer(window))
 	if action == .Release {
 		return

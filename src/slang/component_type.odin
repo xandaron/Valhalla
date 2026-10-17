@@ -146,7 +146,6 @@ get_entry_point_metadata :: proc(this: ^Component_Type, entry_point_index: Int, 
 // A module is the granularity of shader code compilation and loading -
 // typically a single `.slang`/`.hlsl` file plus everything it `#include`s.
 // Things it `import`s remain distinct modules in the same session.
-@(private)
 Module :: struct #raw_union {
 	#subtype component_type: Component_Type,
 	using vtable:            ^Module_VTable,

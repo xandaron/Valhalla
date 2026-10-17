@@ -45,6 +45,12 @@ Device_Features :: struct {
 	vulkan14: vk.PhysicalDeviceVulkan14Features,
 }
 
+Validation :: enum {
+	None,
+	Standard,
+	Synchronisation,
+}
+
 @(private = "file")
 Device_Settings :: struct {
 	app_name:            string,
@@ -53,6 +59,7 @@ Device_Settings :: struct {
 	device_extensions:   []cstring,
 	features:            Device_Features,
 	feature_chain:       rawptr,
+	validation:          Validation,
 }
 
 Queue_Families :: struct {
@@ -146,6 +153,7 @@ init :: proc(
 	device_extensions: []cstring = nil,
 	features := Device_Features{},
 	feature_chain: rawptr = nil,
+	validation := Validation.Synchronisation,
 ) -> (
 	err: Error,
 ) {
@@ -158,6 +166,7 @@ init :: proc(
 		device_extensions   = device_extensions,
 		features            = features,
 		feature_chain       = feature_chain,
+		validation          = validation,
 	}
 	runtime_context = context
 	install_error_callback()
@@ -345,7 +354,7 @@ create_instance :: proc(settings: Device_Settings) -> (debug_utils: bool, err: E
 	vk.EnumerateInstanceLayerProperties(&layer_count, raw_data(available_layers))
 
 	layers := make([dynamic]cstring, 0, len(REQUESTED_LAYERS), context.temp_allocator)
-	layer_loop: for name in REQUESTED_LAYERS {
+	layer_loop: for name in (REQUESTED_LAYERS if settings.validation != .None else nil) {
 		for &layer in available_layers {
 			if name == cstring(&layer.layerName[0]) {
 				append(&layers, name)
@@ -364,7 +373,7 @@ create_instance :: proc(settings: Device_Settings) -> (debug_utils: bool, err: E
 
 	instance_info: vk.InstanceCreateInfo = {
 		sType                   = .INSTANCE_CREATE_INFO,
-		pNext                   = &validation_features,
+		pNext                   = &validation_features if settings.validation == .Synchronisation else nil,
 		pApplicationInfo        = &app_info,
 		enabledLayerCount       = u32(len(layers)),
 		ppEnabledLayerNames     = raw_data(layers),
@@ -772,4 +781,97 @@ unique_queue_families :: proc() -> []u32 {
 		}
 	}
 	return unique[:]
+}
+
+// ===[ Command Buffers and Semaphores ]========================================
+
+@(private)
+@(require_results)
+make_command_pool :: proc(flags: vk.CommandPoolCreateFlags, name := "") -> (pool: vk.CommandPool, err: Error) {
+	info: vk.CommandPoolCreateInfo = {
+		sType            = .COMMAND_POOL_CREATE_INFO,
+		flags            = flags,
+		queueFamilyIndex = device.queue_families.graphics,
+	}
+	if res := vk.CreateCommandPool(device.handle, &info, nil, &pool); res != .SUCCESS {
+		log.errorf("Failed to create a command pool: %v", res)
+		return 0, .Command_Pool_Creation_Failed
+	}
+	name_object(.COMMAND_POOL, u64(pool), name)
+	return
+}
+
+@(private)
+@(require_results)
+allocate_command_buffer :: proc(pool: vk.CommandPool, name := "") -> (cmd: vk.CommandBuffer, err: Error) {
+	info: vk.CommandBufferAllocateInfo = {
+		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
+		commandPool        = pool,
+		level              = .PRIMARY,
+		commandBufferCount = 1,
+	}
+	if res := vk.AllocateCommandBuffers(device.handle, &info, &cmd); res != .SUCCESS {
+		log.errorf("Failed to allocate a command buffer: %v", res)
+		return nil, .Command_Buffer_Allocation_Failed
+	}
+	name_object(.COMMAND_BUFFER, u64(uintptr(cmd)), name)
+	return
+}
+
+@(private)
+@(require_results)
+begin_commands :: proc(cmd: vk.CommandBuffer, flags: vk.CommandBufferUsageFlags) -> Error {
+	info: vk.CommandBufferBeginInfo = {
+		sType = .COMMAND_BUFFER_BEGIN_INFO,
+		flags = flags,
+	}
+	if res := vk.BeginCommandBuffer(cmd, &info); res != .SUCCESS {
+		log.errorf("Failed to begin a command buffer: %v", res)
+		return .Recording_Failed
+	}
+	return nil
+}
+
+@(private)
+@(require_results)
+make_semaphore :: proc(timeline: bool, name := "") -> (semaphore: vk.Semaphore, err: Error) {
+	type_info: vk.SemaphoreTypeCreateInfo = {
+		sType         = .SEMAPHORE_TYPE_CREATE_INFO,
+		semaphoreType = .TIMELINE,
+	}
+	info: vk.SemaphoreCreateInfo = {
+		sType = .SEMAPHORE_CREATE_INFO,
+		pNext = &type_info if timeline else nil,
+	}
+	if res := vk.CreateSemaphore(device.handle, &info, nil, &semaphore); res != .SUCCESS {
+		log.errorf("Failed to create a semaphore: %v", res)
+		return 0, .Sync_Creation_Failed
+	}
+	name_object(.SEMAPHORE, u64(semaphore), name)
+	return
+}
+
+@(private)
+semaphore_value :: proc(semaphore: vk.Semaphore) -> (value: u64) {
+	if semaphore != 0 {
+		vk.GetSemaphoreCounterValue(device.handle, semaphore, &value)
+	}
+	return
+}
+
+@(private)
+@(require_results)
+wait_semaphore :: proc(semaphore: vk.Semaphore, value: u64) -> Error {
+	semaphore, value := semaphore, value
+	info: vk.SemaphoreWaitInfo = {
+		sType          = .SEMAPHORE_WAIT_INFO,
+		semaphoreCount = 1,
+		pSemaphores    = &semaphore,
+		pValues        = &value,
+	}
+	if res := vk.WaitSemaphores(device.handle, &info, max(u64)); res != .SUCCESS {
+		log.errorf("Failed to wait on a semaphore: %v", res)
+		return .Wait_Failed
+	}
+	return nil
 }

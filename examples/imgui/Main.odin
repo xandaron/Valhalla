@@ -30,7 +30,7 @@ Pattern_Push :: struct {
 }
 
 Demo :: struct {
-	window:          ^Valhalla.Window,
+	window:          Valhalla.Window,
 	surface:         ^Valhalla.Surface,
 	pattern_shader:  ^Valhalla.Shader,
 	pattern:         Valhalla.Image,
@@ -48,7 +48,7 @@ Demo :: struct {
 	show_id_stack:   bool,
 	frame_times:     [FRAME_HISTORY]f32,
 	frame_index:     int,
-	minimised:       bool,
+	target:       Valhalla.Image,
 }
 
 run :: proc() -> Valhalla.Error {
@@ -58,25 +58,21 @@ run :: proc() -> Valhalla.Error {
 	window := Valhalla.make_window(title = "Dear ImGui on Valhalla", size = {1600, 900}) or_return
 	defer Valhalla.delete_window(&window)
 
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
-	settings := Valhalla.Compiler_Settings {
-		search_paths = {#directory + "/../../src/shaders"},
-	}
-	pattern_shader, _ := Valhalla.make_shader(
+	pattern_shader := Valhalla.make_shader(
 		#load("Pattern.slang"),
 		[]string{"pattern_vertex", "pattern_fragment"},
-		settings,
-		{push_type = Pattern_Push, colour_formats = {0 = .R8G8B8A8_UNORM}},
+		push_type = Pattern_Push, colour_formats = {0 = .R8G8B8A8_UNORM},
 	) or_return
 	defer Valhalla.delete_shader(&pattern_shader)
 
 	demo := Demo {
-		window          = &window,
+		window          = window,
 		surface         = &surface,
 		pattern_shader  = &pattern_shader,
-		pattern         = Valhalla.make_image(.R8G8B8A8_UNORM, {PATTERN_SIZE, PATTERN_SIZE, 1}, name = "pattern") or_return,
+		pattern         = Valhalla.make_image(.R8G8B8A8_UNORM, {PATTERN_SIZE, PATTERN_SIZE, 1}, usage = {.Attachment}, name = "pattern") or_return,
 		photo           = Valhalla.make_image_from_file(#directory + "/../textured_cube/Cube.png") or_return,
 		clear_colour    = {0.09, 0.1, 0.13, 1},
 		pattern_tint    = {1, 1, 1},
@@ -85,21 +81,19 @@ run :: proc() -> Valhalla.Error {
 	}
 	defer Valhalla.delete_image(&demo.pattern)
 	defer Valhalla.delete_image(&demo.photo)
+	demo.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&demo.target)
 	demo.pattern_written = demo.pattern
 
-	valhalla_imgui.init(&window, surface.format.format) or_return
+	valhalla_imgui.init(window, surface.format) or_return
 	defer valhalla_imgui.shutdown()
 
-	Valhalla.set_frame_callback(draw_frame, rawptr(&demo))
-	defer Valhalla.set_frame_callback(nil)
-
-	for !Valhalla.should_close(&window) {
-		if demo.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(rawptr(&demo)) or_return
+		if demo.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -107,21 +101,11 @@ run :: proc() -> Valhalla.Error {
 draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	demo := (^Demo)(user_data)
 
-	valhalla_imgui.new_frame()
-	imgui.NewFrame()
-	build_ui(demo)
-	imgui.Render()
-
 	frame := Valhalla.make_workload() or_return
 	defer Valhalla.delete_workload(&frame)
 
-	image, acquire_err := Valhalla.acquire(&frame, demo.surface)
-	demo.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if demo.minimised {
-		return nil
-	} else if acquire_err != nil {
-		return acquire_err
-	}
+	_ = Valhalla.resize_image(&demo.target, {max(demo.surface.extent.x, 1), max(demo.surface.extent.y, 1), 1}) or_return
+	image := demo.target
 
 	demo.pattern_written = demo.pattern
 	if demo.pattern_shown {
@@ -137,15 +121,18 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 				tint = {demo.pattern_tint.r, demo.pattern_tint.g, demo.pattern_tint.b, 1},
 			},
 		)
-		Valhalla.draw(pattern, 3, 1, 0, 0)
+		Valhalla.draw(pattern, 3)
 		Valhalla.bind_shader(&frame, pattern^) or_return
 	}
 
-	colour := Valhalla.srgb_to_linear(demo.clear_colour) if demo.surface.encodes_srgb else demo.clear_colour
-	cleared := Valhalla.clear_image(&frame, image, {color = {float32 = colour}})
-	drawn := valhalla_imgui.render(&frame, cleared) or_return
+	valhalla_imgui.begin_frame()
+	build_ui(demo)
 
-	Valhalla.present(&frame, drawn)
+	colour := Valhalla.srgb_to_linear(demo.clear_colour) if demo.surface.encodes_srgb else demo.clear_colour
+	cleared := Valhalla.clear_image(&frame, image, colour)
+	drawn := valhalla_imgui.end_frame(&frame, cleared) or_return
+
+	Valhalla.present(&frame, drawn, demo.surface)
 	Valhalla.finalize_workload(&frame) or_return
 	execution := Valhalla.execute_workloads(&frame) or_return
 	Valhalla.wait_execution(execution) or_return
@@ -213,7 +200,7 @@ build_ui :: proc(demo: ^Demo) {
 		imgui.ColorEdit4("Clear colour", &demo.clear_colour)
 
 		imgui.SeparatorText("Rendered by Valhalla this frame")
-		imgui.Image(valhalla_imgui.texture(&demo.pattern_written), {PATTERN_SIZE, PATTERN_SIZE})
+		imgui.Image(valhalla_imgui.texture(demo.pattern_written), {PATTERN_SIZE, PATTERN_SIZE})
 		demo.pattern_shown = imgui.IsItemVisible() && !imgui.IsWindowAppearing()
 		if imgui.IsItemHovered() {
 			imgui.SetTooltip("Drawn into an Valhalla image by another shader in the same workload")
@@ -223,7 +210,7 @@ build_ui :: proc(demo: ^Demo) {
 
 		imgui.SeparatorText("Loaded from a file")
 		width := min(imgui.GetContentRegionAvail().x, 384)
-		imgui.Image(valhalla_imgui.texture(&demo.photo), {width, width * f32(demo.photo.extent.y) / f32(demo.photo.extent.x)})
+		imgui.Image(valhalla_imgui.texture(demo.photo), {width, width * f32(demo.photo.extent.y) / f32(demo.photo.extent.x)})
 
 		imgui.SeparatorText("Draw list primitives")
 		draw_primitives()

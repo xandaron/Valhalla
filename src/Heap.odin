@@ -274,12 +274,12 @@ open_descriptor_heap :: proc() -> (err: Error) {
 	heap.images = make_slot_pool(u32(image_base / image_size), MAX_HEAP_IMAGES)
 	heap.samplers = make_slot_pool(u32(sampler_base / sampler_descriptor_size), MAX_HEAP_SAMPLERS)
 
-	heap.null_buffer = make_empty_buffer(16, Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	heap.null_buffer = make_buffer(16, {.Storage}, .Host_Visible) or_return
 	runtime.mem_zero(heap.null_buffer.mapped, 16)
 	null_uniform_size := int(min(device.properties.limits.maxUniformBufferRange, 64 * 1024))
-	heap.null_uniform = make_empty_buffer(null_uniform_size, Buffer_Settings{usage = {.Uniform}, memory = .Host_Visible}) or_return
+	heap.null_uniform = make_buffer(null_uniform_size, {.Uniform}, .Host_Visible) or_return
 	runtime.mem_zero(heap.null_uniform.mapped, null_uniform_size)
-	heap.null_image = make_empty_image(.R8G8B8A8_UNORM, {1, 1, 1}, kind = .Generic) or_return
+	heap.null_image = make_image(.R8G8B8A8_UNORM, {1, 1, 1}, usage = {.Storage}) or_return
 	heap.null_view = {
 		sType = .IMAGE_VIEW_CREATE_INFO,
 		image = heap.null_image.handle,

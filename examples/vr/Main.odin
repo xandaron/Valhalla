@@ -110,7 +110,7 @@ run :: proc() -> Valhalla.Error {
 	) or_return
 	defer Valhalla.delete_window(&window)
 
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
 	vertices: [dynamic]Vertex
@@ -162,34 +162,29 @@ run :: proc() -> Valhalla.Error {
 		append(&spinners, Spinner{object = object, position = def.position, scale = def.scale, speed = def.speed, bob = f32(index)})
 	}
 
-	vertex_buffer := Valhalla.make_buffer(raw_bytes(vertices[:]), Valhalla.Buffer_Settings{usage = {.Storage}}) or_return
+	vertex_buffer := Valhalla.make_buffer_from_memory(raw_bytes(vertices[:]), {.Storage}) or_return
 	defer Valhalla.delete_buffer(&vertex_buffer)
-	index_buffer := Valhalla.make_buffer(raw_bytes(indices[:]), Valhalla.Buffer_Settings{usage = {.Index}}) or_return
+	index_buffer := Valhalla.make_buffer_from_memory(raw_bytes(indices[:]), {.Index}) or_return
 	defer Valhalla.delete_buffer(&index_buffer)
-	object_buffer := Valhalla.make_buffer(len(objects) * size_of(Object), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	object_buffer := Valhalla.make_buffer(len(objects) * size_of(Object), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&object_buffer)
-	eye_buffer := Valhalla.make_buffer(EYE_COUNT * size_of(Eye), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	eye_buffer := Valhalla.make_buffer(EYE_COUNT * size_of(Eye), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&eye_buffer)
-	view_buffer := Valhalla.make_buffer(size_of(View), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	view_buffer := Valhalla.make_buffer(size_of(View), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&view_buffer)
 	sampler := Valhalla.make_sampler(address_mode = .CLAMP_TO_EDGE) or_return
 	defer Valhalla.delete_sampler(&sampler)
 
-	settings := Valhalla.Compiler_Settings {
-		search_paths = {#directory + "/../../src/shaders"},
-	}
-	stereo, _ := Valhalla.make_shader(
+	stereo := Valhalla.make_shader(
 		#load("Vr.slang"),
 		[]string{"scene_vertex", "scene_fragment"},
-		settings,
-		{push_type = Push, colour_formats = {0 = EYE_FORMAT}, depth_format = .D32_SFLOAT, view_mask = 0b11},
+		push_type = Push, colour_formats = {0 = EYE_FORMAT}, depth_format = .D32_SFLOAT, view_mask = 0b11,
 	) or_return
 	defer Valhalla.delete_shader(&stereo)
-	composite, _ := Valhalla.make_shader(
+	composite := Valhalla.make_shader(
 		#load("Vr.slang"),
 		[]string{"composite_vertex", "composite_fragment"},
-		settings,
-		{push_type = Push, colour_formats = {0 = surface.format.format}},
+		push_type = Push, colour_formats = {0 = surface.format},
 	) or_return
 	defer Valhalla.delete_shader(&composite)
 
@@ -212,28 +207,26 @@ run :: proc() -> Valhalla.Error {
 		previous      = time.now(),
 	}
 	eye_size := eye_extent(surface.extent)
-	scene.eyes = Valhalla.make_image(EYE_FORMAT, eye_size, shape = .D2_Array, layers = EYE_COUNT, name = "eyes") or_return
+	scene.eyes = Valhalla.make_image(EYE_FORMAT, eye_size, usage = {.Attachment}, shape = .D2_Array, layers = EYE_COUNT, name = "eyes") or_return
 	defer Valhalla.delete_image(&scene.eyes)
-	scene.eye_depth = Valhalla.make_image(.D32_SFLOAT, eye_size, kind = .Depth, shape = .D2_Array, layers = EYE_COUNT, name = "eye depth") or_return
+	scene.eye_depth = Valhalla.make_image(.D32_SFLOAT, eye_size, usage = {.Attachment}, shape = .D2_Array, layers = EYE_COUNT, name = "eye depth") or_return
 	defer Valhalla.delete_image(&scene.eye_depth)
+	scene.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&scene.target)
 	scene.frame = Valhalla.make_workload("frame") or_return
 	defer Valhalla.delete_workload(&scene.frame)
 	defer _ = Valhalla.wait_execution(scene.last)
 
-	Valhalla.set_window_user_pointer(&window, rawptr(&scene.head))
-	Valhalla.set_mouse_button_callback(&window, on_mouse_button)
-	Valhalla.set_cursor_position_callback(&window, on_cursor_pos)
-	Valhalla.set_key_callback(&window, on_key)
-	Valhalla.set_frame_callback(draw_frame, rawptr(&scene))
-	defer Valhalla.set_frame_callback(nil)
-
-	for !Valhalla.should_close(&window) {
-		if scene.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	Valhalla.set_window_user_pointer(window, rawptr(&scene.head))
+	Valhalla.set_mouse_button_callback(window, on_mouse_button)
+	Valhalla.set_cursor_position_callback(window, on_cursor_pos)
+	Valhalla.set_key_callback(window, on_key)
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(&scene) or_return
+		if scene.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -260,7 +253,7 @@ Scene :: struct {
 	sun:           [3]f32,
 	start:         time.Time,
 	previous:      time.Time,
-	minimised:     bool,
+	target:     Valhalla.Image,
 }
 
 eye_extent :: proc(extent: [2]u32) -> [3]u32 {
@@ -269,11 +262,11 @@ eye_extent :: proc(extent: [2]u32) -> [3]u32 {
 
 draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	scene := (^Scene)(user_data)
+	if scene.target.extent.xy != scene.surface.extent {
+		scene.recorded = false
+	}
 	if !scene.recorded {
 		record_frame(scene) or_return
-		if !scene.recorded {
-			return nil
-		}
 	}
 
 	now := time.now()
@@ -307,17 +300,12 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 			position        = {position.x, position.y, position.z, 1},
 		}
 	}
-	Valhalla.load_memory_to_buffer(raw_bytes(scene.objects), scene.object_buffer) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(eyes[:]), scene.eye_buffer) or_return
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&view), scene.view_buffer) or_return
+	Valhalla.load_memory_to_buffer(raw_bytes(scene.objects), scene.object_buffer^) or_return
+	Valhalla.load_memory_to_buffer(raw_bytes(eyes[:]), scene.eye_buffer^) or_return
+	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&view), scene.view_buffer^) or_return
 
-	execution, err := Valhalla.execute_workloads(&scene.frame)
-	if err == Valhalla.Workload_Error.Swapchain_Changed {
-		scene.recorded = false
-		return nil
-	}
-	scene.last = execution
-	return err
+	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
+	return nil
 }
 
 record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
@@ -325,16 +313,11 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	frame := &scene.frame
 	Valhalla.reset_workload(frame) or_return
 
-	image, acquire_err := Valhalla.acquire(frame, scene.surface)
-	scene.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if scene.minimised {
-		return nil
-	} else if acquire_err != nil {
-		return acquire_err
-	}
+	_ = Valhalla.resize_image(&scene.target, {max(scene.surface.extent.x, 1), max(scene.surface.extent.y, 1), 1}) or_return
+	image := scene.target
 	eye_size := eye_extent(image.extent.xy)
-	Valhalla.resize_image(&scene.eyes, eye_size) or_return
-	Valhalla.resize_image(&scene.eye_depth, eye_size) or_return
+	_ = Valhalla.resize_image(&scene.eyes, eye_size) or_return
+	_ = Valhalla.resize_image(&scene.eye_depth, eye_size) or_return
 
 	push := Push {
 		vertices = scene.vertex_buffer,
@@ -344,8 +327,8 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 		sampler  = scene.sampler,
 	}
 
-	eyes_cleared := Valhalla.clear_image(frame, scene.eyes, {color = {float32 = SKY}})
-	depth_cleared := Valhalla.clear_image(frame, scene.eye_depth, {depthStencil = {depth = 1}})
+	eyes_cleared := Valhalla.clear_image(frame, scene.eyes, SKY)
+	depth_cleared := Valhalla.clear_depth(frame, scene.eye_depth)
 	Valhalla.reset_shader(stereo)
 	Valhalla.bind_shader_index_buffer(stereo, scene.index_buffer)
 	eyes := Valhalla.bind_shader_colour(stereo, eyes_cleared)
@@ -354,20 +337,20 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	Valhalla.set_depth_write(stereo, true)
 	Valhalla.set_push_data(stereo, push)
 	for mesh, index in scene.meshes {
-		Valhalla.draw_indexed(stereo, mesh.base_vertex, mesh.first_index, mesh.index_count, 0, 1, draw_data = u32(index))
+		Valhalla.draw_indexed(stereo, mesh.index_count, first_index = mesh.first_index, vertex_offset = mesh.base_vertex, draw_data = u32(index))
 	}
 	Valhalla.bind_shader(frame, stereo^) or_return
 	Valhalla.workload_discards(frame, depth)
 
-	cleared := Valhalla.clear_image(frame, image, {color = {float32 = {0, 0, 0, 1}}})
+	cleared := Valhalla.clear_image(frame, image, {0, 0, 0, 1})
 	Valhalla.reset_shader(composite)
 	drawn := Valhalla.bind_shader_colour(composite, cleared)
 	push.eye_images = eyes
 	Valhalla.set_push_data(composite, push)
-	Valhalla.draw(composite, 3, 1, 0, 0)
+	Valhalla.draw(composite, 3)
 	Valhalla.bind_shader(frame, composite^) or_return
 
-	Valhalla.present(frame, drawn)
+	Valhalla.present(frame, drawn, scene.surface)
 	Valhalla.finalize_workload(frame) or_return
 	scene.recorded = true
 	return nil
@@ -405,14 +388,14 @@ move_head :: proc(head: ^Head, delta: f32) {
 	}
 }
 
-on_mouse_button :: proc(window: ^Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_mouse_button :: proc(window: Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	head := (^Head)(Valhalla.window_user_pointer(window))
 	if button == .Left {
 		head.looking = action == .Press
 	}
 }
 
-on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
+on_cursor_pos :: proc(window: Valhalla.Window, position: [2]f64) {
 	head := (^Head)(Valhalla.window_user_pointer(window))
 	if head.looking {
 		delta := position - head.last_mouse
@@ -422,7 +405,7 @@ on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
 	head.last_mouse = position
 }
 
-on_key :: proc(window: ^Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_key :: proc(window: Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	head := (^Head)(Valhalla.window_user_pointer(window))
 	held := action != .Release
 	pressed := action == .Press

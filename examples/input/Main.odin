@@ -31,7 +31,7 @@ State :: struct {
 	locked:     bool,
 	last_mouse: [2]f64,
 	title:      string,
-	window:     ^Valhalla.Window,
+	window:     Valhalla.Window,
 	surface:    ^Valhalla.Surface,
 	shader:     ^Valhalla.Shader,
 	disc:       Valhalla.Buffer,
@@ -39,7 +39,7 @@ State :: struct {
 	recorded:   bool,
 	last:       Valhalla.Execution,
 	last_time:  f64,
-	minimised:  bool,
+	target:  Valhalla.Image,
 }
 
 main :: proc() {
@@ -58,42 +58,39 @@ run :: proc() -> Valhalla.Error {
 	window := Valhalla.make_window(title = "Input: WASD/stick move, Tab locks mouse, C/V clipboard, F11 fullscreen, drop files") or_return
 	defer Valhalla.delete_window(&window)
 
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
-	settings := Valhalla.Compiler_Settings {
-		search_paths = {#directory + "/../../src/shaders"},
-	}
-	shader, _ := Valhalla.make_shader(#load("Input.slang"), []string{"fullscreen", "scene"}, settings, {push_type = Push, colour_formats = {0 = surface.format.format}}) or_return
+	shader := Valhalla.make_shader(#load("Input.slang"), []string{"fullscreen", "scene"}, push_type = Push, colour_formats = {0 = surface.format}) or_return
 	defer Valhalla.delete_shader(&shader)
 
 	crosshair := Valhalla.make_standard_cursor(.Crosshair) or_return
 	defer Valhalla.delete_cursor(&crosshair)
-	Valhalla.set_cursor(&window, crosshair)
+	Valhalla.set_cursor(window, crosshair)
 
-	size := Valhalla.window_size(&window)
+	size := Valhalla.window_size(window)
 	state := State {
 		position   = [2]f32{f32(size.x), f32(size.y)} * 0.5,
 		radius     = 40,
-		last_mouse = Valhalla.cursor_position(&window),
+		last_mouse = Valhalla.cursor_position(window),
 	}
 	defer delete(state.title)
 
-	Valhalla.set_window_user_pointer(&window, rawptr(&state))
-	Valhalla.set_lock_key_modifiers(&window, true)
-	Valhalla.set_key_callback(&window, on_key)
-	Valhalla.set_mouse_button_callback(&window, on_mouse_button)
-	Valhalla.set_cursor_position_callback(&window, on_cursor_pos)
-	Valhalla.set_scroll_callback(&window, on_scroll)
-	Valhalla.set_cursor_enter_callback(&window, on_cursor_enter)
-	Valhalla.set_window_focus_callback(&window, on_focus)
-	Valhalla.set_window_size_callback(&window, on_window_size)
-	Valhalla.set_framebuffer_size_callback(&window, on_framebuffer_size)
-	Valhalla.set_window_minimise_callback(&window, on_minimise)
-	Valhalla.set_window_maximise_callback(&window, on_maximise)
-	Valhalla.set_window_content_scale_callback(&window, on_content_scale)
-	Valhalla.set_window_close_callback(&window, on_close)
-	Valhalla.set_drop_callback(&window, on_drop)
+	Valhalla.set_window_user_pointer(window, rawptr(&state))
+	Valhalla.set_lock_key_modifiers(window, true)
+	Valhalla.set_key_callback(window, on_key)
+	Valhalla.set_mouse_button_callback(window, on_mouse_button)
+	Valhalla.set_cursor_position_callback(window, on_cursor_pos)
+	Valhalla.set_scroll_callback(window, on_scroll)
+	Valhalla.set_cursor_enter_callback(window, on_cursor_enter)
+	Valhalla.set_window_focus_callback(window, on_focus)
+	Valhalla.set_window_size_callback(window, on_window_size)
+	Valhalla.set_framebuffer_size_callback(window, on_framebuffer_size)
+	Valhalla.set_window_minimise_callback(window, on_minimise)
+	Valhalla.set_window_maximise_callback(window, on_maximise)
+	Valhalla.set_window_content_scale_callback(window, on_content_scale)
+	Valhalla.set_window_close_callback(window, on_close)
+	Valhalla.set_drop_callback(window, on_drop)
 	Valhalla.set_joystick_callback(on_joystick)
 
 	for joystick in 0 ..< Valhalla.MAX_JOYSTICKS {
@@ -102,25 +99,23 @@ run :: proc() -> Valhalla.Error {
 		}
 	}
 
-	state.window = &window
+	state.window = window
 	state.surface = &surface
 	state.shader = &shader
-	state.disc = Valhalla.make_empty_buffer(size_of(Disc), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+	state.disc = Valhalla.make_buffer(size_of(Disc), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&state.disc)
+	state.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&state.target)
 	state.frame = Valhalla.make_workload() or_return
 	defer Valhalla.delete_workload(&state.frame)
 	defer _ = Valhalla.wait_execution(state.last)
 	state.last_time = Valhalla.time()
-	Valhalla.set_frame_callback(draw_frame, rawptr(&state))
-	defer Valhalla.set_frame_callback(nil)
-
-	for !Valhalla.should_close(&window) {
-		if state.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(&state) or_return
+		if state.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -166,11 +161,11 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	size := Valhalla.window_size(window)
 	state.position = {clamp(state.position.x, 0, f32(size.x)), clamp(state.position.y, 0, f32(size.y))}
 
+	if state.target.extent.xy != state.surface.extent {
+		state.recorded = false
+	}
 	if !state.recorded {
 		record_frame(state) or_return
-		if !state.recorded {
-			return nil
-		}
 	}
 
 	Valhalla.wait_execution(state.last) or_return
@@ -182,27 +177,17 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		radius   = state.radius * scale.x,
 		locked   = u32(state.locked),
 	}
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&disc), &state.disc) or_return
+	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&disc), state.disc) or_return
 
-	execution, err := Valhalla.execute_workloads(&state.frame)
-	if err == Valhalla.Workload_Error.Swapchain_Changed {
-		state.recorded = false
-		return nil
-	}
-	state.last = execution
-	return err
+	state.last = Valhalla.execute_workloads(&state.frame) or_return
+	return nil
 }
 
 record_frame :: proc(state: ^State) -> Valhalla.Error {
 	frame := &state.frame
 	Valhalla.reset_workload(frame) or_return
-	image, acquire_err := Valhalla.acquire(frame, state.surface)
-	state.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if state.minimised {
-		return nil
-	} else if acquire_err != nil {
-		return acquire_err
-	}
+	_ = Valhalla.resize_image(&state.target, {max(state.surface.extent.x, 1), max(state.surface.extent.y, 1), 1}) or_return
+	image := state.target
 
 	shader := state.shader
 	Valhalla.reset_shader(shader)
@@ -211,19 +196,19 @@ record_frame :: proc(state: ^State) -> Valhalla.Error {
 	}
 	written := Valhalla.bind_shader_colour(shader, image)
 	Valhalla.set_push_data(shader, push)
-	Valhalla.draw(shader, 3, 1, 0, 0)
+	Valhalla.draw(shader, 3)
 	Valhalla.bind_shader(frame, shader^) or_return
-	Valhalla.present(frame, written)
+	Valhalla.present(frame, written, state.surface)
 	Valhalla.finalize_workload(frame) or_return
 	state.recorded = true
 	return nil
 }
 
-held :: proc(window: ^Valhalla.Window, key: Valhalla.Key) -> bool {
+held :: proc(window: Valhalla.Window, key: Valhalla.Key) -> bool {
 	return Valhalla.key_down(window, key)
 }
 
-state_of :: proc(window: ^Valhalla.Window) -> ^State {
+state_of :: proc(window: Valhalla.Window) -> ^State {
 	return (^State)(Valhalla.window_user_pointer(window))
 }
 
@@ -232,7 +217,7 @@ set_title :: proc(state: ^State, title: string) {
 	state.title = strings.clone(title)
 }
 
-set_locked :: proc(window: ^Valhalla.Window, locked: bool) {
+set_locked :: proc(window: Valhalla.Window, locked: bool) {
 	state := state_of(window)
 	state.locked = locked
 	state.last_mouse = Valhalla.cursor_position(window)
@@ -242,7 +227,7 @@ set_locked :: proc(window: ^Valhalla.Window, locked: bool) {
 	}
 }
 
-on_key :: proc(window: ^Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_key :: proc(window: Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	if action != .Press {
 		return
 	}
@@ -280,7 +265,7 @@ on_key :: proc(window: ^Valhalla.Window, key: Valhalla.Key, scancode: i32, actio
 	}
 }
 
-on_mouse_button :: proc(window: ^Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_mouse_button :: proc(window: Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	if action != .Press {
 		return
 	}
@@ -292,7 +277,7 @@ on_mouse_button :: proc(window: ^Valhalla.Window, button: Valhalla.Mouse_Button,
 	}
 }
 
-on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
+on_cursor_pos :: proc(window: Valhalla.Window, position: [2]f64) {
 	state := state_of(window)
 	if state.locked {
 		delta := position - state.last_mouse
@@ -301,47 +286,47 @@ on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
 	state.last_mouse = position
 }
 
-on_scroll :: proc(window: ^Valhalla.Window, offset: [2]f64) {
+on_scroll :: proc(window: Valhalla.Window, offset: [2]f64) {
 	state := state_of(window)
 	state.radius = clamp(state.radius + f32(offset.y) * 4, 8, 200)
 }
 
-on_cursor_enter :: proc(window: ^Valhalla.Window, entered: bool) {
+on_cursor_enter :: proc(window: Valhalla.Window, entered: bool) {
 	log.infof("cursor %v", entered ? "entered" : "left")
 }
 
-on_focus :: proc(window: ^Valhalla.Window, focused: bool) {
+on_focus :: proc(window: Valhalla.Window, focused: bool) {
 	log.infof("window %v", focused ? "focused" : "unfocused")
 	if !focused && state_of(window).locked {
 		set_locked(window, false)
 	}
 }
 
-on_window_size :: proc(window: ^Valhalla.Window, size: [2]i32) {
+on_window_size :: proc(window: Valhalla.Window, size: [2]i32) {
 	log.infof("resized to %v", size)
 }
 
-on_framebuffer_size :: proc(window: ^Valhalla.Window, size: [2]i32) {
+on_framebuffer_size :: proc(window: Valhalla.Window, size: [2]i32) {
 	log.infof("framebuffer resized to %v", size)
 }
 
-on_minimise :: proc(window: ^Valhalla.Window, minimised: bool) {
+on_minimise :: proc(window: Valhalla.Window, minimised: bool) {
 	log.infof("minimised: %v", minimised)
 }
 
-on_maximise :: proc(window: ^Valhalla.Window, maximised: bool) {
+on_maximise :: proc(window: Valhalla.Window, maximised: bool) {
 	log.infof("maximised: %v", maximised)
 }
 
-on_content_scale :: proc(window: ^Valhalla.Window, scale: [2]f32) {
+on_content_scale :: proc(window: Valhalla.Window, scale: [2]f32) {
 	log.infof("content scale %v", scale)
 }
 
-on_close :: proc(window: ^Valhalla.Window) {
+on_close :: proc(window: Valhalla.Window) {
 	log.info("close requested")
 }
 
-on_drop :: proc(window: ^Valhalla.Window, paths: []string) {
+on_drop :: proc(window: Valhalla.Window, paths: []string) {
 	for path in paths {
 		log.infof("dropped %s", path)
 	}

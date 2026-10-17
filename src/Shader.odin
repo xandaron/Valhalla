@@ -1,7 +1,6 @@
 package Valhalla
 
 import "base:runtime"
-import "base:intrinsics"
 import "core:fmt"
 import "core:log"
 import "core:mem"
@@ -10,6 +9,32 @@ import "core:slice"
 import "core:strings"
 import vk "vendor:vulkan"
 import slang "./slang"
+
+Compare_Op :: vk.CompareOp
+
+Cull_Mode :: vk.CullModeFlags
+
+Front_Face :: vk.FrontFace
+
+Topology :: vk.PrimitiveTopology
+
+Polygon_Mode :: vk.PolygonMode
+
+Stencil_Op :: vk.StencilOp
+
+Stencil_Faces :: vk.StencilFaceFlags
+
+Blend_Equation :: vk.ColorBlendEquationEXT
+
+Colour_Mask :: vk.ColorComponentFlags
+
+Indirect_Draw :: vk.DrawIndirectCommand
+
+Indirect_Indexed_Draw :: vk.DrawIndexedIndirectCommand
+
+Indirect_Mesh_Draw :: vk.DrawMeshTasksIndirectCommandEXT
+
+Indirect_Dispatch :: vk.DispatchIndirectCommand
 
 Shader_Error :: enum {
 	None,
@@ -57,6 +82,7 @@ Shader_Define :: struct {
 	value: string,
 }
 
+@(private)
 Compiler_Settings :: struct {
 	search_paths: []string,
 	defines:      []Shader_Define,
@@ -66,9 +92,9 @@ Shader_Config :: struct {
 	name:           string,
 	pipeline_cache: Pipeline_Cache,
 	push_type:      typeid,
-	colour_formats: [MAX_COLOUR_ATTACHMENTS]vk.Format,
-	depth_format:   vk.Format,
-	stencil_format: vk.Format,
+	colour_formats: [MAX_COLOUR_ATTACHMENTS]Format,
+	depth_format:   Format,
+	stencil_format: Format,
 	view_mask:      u32,
 }
 
@@ -78,7 +104,6 @@ Shader :: struct {
 	push_size: int,
 	push_type: typeid,
 	push_plan: Push_Plan,
-	pipeline_cache: Pipeline_Cache,
 	variant:   union {
 		Graphics_Shader,
 		Compute_Shader,
@@ -154,13 +179,14 @@ Shader_Resource :: union {
 Shader_Binding :: struct {
 	resource: Shader_Resource,
 	written:  bool,
+	table:    bool,
 }
 
 Stencil_State :: struct {
-	compare_op:    vk.CompareOp,
-	pass_op:       vk.StencilOp,
-	fail_op:       vk.StencilOp,
-	depth_fail_op: vk.StencilOp,
+	compare_op:    Compare_Op,
+	pass_op:       Stencil_Op,
+	fail_op:       Stencil_Op,
+	depth_fail_op: Stencil_Op,
 	reference:     u32,
 	compare_mask:  u32,
 	write_mask:    u32,
@@ -169,13 +195,13 @@ Stencil_State :: struct {
 Draw_State :: struct {
 	viewport:          Maybe(vk.Viewport),
 	scissor:           Maybe(vk.Rect2D),
-	cull_mode:         vk.CullModeFlags,
-	front_face:        vk.FrontFace,
-	topology:          vk.PrimitiveTopology,
+	cull_mode:         Cull_Mode,
+	front_face:        Front_Face,
+	topology:          Topology,
 	primitive_restart: bool,
-	polygon_mode:      vk.PolygonMode,
+	polygon_mode:      Polygon_Mode,
 	depth_test:        bool,
-	depth_compare:     vk.CompareOp,
+	depth_compare:     Compare_Op,
 	depth_write:       bool,
 	depth_bias:        bool,
 	depth_bias_values: [3]f32,
@@ -183,8 +209,8 @@ Draw_State :: struct {
 	stencil_test:      bool,
 	stencil_front:     Stencil_State,
 	stencil_back:      Stencil_State,
-	blend:             [MAX_COLOUR_ATTACHMENTS]Maybe(vk.ColorBlendEquationEXT),
-	write_masks:       [MAX_COLOUR_ATTACHMENTS]vk.ColorComponentFlags,
+	blend:             [MAX_COLOUR_ATTACHMENTS]Maybe(Blend_Equation),
+	write_masks:       [MAX_COLOUR_ATTACHMENTS]Colour_Mask,
 	colour_state_set:  bit_set[0 ..< MAX_COLOUR_ATTACHMENTS],
 	blend_constants:   [4]f32,
 	alpha_to_coverage: bool,
@@ -268,7 +294,7 @@ Shader_Recording :: struct {
 	push_source:        [dynamic]u8,
 }
 
-BLEND_ALPHA :: vk.ColorBlendEquationEXT {
+BLEND_ALPHA :: Blend_Equation {
 	srcColorBlendFactor = .SRC_ALPHA,
 	dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
 	colorBlendOp        = .ADD,
@@ -277,7 +303,7 @@ BLEND_ALPHA :: vk.ColorBlendEquationEXT {
 	alphaBlendOp        = .ADD,
 }
 
-BLEND_PREMULTIPLIED :: vk.ColorBlendEquationEXT {
+BLEND_PREMULTIPLIED :: Blend_Equation {
 	srcColorBlendFactor = .ONE,
 	dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
 	colorBlendOp        = .ADD,
@@ -286,7 +312,7 @@ BLEND_PREMULTIPLIED :: vk.ColorBlendEquationEXT {
 	alphaBlendOp        = .ADD,
 }
 
-BLEND_ADDITIVE :: vk.ColorBlendEquationEXT {
+BLEND_ADDITIVE :: Blend_Equation {
 	srcColorBlendFactor = .ONE,
 	dstColorBlendFactor = .ONE,
 	colorBlendOp        = .ADD,
@@ -299,7 +325,21 @@ BLEND_ADDITIVE :: vk.ColorBlendEquationEXT {
 next_recording_id: u64
 
 @(private = "file")
-compiler: intrinsics.type_proc_return_type(type_of(slang.create_global_session2), 0)
+bound_recordings: map[u64]bool
+
+@(private)
+lock_recording :: proc(id: u64) {
+	bound_recordings[id] = true
+}
+
+@(private = "file")
+mutable_recording :: proc(shader: ^Shader, loc := #caller_location) -> ^Shader_Recording {
+	assert(shader.recording.id not_in bound_recordings, "the shader is bound to a workload; reset_shader before recording it again", loc)
+	return &shader.recording
+}
+
+@(private = "file")
+compiler: ^slang.Global_Session
 
 @(private = "file")
 SPIRV_MAGIC :: 0x07230203
@@ -432,77 +472,84 @@ Spirv_Entry_Point :: struct {
 make_shader_from_file :: proc(
 	path: string,
 	entry_points: []string,
-	settings: Compiler_Settings,
-	config: Shader_Config,
-	allocator := context.temp_allocator,
+	push_type: typeid,
+	colour_formats := [MAX_COLOUR_ATTACHMENTS]Format{},
+	depth_format := Format.UNDEFINED,
+	stencil_format := Format.UNDEFINED,
+	view_mask: u32 = 0,
+	name := "",
+	pipeline_cache := Pipeline_Cache{},
+	search_paths: []string = nil,
+	defines: []Shader_Define = nil,
 ) -> (
 	shader: Shader,
-	diagnostics: string,
 	err: Error,
 ) {
-	text: string
-	shader, text, err = compile_and_build(path, nil, entry_points, settings, config)
-	return shader, take_diagnostics(text, allocator), err
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	code := compile(path, nil, entry_points, {search_paths, defines}) or_return
+	return build_shader(code, entry_points, {name, pipeline_cache, push_type, colour_formats, depth_format, stencil_format, view_mask})
 }
 
 @(require_results)
 make_shader_from_code :: proc(
 	code: []u8,
 	entry_points: []string,
-	settings: Compiler_Settings,
-	config: Shader_Config,
-	allocator := context.temp_allocator,
+	push_type: typeid,
+	colour_formats := [MAX_COLOUR_ATTACHMENTS]Format{},
+	depth_format := Format.UNDEFINED,
+	stencil_format := Format.UNDEFINED,
+	view_mask: u32 = 0,
+	name := "",
+	pipeline_cache := Pipeline_Cache{},
+	search_paths: []string = nil,
+	defines: []Shader_Define = nil,
 ) -> (
 	shader: Shader,
-	diagnostics: string,
-	err: Error,
-) {
-	text: string
-	shader, text, err = compile_and_build("", code, entry_points, settings, config)
-	return shader, take_diagnostics(text, allocator), err
-}
-
-@(private = "file")
-compile_and_build :: proc(
-	path: string,
-	source: []u8,
-	entry_points: []string,
-	settings: Compiler_Settings,
-	config: Shader_Config,
-) -> (
-	shader: Shader,
-	text: string,
 	err: Error,
 ) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	code: []u32
-	code, text, err = compile(path, source, entry_points, settings)
-	if err != nil {
-		return
-	}
-	shader, err = make_shader_from_compiled(code, entry_points, config)
+	compiled := compile("", code, entry_points, {search_paths, defines}) or_return
+	return build_shader(compiled, entry_points, {name, pipeline_cache, push_type, colour_formats, depth_format, stencil_format, view_mask})
+}
+
+@(require_results)
+make_shader_from_compiled :: proc(
+	code: []u32,
+	entry_points: []string,
+	push_type: typeid,
+	colour_formats := [MAX_COLOUR_ATTACHMENTS]Format{},
+	depth_format := Format.UNDEFINED,
+	stencil_format := Format.UNDEFINED,
+	view_mask: u32 = 0,
+	name := "",
+	pipeline_cache := Pipeline_Cache{},
+) -> (
+	shader: Shader,
+	err: Error,
+) {
+	return build_shader(code, entry_points, {name, pipeline_cache, push_type, colour_formats, depth_format, stencil_format, view_mask})
+}
+
+@(private = "file")
+latest_diagnostics: string
+
+shader_diagnostics :: proc() -> string {
+	return latest_diagnostics
+}
+
+@(private = "file")
+@(require_results)
+compile :: proc(path: string, source: []u8, entry_points: []string, settings: Compiler_Settings) -> (code: []u32, err: Error) {
+	report := strings.builder_make()
+	code, err = compile_slang(path, source, entry_points, settings, &report)
+	delete(latest_diagnostics)
+	latest_diagnostics = strings.to_string(report)
 	return
 }
 
 @(private = "file")
-compile :: proc(path: string, source: []u8, entry_points: []string, settings: Compiler_Settings) -> (code: []u32, text: string, err: Error) {
-	report := strings.builder_make()
-	code, err = compile_slang(path, source, entry_points, settings, &report)
-	return code, strings.to_string(report), err
-}
-
-@(private = "file")
-take_diagnostics :: proc(text: string, allocator: runtime.Allocator) -> string {
-	if text == "" {
-		return ""
-	}
-	diagnostics := strings.clone(text, allocator)
-	delete(text)
-	return diagnostics
-}
-
 @(require_results)
-make_shader_from_compiled :: proc(code: []u32, entry_points: []string, config: Shader_Config) -> (shader: Shader, err: Error) {
+build_shader :: proc(code: []u32, entry_points: []string, config: Shader_Config) -> (shader: Shader, err: Error) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	shader = build_pipeline(code, entry_points, config) or_return
 	reset_shader(&shader)
@@ -519,59 +566,34 @@ make_shader :: proc {
 make_shaders_from_file :: proc(
 	path: string,
 	entry_points: [][]string,
-	settings: Compiler_Settings,
 	configs: []Shader_Config,
+	search_paths: []string = nil,
+	defines: []Shader_Define = nil,
 	allocator := context.allocator,
-	diagnostics_allocator := context.temp_allocator,
 ) -> (
 	shaders: []Shader,
-	diagnostics: string,
 	err: Error,
 ) {
-	text: string
-	shaders, text, err = compile_and_build_all(path, nil, entry_points, settings, configs, allocator)
-	return shaders, take_diagnostics(text, diagnostics_allocator), err
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	code := compile(path, nil, slice.concatenate(entry_points, context.temp_allocator), {search_paths, defines}) or_return
+	return make_shaders_from_compiled(code, entry_points, configs, allocator)
 }
 
 @(require_results)
 make_shaders_from_code :: proc(
 	code: []u8,
 	entry_points: [][]string,
-	settings: Compiler_Settings,
 	configs: []Shader_Config,
+	search_paths: []string = nil,
+	defines: []Shader_Define = nil,
 	allocator := context.allocator,
-	diagnostics_allocator := context.temp_allocator,
 ) -> (
 	shaders: []Shader,
-	diagnostics: string,
-	err: Error,
-) {
-	text: string
-	shaders, text, err = compile_and_build_all("", code, entry_points, settings, configs, allocator)
-	return shaders, take_diagnostics(text, diagnostics_allocator), err
-}
-
-@(private = "file")
-compile_and_build_all :: proc(
-	path: string,
-	source: []u8,
-	entry_points: [][]string,
-	settings: Compiler_Settings,
-	configs: []Shader_Config,
-	allocator: runtime.Allocator,
-) -> (
-	shaders: []Shader,
-	text: string,
 	err: Error,
 ) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	code: []u32
-	code, text, err = compile(path, source, slice.concatenate(entry_points, context.temp_allocator), settings)
-	if err != nil {
-		return
-	}
-	shaders, err = make_shaders_from_compiled(code, entry_points, configs, allocator)
-	return
+	compiled := compile("", code, slice.concatenate(entry_points, context.temp_allocator), {search_paths, defines}) or_return
+	return make_shaders_from_compiled(compiled, entry_points, configs, allocator)
 }
 
 @(require_results)
@@ -587,7 +609,7 @@ make_shaders_from_compiled :: proc(
 	assert(len(entry_points) == len(configs), "make_shaders needs one config per shader")
 	shaders = make([]Shader, len(configs), allocator)
 	for &shader, index in shaders {
-		shader, err = make_shader_from_compiled(code, entry_points[index], configs[index])
+		shader, err = build_shader(code, entry_points[index], configs[index])
 		if err != nil {
 			delete_shaders(shaders[:index], allocator)
 			return nil, err
@@ -604,10 +626,10 @@ make_shaders :: proc {
 
 delete_shader :: proc(shader: ^Shader) {
 	if shader.handle != 0 {
-		vk.DeviceWaitIdle(device.handle)
-		vk.DestroyPipeline(device.handle, shader.handle, nil)
+		bury(shader.handle)
 	}
 	recording := &shader.recording
+	delete_key(&bound_recordings, recording.id)
 	delete(recording.bindings)
 	delete(recording.colour_attachments)
 	delete(recording.states)
@@ -626,92 +648,9 @@ delete_shaders :: proc(shaders: []Shader, allocator := context.allocator) {
 	delete(shaders, allocator)
 }
 
-@(require_results)
-reload_shader_from_file :: proc(
-	shader: ^Shader,
-	path: string,
-	entry_points: []string,
-	settings: Compiler_Settings,
-	allocator := context.temp_allocator,
-) -> (
-	diagnostics: string,
-	err: Error,
-) {
-	text: string
-	text, err = compile_and_reload(shader, path, nil, entry_points, settings)
-	return take_diagnostics(text, allocator), err
-}
-
-@(require_results)
-reload_shader_from_code :: proc(
-	shader: ^Shader,
-	code: []u8,
-	entry_points: []string,
-	settings: Compiler_Settings,
-	allocator := context.temp_allocator,
-) -> (
-	diagnostics: string,
-	err: Error,
-) {
-	text: string
-	text, err = compile_and_reload(shader, "", code, entry_points, settings)
-	return take_diagnostics(text, allocator), err
-}
-
-@(private = "file")
-compile_and_reload :: proc(
-	shader: ^Shader,
-	path: string,
-	source: []u8,
-	entry_points: []string,
-	settings: Compiler_Settings,
-) -> (
-	text: string,
-	err: Error,
-) {
-	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	code: []u32
-	code, text, err = compile(path, source, entry_points, settings)
-	if err != nil {
-		return
-	}
-	err = reload_shader_from_compiled(shader, code, entry_points)
-	return
-}
-
-@(require_results)
-reload_shader_from_compiled :: proc(shader: ^Shader, code: []u32, entry_points: []string) -> Error {
-	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	config: Shader_Config
-	if graphics, is_graphics := shader.variant.(Graphics_Shader); is_graphics {
-		config = graphics.config
-	}
-	config.push_type = shader.push_type
-	config.pipeline_cache = shader.pipeline_cache
-	config.name = shader.name
-	rebuilt := build_pipeline(code, entry_points, config) or_return
-	vk.DeviceWaitIdle(device.handle)
-	vk.DestroyPipeline(device.handle, shader.handle, nil)
-	rebuilt.recording = shader.recording
-	delete_push_plan(&shader.push_plan)
-	delete(rebuilt.name)
-	rebuilt.name = shader.name
-	shader^ = rebuilt
-	if len(shader.recording.push_source) > 0 {
-		resize(&shader.recording.push_data, shader.push_size)
-	}
-	return nil
-}
-
-reload_shader :: proc {
-	reload_shader_from_file,
-	reload_shader_from_code,
-	reload_shader_from_compiled,
-}
-
 reset_shader :: proc(shader: ^Shader) {
-	reset_shader_bindings(shader)
 	recording := &shader.recording
+	reset_shader_bindings(shader)
 	next_recording_id += 1
 	recording.id = next_recording_id
 	recording.index_type = .U32
@@ -725,6 +664,7 @@ reset_shader :: proc(shader: ^Shader) {
 
 reset_shader_bindings :: proc(shader: ^Shader) {
 	recording := &shader.recording
+	delete_key(&bound_recordings, recording.id)
 	clear(&recording.bindings)
 	clear(&recording.colour_attachments)
 	recording.depth_attachment = nil
@@ -732,38 +672,57 @@ reset_shader_bindings :: proc(shader: ^Shader) {
 }
 
 @(require_results)
-bind_shader_image_input :: proc(shader: ^Shader, image: Image) -> (index: u32, err: Error) {
-	return add_binding(shader, {resource = image})
-}
-
-@(require_results)
-bind_shader_buffer_input :: proc(shader: ^Shader, buffer: Buffer) -> (index: u32, err: Error) {
-	return add_binding(shader, {resource = buffer})
-}
-
-@(require_results)
-bind_shader_sampler_input :: proc(shader: ^Shader, sampler: Sampler) -> (index: u32, err: Error) {
-	return add_binding(shader, {resource = sampler})
-}
-
-bind_shader_input :: proc {
-	bind_shader_image_input,
-	bind_shader_buffer_input,
-	bind_shader_sampler_input,
-}
-
-@(require_results)
-bind_shader_image_output :: proc(shader: ^Shader, image: Image) -> (written: Image, index: u32, err: Error) {
+bind_shader_image_output :: proc(shader: ^Shader, image: Image) -> (written: Image, err: Error) {
 	assert(.STORAGE in image.usage, "bind_shader_output writes through a storage descriptor; render targets use bind_shader_colour or bind_shader_depth")
-	index = add_binding(shader, {resource = image, written = true}) or_return
+	_ = add_binding(shader, {resource = image, written = true}) or_return
+	return next_version(image), nil
+}
+
+@(require_results)
+bind_shader_buffer_output :: proc(shader: ^Shader, buffer: Buffer) -> (written: Buffer, err: Error) {
+	assert(.UNIFORM_BUFFER not_in buffer.usage, "bind_shader_output writes through a storage descriptor; a .Uniform buffer is read-only to shaders")
+	_ = add_binding(shader, {resource = buffer, written = true}) or_return
+	return next_version(buffer), nil
+}
+
+@(require_results)
+bind_table_image_input :: proc(shader: ^Shader, image: Image) -> (index: u32, err: Error) {
+	return add_binding(shader, {resource = image, table = true})
+}
+
+@(require_results)
+bind_table_buffer_input :: proc(shader: ^Shader, buffer: Buffer) -> (index: u32, err: Error) {
+	return add_binding(shader, {resource = buffer, table = true})
+}
+
+@(require_results)
+bind_table_sampler_input :: proc(shader: ^Shader, sampler: Sampler) -> (index: u32, err: Error) {
+	return add_binding(shader, {resource = sampler, table = true})
+}
+
+bind_table_input :: proc {
+	bind_table_image_input,
+	bind_table_buffer_input,
+	bind_table_sampler_input,
+}
+
+@(require_results)
+bind_table_image_output :: proc(shader: ^Shader, image: Image) -> (written: Image, index: u32, err: Error) {
+	assert(.STORAGE in image.usage, "bind_table_output writes through a storage descriptor; render targets use bind_shader_colour or bind_shader_depth")
+	index = add_binding(shader, {resource = image, written = true, table = true}) or_return
 	return next_version(image), index, nil
 }
 
 @(require_results)
-bind_shader_buffer_output :: proc(shader: ^Shader, buffer: Buffer) -> (written: Buffer, index: u32, err: Error) {
-	assert(.UNIFORM_BUFFER not_in buffer.usage, "bind_shader_output writes through a storage descriptor; a .Uniform buffer is read-only to shaders")
-	index = add_binding(shader, {resource = buffer, written = true}) or_return
+bind_table_buffer_output :: proc(shader: ^Shader, buffer: Buffer) -> (written: Buffer, index: u32, err: Error) {
+	assert(.UNIFORM_BUFFER not_in buffer.usage, "bind_table_output writes through a storage descriptor; a .Uniform buffer is read-only to shaders")
+	index = add_binding(shader, {resource = buffer, written = true, table = true}) or_return
 	return next_version(buffer), index, nil
+}
+
+bind_table_output :: proc {
+	bind_table_image_output,
+	bind_table_buffer_output,
 }
 
 bind_shader_output :: proc {
@@ -771,10 +730,11 @@ bind_shader_output :: proc {
 	bind_shader_buffer_output,
 }
 
+@(require_results)
 bind_shader_colour :: proc(shader: ^Shader, image: Image) -> Image {
 	graphics, is_graphics := shader.variant.(Graphics_Shader)
 	assert(is_graphics, "only graphics shaders have colour attachments")
-	recording := &shader.recording
+	recording := mutable_recording(shader)
 	slot := len(recording.colour_attachments)
 	assert(slot < colour_format_count(graphics.config), "the shader was made with fewer colour formats than colour attachments bound")
 	assert(image.format == graphics.config.colour_formats[slot], "a colour attachment's format must match the shader's colour format in that slot")
@@ -783,10 +743,11 @@ bind_shader_colour :: proc(shader: ^Shader, image: Image) -> Image {
 	return next_version(image)
 }
 
+@(require_results)
 bind_shader_depth :: proc(shader: ^Shader, image: Image) -> Image {
 	graphics, is_graphics := shader.variant.(Graphics_Shader)
 	assert(is_graphics, "only graphics shaders have a depth attachment")
-	recording := &shader.recording
+	recording := mutable_recording(shader)
 	_, has_depth := recording.depth_attachment.?
 	assert(!has_depth, "a shader has one depth attachment")
 	assert(
@@ -802,24 +763,32 @@ bind_shader_index_buffer :: proc(shader: ^Shader, buffer: Buffer, index_type := 
 	_, is_graphics := shader.variant.(Graphics_Shader)
 	assert(is_graphics, "only graphics shaders draw indexed")
 	assert(.INDEX_BUFFER in buffer.usage, "the index buffer was not made with .Index usage")
-	shader.recording.index_buffer = buffer
-	shader.recording.index_type = index_type
+	recording := mutable_recording(shader)
+	recording.index_buffer = buffer
+	recording.index_type = index_type
 }
 
 set_push_data :: proc(shader: ^Shader, data: $T) {
 	fmt.assertf(shader.push_type != nil, "set_push_data with %v, but the shader was made without Shader_Config.push_type", typeid_of(T))
 	fmt.assertf(T == shader.push_type, "set_push_data with %v, but the shader was made for %v", typeid_of(T), shader.push_type)
 	data := data
-	recording := &shader.recording
+	recording := mutable_recording(shader)
 	resize(&recording.push_source, size_of(T))
 	copy(recording.push_source[:], mem.ptr_to_bytes(&data))
 	resize(&recording.push_data, shader.push_size)
 }
 
-draw_vertices :: proc(shader: ^Shader, #any_int vertex_count, instances, first_vertex, first_instance: int, draw_data: u32 = 0) {
+draw :: proc(
+	shader: ^Shader,
+	#any_int vertex_count: int,
+	#any_int instances: int = 1,
+	#any_int first_vertex: int = 0,
+	#any_int first_instance: int = 0,
+	draw_data: u32 = 0,
+) {
 	assert(!is_mesh_shader(shader^), "a mesh shader draws with draw_mesh_tasks")
 	append(
-		&shader.recording.commands,
+		&mutable_recording(shader).commands,
 		Draw_Command {
 			state = current_state(shader),
 			draw_data = draw_data,
@@ -833,12 +802,16 @@ draw_vertices :: proc(shader: ^Shader, #any_int vertex_count, instances, first_v
 
 draw_indexed :: proc(
 	shader: ^Shader,
-	#any_int vertex_offset, first_index, index_count, first_instance, instances: int,
+	#any_int index_count: int,
+	#any_int instances: int = 1,
+	#any_int first_index: int = 0,
+	#any_int vertex_offset: int = 0,
+	#any_int first_instance: int = 0,
 	draw_data: u32 = 0,
 ) {
 	assert(!is_mesh_shader(shader^), "a mesh shader draws with draw_mesh_tasks")
 	append(
-		&shader.recording.commands,
+		&mutable_recording(shader).commands,
 		Draw_Indexed_Command {
 			state = current_state(shader),
 			draw_data = draw_data,
@@ -851,17 +824,12 @@ draw_indexed :: proc(
 	)
 }
 
-draw :: proc {
-	draw_vertices,
-	draw_indexed,
-}
-
 draw_indirect :: proc(
 	shader: ^Shader,
 	buffer: Buffer,
 	#any_int offset: int = 0,
 	#any_int draws: int = 1,
-	#any_int stride: int = size_of(vk.DrawIndirectCommand),
+	#any_int stride: int = size_of(Indirect_Draw),
 	draw_data: u32 = 0,
 ) {
 	record_indirect(shader, .Vertices, buffer, offset, nil, 0, draws, stride, draw_data)
@@ -872,7 +840,7 @@ draw_indexed_indirect :: proc(
 	buffer: Buffer,
 	#any_int offset: int = 0,
 	#any_int draws: int = 1,
-	#any_int stride: int = size_of(vk.DrawIndexedIndirectCommand),
+	#any_int stride: int = size_of(Indirect_Indexed_Draw),
 	draw_data: u32 = 0,
 ) {
 	record_indirect(shader, .Indexed, buffer, offset, nil, 0, draws, stride, draw_data)
@@ -885,7 +853,7 @@ draw_indirect_count :: proc(
 	count_buffer: Buffer,
 	#any_int count_offset: int,
 	#any_int max_draws: int,
-	#any_int stride: int = size_of(vk.DrawIndirectCommand),
+	#any_int stride: int = size_of(Indirect_Draw),
 	draw_data: u32 = 0,
 ) {
 	record_indirect(shader, .Vertices, buffer, offset, count_buffer, count_offset, max_draws, stride, draw_data)
@@ -898,7 +866,7 @@ draw_indexed_indirect_count :: proc(
 	count_buffer: Buffer,
 	#any_int count_offset: int,
 	#any_int max_draws: int,
-	#any_int stride: int = size_of(vk.DrawIndexedIndirectCommand),
+	#any_int stride: int = size_of(Indirect_Indexed_Draw),
 	draw_data: u32 = 0,
 ) {
 	record_indirect(shader, .Indexed, buffer, offset, count_buffer, count_offset, max_draws, stride, draw_data)
@@ -906,7 +874,7 @@ draw_indexed_indirect_count :: proc(
 
 draw_mesh_tasks :: proc(shader: ^Shader, groups: [3]u32, draw_data: u32 = 0) {
 	assert(is_mesh_shader(shader^), "draw_mesh_tasks needs a shader made with a mesh entry point")
-	append(&shader.recording.commands, Draw_Mesh_Command{state = current_state(shader), draw_data = draw_data, groups = groups})
+	append(&mutable_recording(shader).commands, Draw_Mesh_Command{state = current_state(shader), draw_data = draw_data, groups = groups})
 }
 
 draw_mesh_tasks_indirect :: proc(
@@ -914,7 +882,7 @@ draw_mesh_tasks_indirect :: proc(
 	buffer: Buffer,
 	#any_int offset: int = 0,
 	#any_int draws: int = 1,
-	#any_int stride: int = size_of(vk.DrawMeshTasksIndirectCommandEXT),
+	#any_int stride: int = size_of(Indirect_Mesh_Draw),
 	draw_data: u32 = 0,
 ) {
 	record_indirect(shader, .Mesh_Tasks, buffer, offset, nil, 0, draws, stride, draw_data)
@@ -927,7 +895,7 @@ draw_mesh_tasks_indirect_count :: proc(
 	count_buffer: Buffer,
 	#any_int count_offset: int,
 	#any_int max_draws: int,
-	#any_int stride: int = size_of(vk.DrawMeshTasksIndirectCommandEXT),
+	#any_int stride: int = size_of(Indirect_Mesh_Draw),
 	draw_data: u32 = 0,
 ) {
 	record_indirect(shader, .Mesh_Tasks, buffer, offset, count_buffer, count_offset, max_draws, stride, draw_data)
@@ -936,10 +904,8 @@ draw_mesh_tasks_indirect_count :: proc(
 dispatch_indirect :: proc(shader: ^Shader, buffer: Buffer, #any_int offset: int = 0, draw_data: u32 = 0) {
 	_, is_compute := shader.variant.(Compute_Shader)
 	assert(is_compute, "dispatch_indirect needs a compute shader")
-	assert(.INDIRECT_BUFFER in buffer.usage, "an indirect buffer needs .Indirect usage")
-	assert(offset >= 0 && offset % 4 == 0, "an indirect offset must be a multiple of 4")
-	assert(vk.DeviceSize(offset + size_of(vk.DispatchIndirectCommand)) <= buffer.size, "the dispatch reads past the end of the indirect buffer")
-	append(&shader.recording.commands, Dispatch_Indirect_Command{draw_data = draw_data, buffer = buffer, offset = vk.DeviceSize(offset)})
+	check_indirect_buffer(buffer, offset, size_of(Indirect_Dispatch))
+	append(&mutable_recording(shader).commands, Dispatch_Indirect_Command{draw_data = draw_data, buffer = buffer, offset = vk.DeviceSize(offset)})
 }
 
 @(private = "file")
@@ -960,24 +926,21 @@ record_indirect :: proc(
 		assert(!is_mesh_shader(shader^), "a mesh shader draws with draw_mesh_tasks")
 	}
 	command_size := [Indirect_Kind]int {
-		.Vertices   = size_of(vk.DrawIndirectCommand),
-		.Indexed    = size_of(vk.DrawIndexedIndirectCommand),
-		.Mesh_Tasks = size_of(vk.DrawMeshTasksIndirectCommandEXT),
+		.Vertices   = size_of(Indirect_Draw),
+		.Indexed    = size_of(Indirect_Indexed_Draw),
+		.Mesh_Tasks = size_of(Indirect_Mesh_Draw),
 	}
 	_, has_count := count_buffer.?
-	assert(.INDIRECT_BUFFER in buffer.usage, "an indirect buffer needs .Indirect usage")
-	assert(offset >= 0 && offset % 4 == 0, "an indirect offset must be a multiple of 4")
 	assert(draws >= 0, "the draw count cannot be negative")
 	assert(draws <= 1 || stride % 4 == 0 && stride >= command_size[kind], "the stride must be a multiple of 4 and at least the size of one indirect command")
 	assert(draws <= 1 || has_count || device.optional.multi_draw_indirect, "more than one indirect draw per command needs the multiDrawIndirect feature")
-	assert(draws == 0 || vk.DeviceSize(offset + (draws - 1) * stride + command_size[kind]) <= buffer.size, "the draws read past the end of the indirect buffer")
+	check_indirect_buffer(buffer, offset, (draws - 1) * stride + command_size[kind] if draws > 0 else 0)
 	if count, ok := count_buffer.?; ok {
 		assert(device.optional.draw_indirect_count, "indirect count draws need the drawIndirectCount feature")
-		assert(.INDIRECT_BUFFER in count.usage, "a count buffer needs .Indirect usage")
-		assert(count_offset >= 0 && count_offset % 4 == 0 && vk.DeviceSize(count_offset + 4) <= count.size, "the count offset must be a multiple of 4 inside the count buffer")
+		check_indirect_buffer(count, count_offset, 4)
 	}
 	append(
-		&shader.recording.commands,
+		&mutable_recording(shader).commands,
 		Draw_Indirect_Command {
 			state = current_state(shader),
 			draw_data = draw_data,
@@ -1001,7 +964,7 @@ is_mesh_shader :: proc(shader: Shader) -> bool {
 dispatch :: proc(shader: ^Shader, groups: [3]u32, draw_data: u32 = 0) {
 	_, is_compute := shader.variant.(Compute_Shader)
 	assert(is_compute, "dispatch needs a compute shader")
-	append(&shader.recording.commands, Dispatch_Command{groups = groups, draw_data = draw_data})
+	append(&mutable_recording(shader).commands, Dispatch_Command{groups = groups, draw_data = draw_data})
 }
 
 dispatch_threads :: proc(shader: ^Shader, threads: [3]u32, draw_data: u32 = 0) {
@@ -1032,15 +995,15 @@ set_scissor :: proc(shader: ^Shader, position: [2]i32, size: [2]u32) {
 	}
 }
 
-set_cull_mode :: proc(shader: ^Shader, cull_mode: vk.CullModeFlags) {
+set_cull_mode :: proc(shader: ^Shader, cull_mode: Cull_Mode) {
 	graphics_state(shader).cull_mode = cull_mode
 }
 
-set_front_face :: proc(shader: ^Shader, front_face: vk.FrontFace) {
+set_front_face :: proc(shader: ^Shader, front_face: Front_Face) {
 	graphics_state(shader).front_face = front_face
 }
 
-set_topology :: proc(shader: ^Shader, topology: vk.PrimitiveTopology) {
+set_topology :: proc(shader: ^Shader, topology: Topology) {
 	assert(!is_mesh_shader(shader^), "mesh shaders choose their own primitives")
 	#partial switch topology {
 	case .TRIANGLE_LIST, .TRIANGLE_STRIP, .TRIANGLE_FAN, .TRIANGLE_LIST_WITH_ADJACENCY, .TRIANGLE_STRIP_WITH_ADJACENCY:
@@ -1058,11 +1021,11 @@ set_primitive_restart :: proc(shader: ^Shader, enabled: bool) {
 	graphics_state(shader).primitive_restart = enabled
 }
 
-set_polygon_mode :: proc(shader: ^Shader, polygon_mode: vk.PolygonMode) {
+set_polygon_mode :: proc(shader: ^Shader, polygon_mode: Polygon_Mode) {
 	graphics_state(shader).polygon_mode = polygon_mode
 }
 
-set_depth_test :: proc(shader: ^Shader, enabled: bool, compare_op := vk.CompareOp.LESS_OR_EQUAL) {
+set_depth_test :: proc(shader: ^Shader, enabled: bool, compare_op := Compare_Op.LESS_OR_EQUAL) {
 	state := graphics_state(shader)
 	state.depth_test = enabled
 	state.depth_compare = compare_op
@@ -1088,14 +1051,14 @@ set_stencil_test :: proc(shader: ^Shader, enabled: bool) {
 
 set_stencil :: proc(
 	shader: ^Shader,
-	compare_op := vk.CompareOp.ALWAYS,
-	pass_op := vk.StencilOp.KEEP,
-	fail_op := vk.StencilOp.KEEP,
-	depth_fail_op := vk.StencilOp.KEEP,
+	compare_op := Compare_Op.ALWAYS,
+	pass_op := Stencil_Op.KEEP,
+	fail_op := Stencil_Op.KEEP,
+	depth_fail_op := Stencil_Op.KEEP,
 	reference: u32 = 0,
 	compare_mask: u32 = 0xff,
 	write_mask: u32 = 0xff,
-	faces := vk.StencilFaceFlags{.FRONT, .BACK},
+	faces := Stencil_Faces{.FRONT, .BACK},
 ) {
 	state := graphics_state(shader)
 	stencil := Stencil_State{compare_op, pass_op, fail_op, depth_fail_op, reference, compare_mask, write_mask}
@@ -1107,14 +1070,14 @@ set_stencil :: proc(
 	}
 }
 
-set_blend :: proc(shader: ^Shader, equation: Maybe(vk.ColorBlendEquationEXT), #any_int attachment: int = 0) {
+set_blend :: proc(shader: ^Shader, equation: Maybe(Blend_Equation), #any_int attachment: int = 0) {
 	assert(attachment >= 0 && attachment < MAX_COLOUR_ATTACHMENTS, "set_blend names a colour attachment out of range")
 	state := graphics_state(shader)
 	state.blend[attachment] = equation
 	state.colour_state_set += {attachment}
 }
 
-set_colour_write_mask :: proc(shader: ^Shader, mask: vk.ColorComponentFlags, #any_int attachment: int = 0) {
+set_colour_write_mask :: proc(shader: ^Shader, mask: Colour_Mask, #any_int attachment: int = 0) {
 	assert(attachment >= 0 && attachment < MAX_COLOUR_ATTACHMENTS, "set_colour_write_mask names a colour attachment out of range")
 	state := graphics_state(shader)
 	state.write_masks[attachment] = mask
@@ -1169,40 +1132,93 @@ default_draw_state :: proc() -> (state: Draw_State) {
 
 @(private = "file")
 @(require_results)
-add_binding :: proc(shader: ^Shader, binding: Shader_Binding) -> (index: u32, err: Error) {
-	switch resource in binding.resource {
+check_descriptor :: proc(resource: Shader_Resource) -> Error {
+	switch resource in resource {
 	case Image:
 		if resource.heap_index == 0 {
 			log.error("The image has no descriptor: it must be sampled or storage capable, single-aspect, and made by Valhalla")
-			return 0, .Resource_Not_In_Heap
+			return .Resource_Not_In_Heap
 		}
 	case Buffer:
 		if resource.heap_index == 0 {
 			log.error("The buffer has no descriptor: it must be made by Valhalla with .Storage or .Uniform usage")
-			return 0, .Resource_Not_In_Heap
+			return .Resource_Not_In_Heap
 		}
 	case Sampler:
 		if resource.heap_index == 0 {
 			log.error("The sampler has no descriptor: it must be made by make_sampler")
-			return 0, .Resource_Not_In_Heap
+			return .Resource_Not_In_Heap
 		}
 	}
-	recording := &shader.recording
-	if len(recording.bindings) >= SHADER_BINDING_CAPACITY {
-		log.errorf("A shader can bind at most %v resources", SHADER_BINDING_CAPACITY)
+	return nil
+}
+
+@(private = "file")
+same_resource :: proc(a, b: Shader_Resource) -> bool {
+	switch resource in a {
+	case Image:
+		other, is_image := b.(Image)
+		return is_image && other.view == resource.view && other.version == resource.version
+	case Buffer:
+		other, is_buffer := b.(Buffer)
+		return is_buffer && other.handle == resource.handle && other.version == resource.version
+	case Sampler:
+		other, is_sampler := b.(Sampler)
+		return is_sampler && other.heap_index == resource.heap_index
+	}
+	return false
+}
+
+@(private = "file")
+@(require_results)
+add_binding :: proc(shader: ^Shader, binding: Shader_Binding) -> (index: u32, err: Error) {
+	check_descriptor(binding.resource) or_return
+	recording := mutable_recording(shader)
+	if !binding.table {
+		append(&recording.bindings, binding)
+		return
+	}
+	for bound in recording.bindings {
+		if !bound.table {
+			continue
+		}
+		if bound.written == binding.written && same_resource(bound.resource, binding.resource) {
+			return
+		}
+		index += 1
+	}
+	if index >= SHADER_BINDING_CAPACITY {
+		log.errorf("A shader can bind at most %v resources in its table", SHADER_BINDING_CAPACITY)
 		return 0, .Too_Many_Bindings
 	}
-	index = u32(len(recording.bindings))
 	append(&recording.bindings, binding)
 	return
+}
+
+@(private)
+table_size :: proc(recording: Shader_Recording) -> (count: int) {
+	for binding in recording.bindings {
+		if binding.table {
+			count += 1
+		}
+	}
+	return
+}
+
+@(private = "file")
+check_indirect_buffer :: proc(buffer: Buffer, offset, span: int, loc := #caller_location) {
+	assert(.INDIRECT_BUFFER in buffer.usage, "an indirect buffer needs .Indirect usage", loc)
+	assert(offset >= 0 && offset % 4 == 0, "an indirect offset must be a multiple of 4", loc)
+	assert(vk.DeviceSize(offset + span) <= buffer.size, "the indirect commands read past the end of the buffer", loc)
 }
 
 @(private = "file")
 graphics_state :: proc(shader: ^Shader) -> ^Draw_State {
 	_, is_graphics := shader.variant.(Graphics_Shader)
 	assert(is_graphics, "draw state belongs to graphics shaders")
-	shader.recording.state_changed = true
-	return &shader.recording.state
+	recording := mutable_recording(shader)
+	recording.state_changed = true
+	return &recording.state
 }
 
 @(private = "file")
@@ -1221,6 +1237,10 @@ current_state :: proc(shader: ^Shader) -> int {
 
 @(private)
 release_shader_compiler :: proc() {
+	delete(latest_diagnostics)
+	latest_diagnostics = ""
+	delete(bound_recordings)
+	bound_recordings = nil
 	if compiler == nil {
 		return
 	}
@@ -1228,6 +1248,9 @@ release_shader_compiler :: proc() {
 	compiler = nil
 	slang.shutdown()
 }
+
+@(private = "file")
+VALHALLA_MODULE :: #load("shaders/Valhalla.slang", string)
 
 @(private = "file")
 blob_text :: proc(blob: ^slang.Blob) -> string {
@@ -1302,7 +1325,19 @@ compile_slang :: proc(
 	}
 	defer slang.release(session)
 
-	module: intrinsics.type_proc_return_type(type_of(slang.load_module), 0)
+	_, valhalla_diagnostics, valhalla_ok := slang.load_module_from_source_string(
+		session,
+		"Valhalla",
+		"Valhalla.slang",
+		strings.clone_to_cstring(VALHALLA_MODULE, context.temp_allocator),
+	)
+	defer slang.release(valhalla_diagnostics)
+	strings.write_string(report, blob_text(valhalla_diagnostics))
+	if !valhalla_ok {
+		return nil, .Module_Load_Failed
+	}
+
+	module: ^slang.Module
 	module_diagnostics: ^slang.Blob
 	module_ok: bool
 	if source != nil {
@@ -1977,7 +2012,7 @@ pack_push_data :: proc(shader: Shader, reads: ^[dynamic]Shader_Resource) {
 	if len(recording.push_source) == 0 {
 		return
 	}
-	assert(len(recording.push_data) == shader.push_size, "the push data no longer fits the shader; set it again after reload_shader changes the push block")
+	assert(len(recording.push_data) == shader.push_size, "the push data does not fit the shader's push block")
 	source := recording.push_source[:]
 	data := recording.push_data[:]
 	for run in plan.copies {
@@ -2125,7 +2160,6 @@ build_pipeline :: proc(code: []u32, entry_points: []string, config: Shader_Confi
 
 	shader.push_plan = make_push_plan(config.push_type, shader.push_size, push_leaves)
 	shader.push_type = config.push_type
-	shader.pipeline_cache = config.pipeline_cache
 	shader.name = strings.clone(config.name) if config.name != "" else strings.join(entry_points, "+")
 
 	module_info: vk.ShaderModuleCreateInfo = {

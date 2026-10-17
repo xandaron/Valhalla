@@ -20,7 +20,6 @@ Workload_Error :: enum {
 	Submit_Failed,
 	Wait_Failed,
 	Present_Failed,
-	Swapchain_Changed,
 	Readback_Format_Unsupported,
 	Readback_Write_Failed,
 }
@@ -46,7 +45,7 @@ Execution :: struct {
 
 Readback :: struct {
 	buffer: Buffer,
-	format: vk.Format,
+	format: Format,
 	extent: [3]u32,
 	layers: u32,
 }
@@ -59,8 +58,8 @@ Resource_Key :: struct {
 	mips:        u32,
 	first_layer: u32,
 	layers:      u32,
-	aspect:      vk.ImageAspectFlags,
-	format:      vk.Format,
+	aspect:      Image_Aspect,
+	format:      Format,
 }
 
 @(private)
@@ -87,7 +86,7 @@ Handle_State :: struct {
 	keys:      int,
 	layout:    vk.ImageLayout,
 	image:     vk.Image,
-	aspect:    vk.ImageAspectFlags,
+	aspect:    Image_Aspect,
 }
 
 @(private)
@@ -100,16 +99,16 @@ Rendering_Scope :: struct {
 }
 
 @(private)
-Acquired_Surface :: struct {
-	surface:    ^Surface,
-	generation: u64,
-	presented:  bool,
+Presentation :: struct {
+	surface: ^Surface,
+	image:   Image,
 }
 
 @(private)
 Execution_Slot :: struct {
 	value:              u64,
 	acquire_semaphores: [dynamic]vk.Semaphore,
+	present_commands:   [dynamic]vk.CommandBuffer,
 }
 
 @(private = "file")
@@ -117,6 +116,7 @@ Acquisition :: struct {
 	surface:   ^Surface,
 	semaphore: vk.Semaphore,
 	index:     u32,
+	copy:      vk.CommandBuffer,
 }
 
 Workload :: struct {
@@ -136,7 +136,7 @@ Workload :: struct {
 	tables:       [dynamic]Buffer,
 	table_chunk:  int,
 	table_used:   int,
-	acquired:     [dynamic]Acquired_Surface,
+	presentations: [dynamic]Presentation,
 	readbacks:    [dynamic]Buffer,
 	slots:        [MAX_EXECUTIONS_IN_FLIGHT]Execution_Slot,
 	next_slot:    int,
@@ -170,7 +170,7 @@ Access :: struct {
 	attachment: bool,
 	layout:     vk.ImageLayout,
 	image:      vk.Image,
-	aspect:     vk.ImageAspectFlags,
+	aspect:     Image_Aspect,
 }
 
 @(require_results)
@@ -186,33 +186,18 @@ make_workload :: proc(name := "workload") -> (workload: Workload, err: Error) {
 		}
 	}
 	if !reused {
-		pool_info: vk.CommandPoolCreateInfo = {
-			sType            = .COMMAND_POOL_CREATE_INFO,
-			flags            = {.RESET_COMMAND_BUFFER},
-			queueFamilyIndex = device.queue_families.graphics,
-		}
-		if res := vk.CreateCommandPool(device.handle, &pool_info, nil, &workload.command_pool); res != .SUCCESS {
-			log.errorf("Failed to create workload command pool: %v", res)
-			return {}, .Command_Pool_Creation_Failed
-		}
+		workload.command_pool = make_command_pool({.RESET_COMMAND_BUFFER}, name) or_return
 	}
 	defer if err != nil {
 		destroy_workload(&workload)
 	}
-	set_workload_name(&workload, name)
-	register_workload(&workload)
-	begin_recording(&workload) or_return
-	return
-}
-
-@(private = "file")
-set_workload_name :: proc(workload: ^Workload, name: string) {
 	delete(workload.name)
 	workload.name = strings.clone(name)
-	name_object(.COMMAND_POOL, u64(workload.command_pool), name)
-	if workload.command_buffer != nil {
-		name_object(.COMMAND_BUFFER, u64(uintptr(workload.command_buffer)), name)
-	}
+	next_workload_id += 1
+	workload.id = next_workload_id
+	workload_records[workload.id] = {name = strings.clone(name)}
+	begin_recording(&workload) or_return
+	return
 }
 
 @(private = "file")
@@ -229,10 +214,7 @@ submitted_value: u64
 
 @(private = "file")
 workload_idle :: proc(workload: ^Workload) -> bool {
-	completed: u64
-	if timeline != 0 {
-		vk.GetSemaphoreCounterValue(device.handle, timeline, &completed)
-	}
+	completed := semaphore_value(timeline)
 	for slot in workload.slots {
 		if slot.value > completed {
 			return false
@@ -241,8 +223,80 @@ workload_idle :: proc(workload: ^Workload) -> bool {
 	return true
 }
 
+// ===[ Deferred Destruction ]==================================================
+
+@(private)
+Grave_Resource :: union {
+	Buffer,
+	Image,
+	vk.Pipeline,
+	Sampler,
+	Acceleration_Structure,
+}
+
+@(private = "file")
+Grave :: struct {
+	value:    u64,
+	staging:  u64,
+	resource: Grave_Resource,
+}
+
+@(private = "file")
+graves: [dynamic]Grave
+
+@(private)
+bury :: proc(resource: Grave_Resource) {
+	staging := staging_pending_value()
+	if submitted_value <= semaphore_value(timeline) && staging <= staging_completed_value() {
+		destroy_resource(resource)
+		return
+	}
+	append(&graves, Grave{value = submitted_value, staging = staging, resource = resource})
+}
+
+@(private)
+retire_graves :: proc(everything := false) {
+	if len(graves) == 0 {
+		return
+	}
+	completed := semaphore_value(timeline)
+	staging := staging_completed_value()
+	for index := 0; index < len(graves); {
+		grave := graves[index]
+		if everything || grave.value <= completed && grave.staging <= staging {
+			destroy_resource(grave.resource)
+			unordered_remove(&graves, index)
+		} else {
+			index += 1
+		}
+	}
+	if everything {
+		delete(graves)
+		graves = nil
+	}
+}
+
+@(private = "file")
+destroy_resource :: proc(resource: Grave_Resource) {
+	resource := resource
+	switch &dead in resource {
+	case Buffer:
+		destroy_buffer(&dead)
+	case Image:
+		destroy_image(&dead)
+	case vk.Pipeline:
+		vk.DestroyPipeline(device.handle, dead, nil)
+	case Sampler:
+		release_sampler_slot(&dead)
+	case Acceleration_Structure:
+		vk.DestroyAccelerationStructureKHR(device.handle, dead.handle, nil)
+		destroy_buffer(&dead.storage)
+	}
+}
+
 @(private)
 release_workload_pool :: proc() {
+	retire_graves(everything = true)
 	for &workload in retired_workloads {
 		destroy_workload(&workload)
 	}
@@ -266,29 +320,11 @@ release_workload_pool :: proc() {
 }
 
 @(require_results)
-acquire :: proc(workload: ^Workload, surface: ^Surface) -> (image: Image, err: Error) {
-	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	assert_recording(workload)
-	for acquired in workload.acquired {
-		assert(acquired.surface != surface, "a workload acquires from each surface once")
-	}
-	update_surface(surface) or_return
-	if surface.minimised {
-		return {}, .Surface_Minimised
-	}
-	append(&workload.acquired, Acquired_Surface{surface = surface, generation = surface.generation})
-	image = surface.stand_in
-	image.variant = Swapchain_Image {
-		surface = surface,
-	}
-	return image, nil
-}
-
-@(require_results)
 bind_shader :: proc(workload: ^Workload, shader: Shader) -> Error {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	assert_recording(workload)
 	recording := shader.recording
+	lock_recording(recording.id)
 	graphics, is_graphics := shader.variant.(Graphics_Shader)
 	assert(
 		shader.push_size <= PUSH_HEADER_SIZE || len(recording.push_data) > 0,
@@ -395,20 +431,13 @@ collect_accesses :: proc(shader: Shader) -> [dynamic]Access {
 	push_reads := make([dynamic]Shader_Resource, context.temp_allocator)
 	pack_push_data(shader, &push_reads)
 	for resource in push_reads {
-		#partial switch read in resource {
-		case Image:
-			append(&accesses, image_access(read, read = true, write = false))
-		case Buffer:
-			append(&accesses, buffer_access(read, read = true, write = false))
+		if access, tracked := resource_access(resource, read = true, write = false); tracked {
+			append(&accesses, access)
 		}
 	}
 	for binding in recording.bindings {
-		switch resource in binding.resource {
-		case Image:
-			append(&accesses, image_access(resource, read = !binding.written, write = binding.written))
-		case Buffer:
-			append(&accesses, buffer_access(resource, read = !binding.written, write = binding.written))
-		case Sampler:
+		if access, tracked := resource_access(binding.resource, read = !binding.written, write = binding.written); tracked {
+			append(&accesses, access)
 		}
 	}
 	if index_buffer, has_index_buffer := recording.index_buffer.?; has_index_buffer {
@@ -428,7 +457,26 @@ collect_accesses :: proc(shader: Shader) -> [dynamic]Access {
 	return accesses
 }
 
-clear_image :: proc(workload: ^Workload, image: Image, value: vk.ClearValue) -> Image {
+@(require_results)
+clear_image :: proc(workload: ^Workload, image: Image, colour: [4]f32 = 0) -> Image {
+	assert(.COLOR in image.aspect, "clear_image clears colour images; depth images are cleared with clear_depth")
+	return record_clear(workload, image, {color = {float32 = colour}})
+}
+
+@(require_results)
+clear_image_8bit :: proc(workload: ^Workload, image: Image, colour: [4]u8) -> Image {
+	return clear_image(workload, image, [4]f32{f32(colour.r), f32(colour.g), f32(colour.b), f32(colour.a)} / 255)
+}
+
+@(require_results)
+clear_depth :: proc(workload: ^Workload, image: Image, depth: f32 = 1, stencil: u32 = 0) -> Image {
+	assert(.COLOR not_in image.aspect, "clear_depth clears depth and stencil images; colour images are cleared with clear_image")
+	return record_clear(workload, image, {depthStencil = {depth = depth, stencil = stencil}})
+}
+
+@(private = "file")
+@(require_results)
+record_clear :: proc(workload: ^Workload, image: Image, value: vk.ClearValue) -> Image {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	assert_recording(workload)
 	assert(.TRANSFER_DST in image.usage, "the image cannot be cleared: it is not a transfer destination")
@@ -484,6 +532,7 @@ folds_into :: proc(pending: Pending_Clear, attachment: Image, view_mask: u32) ->
 	return image.layers < 32 && view_mask == (u32(1) << image.layers) - 1
 }
 
+@(require_results)
 clear_buffer :: proc(workload: ^Workload, buffer: Buffer, value: u32 = 0) -> Buffer {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	assert_recording(workload)
@@ -502,6 +551,7 @@ Image_Region :: struct {
 	size:        [3]u32,
 }
 
+@(require_results)
 copy_buffer :: proc(
 	workload: ^Workload,
 	source, destination: Buffer,
@@ -519,6 +569,7 @@ copy_buffer :: proc(
 	return next_version(destination)
 }
 
+@(require_results)
 copy_image :: proc(
 	workload: ^Workload,
 	source, destination: Image,
@@ -535,12 +586,13 @@ copy_image :: proc(
 	return next_version(destination)
 }
 
+@(require_results)
 blit_image :: proc(
 	workload: ^Workload,
 	source, destination: Image,
 	source_region := Image_Region{},
 	destination_region := Image_Region{},
-	filter := vk.Filter.LINEAR,
+	filter := Filter.LINEAR,
 ) -> Image {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	assert_recording(workload)
@@ -552,7 +604,8 @@ blit_image :: proc(
 	return next_version(destination)
 }
 
-generate_workload_mips :: proc(workload: ^Workload, image: Image) -> (written: Image) {
+@(require_results)
+generate_mips :: proc(workload: ^Workload, image: Image) -> (written: Image) {
 	assert(image.mip_levels > 1, "the image has one mip level, so there are no mips to generate; make it with mip_levels")
 	written = image
 	for mip in 1 ..< image.mip_levels {
@@ -561,6 +614,7 @@ generate_workload_mips :: proc(workload: ^Workload, image: Image) -> (written: I
 	return
 }
 
+@(require_results)
 copy_buffer_to_image :: proc(
 	workload: ^Workload,
 	source: Buffer,
@@ -578,6 +632,7 @@ copy_buffer_to_image :: proc(
 	return next_version(destination)
 }
 
+@(require_results)
 copy_image_to_buffer :: proc(
 	workload: ^Workload,
 	source: Image,
@@ -625,10 +680,9 @@ readback_buffer :: proc(workload: ^Workload, buffer: Buffer) -> (readback: Readb
 	return
 }
 
+@(require_results)
 workload_produces_image :: proc(workload: ^Workload, image: Image) -> (produced: Image) {
 	assert_recording(workload)
-	_, is_swapchain := image.variant.(Swapchain_Image)
-	assert(!is_swapchain, "a surface image's output is its present; it cannot be produced")
 	mark_produced(workload, image_access(image, read = false, write = false))
 	produced = image
 	produced.version = 0
@@ -636,6 +690,7 @@ workload_produces_image :: proc(workload: ^Workload, image: Image) -> (produced:
 	return
 }
 
+@(require_results)
 workload_produces_buffer :: proc(workload: ^Workload, buffer: Buffer) -> (produced: Buffer) {
 	assert_recording(workload)
 	mark_produced(workload, buffer_access(buffer, read = false, write = false))
@@ -721,13 +776,6 @@ workload_records: map[u64]Workload_Record
 
 @(private = "file")
 next_workload_id: u64
-
-@(private = "file")
-register_workload :: proc(workload: ^Workload) {
-	next_workload_id += 1
-	workload.id = next_workload_id
-	workload_records[workload.id] = {name = strings.clone(workload.name)}
-}
 
 @(private = "file")
 unregister_workload :: proc(workload: ^Workload) {
@@ -816,13 +864,12 @@ write_to_sink :: proc "c" (ctx: rawptr, data: rawptr, size: c.int) {
 	}
 }
 
-present :: proc(workload: ^Workload, image: Image) {
+present :: proc(workload: ^Workload, image: Image, surface: ^Surface) {
 	assert_recording(workload)
-	swapchain_image, is_swapchain := image.variant.(Swapchain_Image)
-	assert(is_swapchain, "present needs an image from acquire")
-	acquired := find_acquired(workload, swapchain_image.surface)
-	assert(acquired != nil, "present needs an image this workload acquired")
-	assert(!acquired.presented, "a workload presents each acquired image once")
+	assert(.COLOR in image.aspect && image.mip_levels >= 1, "present shows a colour image")
+	for presentation in workload.presentations {
+		assert(presentation.surface != surface, "a workload presents to each surface once")
+	}
 
 	flush_clears(workload)
 	access := image_access(image, read = true, write = false)
@@ -831,7 +878,7 @@ present :: proc(workload: ^Workload, image: Image) {
 	close_scope(workload)
 	handle.presented = true
 	state.used = true
-	acquired.presented = true
+	append(&workload.presentations, Presentation{surface = surface, image = image})
 }
 
 raw_commands :: proc(workload: ^Workload) -> vk.CommandBuffer {
@@ -848,9 +895,6 @@ raw_commands :: proc(workload: ^Workload) -> vk.CommandBuffer {
 @(require_results)
 finalize_workload :: proc(workload: ^Workload) -> Error {
 	assert(workload.state == .Recording, "finalize_workload called twice")
-	for acquired in workload.acquired {
-		assert(acquired.presented, "a workload that acquires a swapchain image must present it")
-	}
 	close_scope(workload)
 	flush_clears(workload)
 	warn_unused_writes(workload)
@@ -867,16 +911,18 @@ finalize_workload :: proc(workload: ^Workload) -> Error {
 execute_workloads :: proc(workloads: ..^Workload) -> (execution: Execution, err: Error) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	assert(len(workloads) > 0, "execute_workloads needs a workload")
-	acquired_count := 0
+	presentation_count := 0
 	for workload, index in workloads {
 		assert(workload.state == .Finalized, "a workload must be finalized before it is executed")
 		assert(!slice.contains(workloads[:index], workload), "a workload appears once in an execution")
-		for acquired in workload.acquired {
+		for presentation in workload.presentations {
 			for earlier in workloads[:index] {
-				assert(find_acquired(earlier, acquired.surface) == nil, "an execution acquires from each surface once")
+				for other in earlier.presentations {
+					assert(other.surface != presentation.surface, "an execution presents to each surface once")
+				}
 			}
 		}
-		acquired_count += len(workload.acquired)
+		presentation_count += len(workload.presentations)
 		warn_unexecuted_producers(workload, workloads[:index])
 	}
 	create_timeline() or_return
@@ -885,93 +931,67 @@ execute_workloads :: proc(workloads: ..^Workload) -> (execution: Execution, err:
 	for workload, index in workloads {
 		slots[index] = take_slot(workload) or_return
 	}
+	retire_graves()
 
-	acquisitions := make([]Acquisition, acquired_count, context.temp_allocator)
-	semaphores := make([]vk.Semaphore, acquired_count, context.temp_allocator)
-	count := 0
+	acquisitions := make([dynamic]Acquisition, 0, presentation_count, context.temp_allocator)
+	semaphores := make([dynamic]vk.Semaphore, 0, presentation_count, context.temp_allocator)
 	for workload, index in workloads {
-		for acquired, acquired_index in workload.acquired {
-			update_surface(acquired.surface) or_return
-			if acquired.surface.minimised || acquired.surface.generation != acquired.generation {
-				return {}, .Swapchain_Changed
+		for presentation, presentation_index in workload.presentations {
+			surface := presentation.surface
+			update_surface(surface) or_return
+			semaphore := slots[index].acquire_semaphores[presentation_index]
+			image_index: u32
+			acquired: bool
+			for !acquired && !surface.minimised {
+				image_index, acquired = acquire_next_image(surface, semaphore) or_return
 			}
-			semaphores[count] = slots[index].acquire_semaphores[acquired_index]
-			acquisitions[count] = {
-				surface   = acquired.surface,
-				semaphore = semaphores[count],
+			if !acquired {
+				continue
 			}
-			count += 1
+			append(&semaphores, semaphore)
+			copy := slots[index].present_commands[presentation_index]
+			if record_err := record_present(surface, presentation.image, image_index, copy); record_err != nil {
+				release_acquires(semaphores[:])
+				return {}, record_err
+			}
+			append(&acquisitions, Acquisition{surface = surface, semaphore = semaphore, index = image_index, copy = copy})
 		}
 	}
-	for &acquisition, index in acquisitions {
-		acquire_err: Error
-		acquisition.index, acquire_err = acquire_next_image(acquisition.surface, acquisition.semaphore)
-		if acquire_err != nil {
-			release_acquires(semaphores[:index])
-			if acquire_err == Surface_Error.Out_Of_Date {
-				return {}, .Swapchain_Changed
-			}
-			return {}, acquire_err
-		}
-	}
+	acquired_count := len(acquisitions)
 
 	value := submitted_value + 1
-	submit_count := 1 + acquired_count
-	submits := make([]vk.SubmitInfo2, submit_count, context.temp_allocator)
+	submits := make([dynamic]vk.SubmitInfo2, 0, acquired_count + 2, context.temp_allocator)
 	command_infos := make([]vk.CommandBufferSubmitInfo, len(workloads) + acquired_count, context.temp_allocator)
 	wait_infos := make([]vk.SemaphoreSubmitInfo, acquired_count, context.temp_allocator)
 	signal_infos := make([]vk.SemaphoreSubmitInfo, acquired_count + 1, context.temp_allocator)
 	for workload, index in workloads {
-		command_infos[index] = {
-			sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-			commandBuffer = workload.command_buffer,
-		}
+		command_infos[index] = {sType = .COMMAND_BUFFER_SUBMIT_INFO, commandBuffer = workload.command_buffer}
 	}
-	signal_infos[acquired_count] = {
-		sType     = .SEMAPHORE_SUBMIT_INFO,
-		semaphore = timeline,
-		value     = value,
-		stageMask = {.ALL_COMMANDS},
-	}
-	submits[0] = {
-		sType                  = .SUBMIT_INFO_2,
-		commandBufferInfoCount = u32(len(workloads)),
-		pCommandBufferInfos    = &command_infos[0],
-	}
-	if acquired_count == 0 {
-		submits[0].signalSemaphoreInfoCount = 1
-		submits[0].pSignalSemaphoreInfos = &signal_infos[0]
-	}
+	append(&submits, vk.SubmitInfo2{sType = .SUBMIT_INFO_2, commandBufferInfoCount = u32(len(workloads)), pCommandBufferInfos = &command_infos[0]})
 	for acquisition, index in acquisitions {
-		command := len(workloads) + index
-		command_infos[command] = {
-			sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-			commandBuffer = acquisition.surface.copies[acquisition.index],
-		}
-		wait_infos[index] = {
-			sType     = .SEMAPHORE_SUBMIT_INFO,
-			semaphore = acquisition.semaphore,
-			stageMask = {.ALL_TRANSFER},
-		}
-		signal_infos[index] = {
-			sType     = .SEMAPHORE_SUBMIT_INFO,
-			semaphore = acquisition.surface.present_semaphores[acquisition.index],
-			stageMask = {.ALL_COMMANDS},
-		}
-		submits[index + 1] = {
-			sType                    = .SUBMIT_INFO_2,
-			waitSemaphoreInfoCount   = 1,
-			pWaitSemaphoreInfos      = &wait_infos[index],
-			commandBufferInfoCount   = 1,
-			pCommandBufferInfos      = &command_infos[command],
-			signalSemaphoreInfoCount = 2 if index == acquired_count - 1 else 1,
-			pSignalSemaphoreInfos    = &signal_infos[index],
-		}
+		command := &command_infos[len(workloads) + index]
+		command^ = {sType = .COMMAND_BUFFER_SUBMIT_INFO, commandBuffer = acquisition.copy}
+		wait_infos[index] = {sType = .SEMAPHORE_SUBMIT_INFO, semaphore = acquisition.semaphore, stageMask = {.ALL_TRANSFER}}
+		signal_infos[index] = {sType = .SEMAPHORE_SUBMIT_INFO, semaphore = acquisition.surface.present_semaphores[acquisition.index], stageMask = {.ALL_COMMANDS}}
+		append(
+			&submits,
+			vk.SubmitInfo2 {
+				sType                    = .SUBMIT_INFO_2,
+				waitSemaphoreInfoCount   = 1,
+				pWaitSemaphoreInfos      = &wait_infos[index],
+				commandBufferInfoCount   = 1,
+				pCommandBufferInfos      = command,
+				signalSemaphoreInfoCount = 1,
+				pSignalSemaphoreInfos    = &signal_infos[index],
+			},
+		)
 	}
+	signal_infos[acquired_count] = {sType = .SEMAPHORE_SUBMIT_INFO, semaphore = timeline, value = value, stageMask = {.ALL_COMMANDS}}
+	append(&submits, vk.SubmitInfo2{sType = .SUBMIT_INFO_2, signalSemaphoreInfoCount = 1, pSignalSemaphoreInfos = &signal_infos[acquired_count]})
 
-	if res := vk.QueueSubmit2(device.graphics_queue, u32(submit_count), raw_data(submits), 0); res != .SUCCESS {
+	if res := vk.QueueSubmit2(device.graphics_queue, u32(len(submits)), raw_data(submits), 0); res != .SUCCESS {
 		log.errorf("Failed to submit workloads: %v", res)
-		release_acquires(semaphores)
+		release_acquires(semaphores[:])
 		return {}, .Submit_Failed
 	}
 	submitted_value = value
@@ -991,7 +1011,7 @@ execute_workloads :: proc(workloads: ..^Workload) -> (execution: Execution, err:
 		results := make([]vk.Result, acquired_count, context.temp_allocator)
 		for acquisition, index in acquisitions {
 			swapchains[index] = acquisition.surface.swapchain
-			waits[index] = signal_infos[index].semaphore
+			waits[index] = acquisition.surface.present_semaphores[acquisition.index]
 			indices[index] = acquisition.index
 		}
 		present_info: vk.PresentInfoKHR = {
@@ -1037,27 +1057,18 @@ warn_unexecuted_producers :: proc(workload: ^Workload, earlier: []^Workload) {
 
 @(require_results)
 wait_execution :: proc(execution: Execution) -> Error {
-	return wait_value(execution.value)
+	wait_value(execution.value) or_return
+	retire_graves()
+	return nil
 }
 
-@(private = "file")
+@(private)
 @(require_results)
 wait_value :: proc(value: u64) -> Error {
 	if value == 0 {
 		return nil
 	}
-	semaphore, target := timeline, value
-	wait_info: vk.SemaphoreWaitInfo = {
-		sType          = .SEMAPHORE_WAIT_INFO,
-		semaphoreCount = 1,
-		pSemaphores    = &semaphore,
-		pValues        = &target,
-	}
-	if res := vk.WaitSemaphores(device.handle, &wait_info, max(u64)); res != .SUCCESS {
-		log.errorf("Failed to wait for a workload execution: %v", res)
-		return .Wait_Failed
-	}
-	return nil
+	return wait_semaphore(timeline, value)
 }
 
 @(private = "file")
@@ -1066,19 +1077,7 @@ create_timeline :: proc() -> Error {
 	if timeline != 0 {
 		return nil
 	}
-	type_info: vk.SemaphoreTypeCreateInfo = {
-		sType         = .SEMAPHORE_TYPE_CREATE_INFO,
-		semaphoreType = .TIMELINE,
-	}
-	semaphore_info: vk.SemaphoreCreateInfo = {
-		sType = .SEMAPHORE_CREATE_INFO,
-		pNext = &type_info,
-	}
-	if res := vk.CreateSemaphore(device.handle, &semaphore_info, nil, &timeline); res != .SUCCESS {
-		log.errorf("Failed to create the workload timeline: %v", res)
-		return .Sync_Creation_Failed
-	}
-	name_object(.SEMAPHORE, u64(timeline), "workload timeline")
+	timeline = make_semaphore(true, "workload timeline") or_return
 	return nil
 }
 
@@ -1093,6 +1092,7 @@ run_workload :: proc(workload: ^Workload) -> Error {
 @(require_results)
 reset_workload :: proc(workload: ^Workload) -> Error {
 	wait_all(workload)
+	retire_graves()
 	return begin_recording(workload)
 }
 
@@ -1119,11 +1119,12 @@ destroy_workload :: proc(workload: ^Workload) {
 			vk.DestroySemaphore(device.handle, semaphore, nil)
 		}
 		delete(slot.acquire_semaphores)
+		delete(slot.present_commands)
 	}
 	if workload.command_pool != 0 {
 		vk.DestroyCommandPool(device.handle, workload.command_pool, nil)
 	}
-	delete(workload.acquired)
+	delete(workload.presentations)
 	for &table in workload.tables {
 		delete_buffer(&table)
 	}
@@ -1141,8 +1142,17 @@ destroy_workload :: proc(workload: ^Workload) {
 }
 
 @(private)
-transition :: proc(command_buffer: vk.CommandBuffer, image: vk.Image, aspect: vk.ImageAspectFlags, from, to: vk.ImageLayout) {
-	barrier: vk.ImageMemoryBarrier2 = {
+GLOBAL_BARRIER :: vk.MemoryBarrier2 {
+	sType         = .MEMORY_BARRIER_2,
+	srcStageMask  = {.ALL_COMMANDS},
+	srcAccessMask = {.MEMORY_WRITE},
+	dstStageMask  = {.ALL_COMMANDS},
+	dstAccessMask = {.MEMORY_READ, .MEMORY_WRITE},
+}
+
+@(private)
+layout_barrier :: proc(image: vk.Image, aspect: Image_Aspect, from, to: vk.ImageLayout) -> vk.ImageMemoryBarrier2 {
+	return {
 		sType = .IMAGE_MEMORY_BARRIER_2,
 		srcStageMask = {.ALL_COMMANDS},
 		srcAccessMask = {.MEMORY_WRITE},
@@ -1155,22 +1165,17 @@ transition :: proc(command_buffer: vk.CommandBuffer, image: vk.Image, aspect: vk
 		image = image,
 		subresourceRange = {aspectMask = aspect, levelCount = vk.REMAINING_MIP_LEVELS, layerCount = vk.REMAINING_ARRAY_LAYERS},
 	}
+}
+
+@(private)
+transition :: proc(command_buffer: vk.CommandBuffer, image: vk.Image, aspect: Image_Aspect, from, to: vk.ImageLayout) {
+	barrier := layout_barrier(image, aspect, from, to)
 	dependency: vk.DependencyInfo = {
 		sType                   = .DEPENDENCY_INFO,
 		imageMemoryBarrierCount = 1,
 		pImageMemoryBarriers    = &barrier,
 	}
 	vk.CmdPipelineBarrier2(command_buffer, &dependency)
-}
-
-@(private = "file")
-find_acquired :: proc(workload: ^Workload, surface: ^Surface) -> ^Acquired_Surface {
-	for &acquired in workload.acquired {
-		if acquired.surface == surface {
-			return &acquired
-		}
-	}
-	return nil
 }
 
 @(private = "file")
@@ -1226,6 +1231,18 @@ buffer_access :: proc(buffer: Buffer, read, write: bool) -> Access {
 		write = write,
 		layout = .GENERAL,
 	}
+}
+
+@(private = "file")
+resource_access :: proc(resource: Shader_Resource, read, write: bool) -> (access: Access, tracked: bool) {
+	switch bound in resource {
+	case Image:
+		return image_access(bound, read, write), true
+	case Buffer:
+		return buffer_access(bound, read, write), true
+	case Sampler:
+	}
+	return
 }
 
 @(private = "file")
@@ -1295,7 +1312,7 @@ image_copy_region :: proc(source, destination: Image, source_region, destination
 }
 
 @(private)
-image_blit_region :: proc(source, destination: Image, source_region, destination_region: Image_Region, filter: vk.Filter) -> Image_Copy_Region {
+image_blit_region :: proc(source, destination: Image, source_region, destination_region: Image_Region, filter: Filter) -> Image_Copy_Region {
 	assert(.TRANSFER_SRC in source.usage, "the source image is not a transfer source")
 	assert(.TRANSFER_DST in destination.usage, "the destination image is not a transfer destination")
 	assert(source.samples == {._1} && destination.samples == {._1}, "multisampled images cannot be blitted")
@@ -1372,7 +1389,7 @@ emit_image_copy :: proc(cmd: vk.CommandBuffer, source, destination: vk.Image, re
 }
 
 @(private)
-emit_image_blit :: proc(cmd: vk.CommandBuffer, source, destination: vk.Image, region: Image_Copy_Region, filter: vk.Filter) {
+emit_image_blit :: proc(cmd: vk.CommandBuffer, source, destination: vk.Image, region: Image_Copy_Region, filter: Filter, destination_layout := vk.ImageLayout.GENERAL) {
 	far :: proc(region: Resolved_Region) -> vk.Offset3D {
 		return {region.offset.x + i32(region.extent.width), region.offset.y + i32(region.extent.height), region.offset.z + i32(region.extent.depth)}
 	}
@@ -1388,7 +1405,7 @@ emit_image_blit :: proc(cmd: vk.CommandBuffer, source, destination: vk.Image, re
 		srcImage       = source,
 		srcImageLayout = .GENERAL,
 		dstImage       = destination,
-		dstImageLayout = .GENERAL,
+		dstImageLayout = destination_layout,
 		regionCount    = 1,
 		pRegions       = &blit_region,
 		filter         = filter,
@@ -1471,7 +1488,7 @@ image_region_bytes :: proc(image: Image, region: Image_Region) -> int {
 }
 
 @(private = "file")
-region_bytes :: proc(format: vk.Format, region: Resolved_Region) -> vk.DeviceSize {
+region_bytes :: proc(format: Format, region: Resolved_Region) -> vk.DeviceSize {
 	texel_size, known := format_texel_size(format)
 	assert(known, "copying this format between buffers and images is not supported yet")
 	extent := region.extent
@@ -1479,7 +1496,7 @@ region_bytes :: proc(format: vk.Format, region: Resolved_Region) -> vk.DeviceSiz
 }
 
 @(private)
-format_has_features :: proc(format: vk.Format, features: vk.FormatFeatureFlags) -> bool {
+format_has_features :: proc(format: Format, features: vk.FormatFeatureFlags) -> bool {
 	properties: vk.FormatProperties
 	vk.GetPhysicalDeviceFormatProperties(device.physical_device, format, &properties)
 	return properties.optimalTilingFeatures >= features
@@ -1622,31 +1639,9 @@ emit_barrier :: proc(workload: ^Workload, accesses: []Access) {
 		}
 	}
 	barriers := make([]vk.ImageMemoryBarrier2, len(transitions), context.temp_allocator)
-	memory_barrier: vk.MemoryBarrier2 = {
-		sType         = .MEMORY_BARRIER_2,
-		srcStageMask  = {.ALL_COMMANDS},
-		srcAccessMask = {.MEMORY_WRITE},
-		dstStageMask  = {.ALL_COMMANDS},
-		dstAccessMask = {.MEMORY_READ, .MEMORY_WRITE},
-	}
+	memory_barrier := GLOBAL_BARRIER
 	for state, index in transitions {
-		barriers[index] = {
-			sType = .IMAGE_MEMORY_BARRIER_2,
-			srcStageMask = {.ALL_COMMANDS},
-			srcAccessMask = {.MEMORY_WRITE},
-			dstStageMask = {.ALL_COMMANDS},
-			dstAccessMask = {.MEMORY_READ, .MEMORY_WRITE},
-			oldLayout = state.layout,
-			newLayout = .GENERAL,
-			srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-			image = state.image,
-			subresourceRange = {
-				aspectMask = state.aspect,
-				levelCount = vk.REMAINING_MIP_LEVELS,
-				layerCount = vk.REMAINING_ARRAY_LAYERS,
-			},
-		}
+		barriers[index] = layout_barrier(state.image, state.aspect, state.layout, .GENERAL)
 	}
 	dependency: vk.DependencyInfo = {
 		sType                   = .DEPENDENCY_INFO,
@@ -1683,7 +1678,8 @@ memory_barrier :: proc(
 
 @(private = "file")
 global_barrier :: proc(cmd: vk.CommandBuffer) {
-	memory_barrier(cmd, {.ALL_COMMANDS}, {.MEMORY_WRITE}, {.ALL_COMMANDS}, {.MEMORY_READ, .MEMORY_WRITE})
+	barrier := GLOBAL_BARRIER
+	vk.CmdPipelineBarrier2(cmd, &vk.DependencyInfo{sType = .DEPENDENCY_INFO, memoryBarrierCount = 1, pMemoryBarriers = &barrier})
 }
 
 @(private = "file")
@@ -2021,7 +2017,7 @@ emit_draw_state :: proc(
 	}
 	if count > 0 && colour_changed {
 		enables: [MAX_COLOUR_ATTACHMENTS]b32
-		equations: [MAX_COLOUR_ATTACHMENTS]vk.ColorBlendEquationEXT
+		equations: [MAX_COLOUR_ATTACHMENTS]Blend_Equation
 		for index in 0 ..< count {
 			equation, enabled := state.blend[index].?
 			enables[index] = b32(enabled)
@@ -2043,7 +2039,7 @@ emit_draw_state :: proc(
 }
 
 @(private = "file")
-BLEND_REPLACE :: vk.ColorBlendEquationEXT {
+BLEND_REPLACE :: Blend_Equation {
 	srcColorBlendFactor = .ONE,
 	dstColorBlendFactor = .ZERO,
 	colorBlendOp        = .ADD,
@@ -2053,7 +2049,7 @@ BLEND_REPLACE :: vk.ColorBlendEquationEXT {
 }
 
 @(private = "file")
-emit_stencil :: proc(cmd: vk.CommandBuffer, faces: vk.StencilFaceFlags, stencil: Stencil_State) {
+emit_stencil :: proc(cmd: vk.CommandBuffer, faces: Stencil_Faces, stencil: Stencil_State) {
 	vk.CmdSetStencilOp(cmd, faces, stencil.fail_op, stencil.pass_op, stencil.depth_fail_op, stencil.compare_op)
 	vk.CmdSetStencilReference(cmd, faces, stencil.reference)
 	vk.CmdSetStencilCompareMask(cmd, faces, stencil.compare_mask)
@@ -2063,23 +2059,29 @@ emit_stencil :: proc(cmd: vk.CommandBuffer, faces: vk.StencilFaceFlags, stencil:
 @(private = "file")
 @(require_results)
 write_table :: proc(workload: ^Workload, recording: Shader_Recording) -> (address: vk.DeviceAddress, err: Error) {
-	size := round_up(vk.DeviceSize(size_of(u32) * (TABLE_HEADER_WORDS + len(recording.bindings))), 16)
+	count := table_size(recording)
+	size := round_up(vk.DeviceSize(size_of(u32) * (TABLE_HEADER_WORDS + count)), 16)
 	if vk.DeviceSize(workload.table_used) + size > TABLE_CHUNK_SIZE {
 		workload.table_chunk += 1
 		workload.table_used = 0
 	}
 	if workload.table_chunk == len(workload.tables) {
-		chunk := make_empty_buffer(TABLE_CHUNK_SIZE, Buffer_Settings{memory = .Host_Visible}) or_return
+		chunk := make_buffer(TABLE_CHUNK_SIZE, {}, .Host_Visible) or_return
 		append(&workload.tables, chunk)
 	}
 	chunk := workload.tables[workload.table_chunk]
 	words := ([^]u32)(&chunk.mapped[workload.table_used])
-	words[0] = u32(len(recording.bindings))
+	words[0] = u32(count)
 	words[1] = null_buffer_index()
 	words[2] = null_image_index() | HEAP_IMAGE_TAG
 	words[3] = null_sampler_index() | HEAP_SAMPLER_TAG
 	words[4] = null_uniform_index() | HEAP_UNIFORM_TAG
-	for binding, index in recording.bindings {
+	index := 0
+	for binding in recording.bindings {
+		if !binding.table {
+			continue
+		}
+		defer index += 1
 		entry: u32
 		switch resource in binding.resource {
 		case Image:
@@ -2099,60 +2101,18 @@ write_table :: proc(workload: ^Workload, recording: Shader_Recording) -> (addres
 @(private = "file")
 @(require_results)
 make_readback_buffer :: proc(workload: ^Workload, size: int) -> (buffer: Buffer, err: Error) {
-	buffer = make_empty_buffer(size, Buffer_Settings{memory = .Host_Readback}) or_return
+	buffer = make_buffer(size, {}, .Host_Readback) or_return
 	append(&workload.readbacks, buffer)
 	return
 }
 
 @(private = "file")
 @(require_results)
-begin_command_buffer :: proc(workload: ^Workload) -> Error {
-	if workload.command_buffer == nil {
-		buffer_info: vk.CommandBufferAllocateInfo = {
-			sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-			commandPool        = workload.command_pool,
-			level              = .PRIMARY,
-			commandBufferCount = 1,
-		}
-		if res := vk.AllocateCommandBuffers(device.handle, &buffer_info, &workload.command_buffer); res != .SUCCESS {
-			log.errorf("Failed to allocate a workload command buffer: %v", res)
-			workload.command_buffer = nil
-			return .Command_Buffer_Allocation_Failed
-		}
-		name_object(.COMMAND_BUFFER, u64(uintptr(workload.command_buffer)), workload.name)
-	} else if res := vk.ResetCommandBuffer(workload.command_buffer, {}); res != .SUCCESS {
-		log.errorf("Failed to reset the workload command buffer: %v", res)
-		return .Recording_Failed
-	}
-	begin_info: vk.CommandBufferBeginInfo = {
-		sType = .COMMAND_BUFFER_BEGIN_INFO,
-		flags = {.SIMULTANEOUS_USE},
-	}
-	if res := vk.BeginCommandBuffer(workload.command_buffer, &begin_info); res != .SUCCESS {
-		log.errorf("Failed to begin recording workload: %v", res)
-		return .Recording_Failed
-	}
-	bind_descriptor_heaps(workload.command_buffer)
-	begin_label(workload.command_buffer, workload.name)
-	global_barrier(workload.command_buffer)
-	workload.emitted = {}
-	return nil
-}
-
-@(private = "file")
-@(require_results)
 take_slot :: proc(workload: ^Workload) -> (slot: ^Execution_Slot, err: Error) {
 	slot = &workload.slots[workload.next_slot]
-	for len(slot.acquire_semaphores) < len(workload.acquired) {
-		semaphore_info: vk.SemaphoreCreateInfo = {
-			sType = .SEMAPHORE_CREATE_INFO,
-		}
-		semaphore: vk.Semaphore
-		if res := vk.CreateSemaphore(device.handle, &semaphore_info, nil, &semaphore); res != .SUCCESS {
-			log.errorf("Failed to create an acquire semaphore: %v", res)
-			return nil, .Sync_Creation_Failed
-		}
-		append(&slot.acquire_semaphores, semaphore)
+	for len(slot.acquire_semaphores) < len(workload.presentations) {
+		append(&slot.acquire_semaphores, make_semaphore(false, "acquire") or_return)
+		append(&slot.present_commands, allocate_command_buffer(workload.command_pool, "present") or_return)
 	}
 	wait_value(slot.value) or_return
 	return
@@ -2189,8 +2149,18 @@ wait_all :: proc(workload: ^Workload) {
 @(private = "file")
 @(require_results)
 begin_recording :: proc(workload: ^Workload) -> Error {
-	clear(&workload.acquired)
-	begin_command_buffer(workload) or_return
+	clear(&workload.presentations)
+	if workload.command_buffer == nil {
+		workload.command_buffer = allocate_command_buffer(workload.command_pool, workload.name) or_return
+	} else if res := vk.ResetCommandBuffer(workload.command_buffer, {}); res != .SUCCESS {
+		log.errorf("Failed to reset the workload command buffer: %v", res)
+		return .Recording_Failed
+	}
+	begin_commands(workload.command_buffer, {.SIMULTANEOUS_USE}) or_return
+	bind_descriptor_heaps(workload.command_buffer)
+	begin_label(workload.command_buffer, workload.name)
+	global_barrier(workload.command_buffer)
+	workload.emitted = {}
 	workload.state = .Recording
 	clear(&workload.resources)
 	clear(&workload.consumed)

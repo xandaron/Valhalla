@@ -205,9 +205,8 @@ Link_Drag :: struct {
 }
 
 Editor :: struct {
-	window:            ^Valhalla.Window,
+	window:            Valhalla.Window,
 	surface:           ^Valhalla.Surface,
-	settings:          Valhalla.Compiler_Settings,
 	adjust:            Valhalla.Shader,
 	blur:              Valhalla.Shader,
 	sharpen:           Valhalla.Shader,
@@ -236,7 +235,7 @@ Editor :: struct {
 	show_adjustments:  bool,
 	show_shader:       bool,
 	show_imgui_demo:   bool,
-	minimised:         bool,
+	target:         Valhalla.Image,
 	pipeline_cache:    Valhalla.Pipeline_Cache,
 	graph_signature:   u64,
 	graph_recorded:    bool,
@@ -421,10 +420,10 @@ input_value :: proc(input: Input) -> f32 {
 
 ensure_image :: proc(image: ^Valhalla.Image, format: vk.Format, size: [2]u32) -> Valhalla.Error {
 	if image.handle == 0 {
-		image^ = Valhalla.make_image(format, {size.x, size.y, 1}) or_return
+		image^ = Valhalla.make_image(format, {size.x, size.y, 1}, usage = {.Attachment}) or_return
 		return nil
 	}
-	Valhalla.resize_image(image, {size.x, size.y, 1}) or_return
+	_ = Valhalla.resize_image(image, {size.x, size.y, 1}) or_return
 	return nil
 }
 
@@ -454,7 +453,7 @@ run_pass :: proc(
 			params = editor.params,
 		},
 	)
-	Valhalla.draw(shader, 3, 1, 0, 0, draw_data = slot)
+	Valhalla.draw(shader, 3, draw_data = slot)
 	Valhalla.bind_shader(workload, shader^) or_return
 	return
 }
@@ -492,7 +491,7 @@ ensure_display :: proc(editor: ^Editor, size: [2]u32) -> Valhalla.Error {
 		return nil
 	}
 	Valhalla.delete_image(&editor.display)
-	editor.display = Valhalla.make_image(.R8G8B8A8_SRGB, {size.x, size.y, 1}, mip_levels = u32(bits.len(max(size.x, size.y)))) or_return
+	editor.display = Valhalla.make_image(.R8G8B8A8_SRGB, {size.x, size.y, 1}, usage = {.Attachment}, mip_levels = u32(bits.len(max(size.x, size.y)))) or_return
 	return nil
 }
 
@@ -500,7 +499,7 @@ record_graph :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
 	Valhalla.wait_execution(editor.last) or_return
 	if editor.params.size < vk.DeviceSize(max(len(order), 1) * size_of(Node_Params)) {
 		Valhalla.delete_buffer(&editor.params)
-		editor.params = Valhalla.make_empty_buffer(max(len(order), 64) * size_of(Node_Params), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible}) or_return
+		editor.params = Valhalla.make_buffer(max(len(order), 64) * size_of(Node_Params), {.Storage}, .Host_Visible) or_return
 	}
 	resize(&editor.param_values, len(order))
 	editor.params_written = false
@@ -647,7 +646,7 @@ update_params :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
 		return nil
 	}
 	Valhalla.wait_execution(editor.graph_last) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(editor.param_values[:]), &editor.params) or_return
+	Valhalla.load_memory_to_buffer(raw_bytes(editor.param_values[:]), editor.params) or_return
 	editor.params_written = true
 	return nil
 }
@@ -658,12 +657,12 @@ raw_bytes :: proc(data: []$T) -> []u8 {
 
 compile_custom :: proc(editor: ^Editor, node: ^Node) {
 	source := strings.concatenate({CUSTOM_PRELUDE, string(cstring(&node.code[0])), CUSTOM_EPILOGUE}, context.temp_allocator)
-	shader, diagnostics, err := Valhalla.make_shader(
+	shader, err := Valhalla.make_shader(
 		transmute([]u8)source,
 		[]string{"custom_vertex", "custom_fragment"},
-		editor.settings,
-		{pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}},
+		pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT},
 	)
+	diagnostics := Valhalla.shader_diagnostics()
 	delete(node.compile_log)
 	if err != nil {
 		node.compile_failed = true
@@ -861,7 +860,7 @@ viewer_window :: proc(editor: ^Editor) {
 				size := extent * scale
 				cursor := imgui.GetCursorScreenPos()
 				imgui.SetCursorScreenPos(linalg.floor(cursor + linalg.max(available - size, 0) * 0.5))
-				imgui.Image(valhalla_imgui.texture(&editor.display_shown, .Nearest if scale >= 1 else .Linear), size)
+				imgui.Image(valhalla_imgui.texture(editor.display_shown, .Nearest if scale >= 1 else .Linear), size)
 				if imgui.IsItemHovered() && imgui.GetIO().MouseWheel != 0 && imgui.IsKeyDown(.Key_LeftCtrl) {
 					editor.fit = false
 					editor.zoom = clamp(editor.zoom * (1 + imgui.GetIO().MouseWheel * 0.1), 0.05, 8)
@@ -983,7 +982,7 @@ node_body :: proc(editor: ^Editor, node: ^Node, in_graph: bool, left: f32) {
 		if node.preview_shown.handle != 0 && node.valid {
 			height = width * f32(node.preview_shown.extent.y) / f32(node.preview_shown.extent.x)
 		}
-		imgui.Image(valhalla_imgui.texture(&node.preview_shown), {width, height})
+		imgui.Image(valhalla_imgui.texture(node.preview_shown), {width, height})
 	}
 }
 
@@ -1219,14 +1218,15 @@ run :: proc() -> Valhalla.Error {
 
 	window := Valhalla.make_window(title = "Image editor", size = {1600, 1000}) or_return
 	defer Valhalla.delete_window(&window)
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
 	editor := new(Editor)
 	defer free(editor)
-	editor.window = &window
+	editor.window = window
 	editor.surface = &surface
-	editor.settings = {search_paths = {#directory + "/../../src/shaders"}}
+	editor.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&editor.target)
 	editor.fit = true
 	editor.zoom = 1
 	editor.show_viewer = true
@@ -1244,17 +1244,17 @@ run :: proc() -> Valhalla.Error {
 	}
 
 	nodes_code := #load("Nodes.slang")
-	editor.adjust, _ = Valhalla.make_shader(nodes_code, []string{"fullscreen", "adjust"}, editor.settings, {pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}}) or_return
+	editor.adjust = Valhalla.make_shader(nodes_code, []string{"fullscreen", "adjust"}, pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}) or_return
 	defer Valhalla.delete_shader(&editor.adjust)
-	editor.blur, _ = Valhalla.make_shader(nodes_code, []string{"fullscreen", "blur"}, editor.settings, {pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}}) or_return
+	editor.blur = Valhalla.make_shader(nodes_code, []string{"fullscreen", "blur"}, pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}) or_return
 	defer Valhalla.delete_shader(&editor.blur)
-	editor.sharpen, _ = Valhalla.make_shader(nodes_code, []string{"fullscreen", "sharpen"}, editor.settings, {pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}}) or_return
+	editor.sharpen = Valhalla.make_shader(nodes_code, []string{"fullscreen", "sharpen"}, pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}) or_return
 	defer Valhalla.delete_shader(&editor.sharpen)
-	editor.mix, _ = Valhalla.make_shader(nodes_code, []string{"fullscreen", "mix"}, editor.settings, {pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}}) or_return
+	editor.mix = Valhalla.make_shader(nodes_code, []string{"fullscreen", "mix"}, pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R16G16B16A16_SFLOAT}) or_return
 	defer Valhalla.delete_shader(&editor.mix)
-	editor.encode, _ = Valhalla.make_shader(nodes_code, []string{"fullscreen", "encode"}, editor.settings, {pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R8G8B8A8_UNORM}}) or_return
+	editor.encode = Valhalla.make_shader(nodes_code, []string{"fullscreen", "encode"}, pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R8G8B8A8_UNORM}) or_return
 	defer Valhalla.delete_shader(&editor.present)
-	editor.present, _ = Valhalla.make_shader(nodes_code, []string{"fullscreen", "copy"}, editor.settings, {pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R8G8B8A8_SRGB}}) or_return
+	editor.present = Valhalla.make_shader(nodes_code, []string{"fullscreen", "copy"}, pipeline_cache = editor.pipeline_cache, push_type = Node_Push, colour_formats = {0 = .R8G8B8A8_SRGB}) or_return
 	defer Valhalla.delete_shader(&editor.encode)
 	editor.sampler = Valhalla.make_sampler(address_mode = .CLAMP_TO_EDGE) or_return
 	defer Valhalla.delete_sampler(&editor.sampler)
@@ -1276,7 +1276,7 @@ run :: proc() -> Valhalla.Error {
 		delete(editor.nodes)
 	}
 
-	valhalla_imgui.init(&window, surface.format.format) or_return
+	valhalla_imgui.init(window, surface.format) or_return
 	defer valhalla_imgui.shutdown()
 
 	for &frame in editor.frames {
@@ -1287,16 +1287,12 @@ run :: proc() -> Valhalla.Error {
 	}
 	defer _ = Valhalla.wait_execution(editor.last)
 
-	Valhalla.set_frame_callback(draw_frame, rawptr(editor))
-	defer Valhalla.set_frame_callback(nil)
-
-	for !Valhalla.should_close(&window) {
-		if editor.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(editor) or_return
+		if editor.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -1304,10 +1300,8 @@ run :: proc() -> Valhalla.Error {
 draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	editor := (^Editor)(user_data)
 
-	valhalla_imgui.new_frame()
-	imgui.NewFrame()
+	valhalla_imgui.begin_frame()
 	build_ui(editor)
-	imgui.Render()
 
 	load_opened_image(editor) or_return
 	order := ordered_nodes(editor)
@@ -1324,25 +1318,22 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	frame := &editor.frames[editor.next_frame]
 	editor.next_frame = (editor.next_frame + 1) % len(editor.frames)
 	Valhalla.reset_workload(frame) or_return
-	image, acquire_err := Valhalla.acquire(frame, editor.surface)
-	editor.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if editor.minimised {
-		return delete_doomed_nodes(editor)
-	} else if acquire_err != nil {
-		return acquire_err
+	size := [3]u32{max(editor.surface.extent.x, 1), max(editor.surface.extent.y, 1), 1}
+	if editor.target.extent != size {
+		Valhalla.wait_execution(editor.last) or_return
+		_ = Valhalla.resize_image(&editor.target, size) or_return
 	}
+	image := editor.target
 
 	background := [4]f32{0.07, 0.07, 0.09, 1}
 	if editor.surface.encodes_srgb {
 		background = Valhalla.srgb_to_linear(background)
 	}
-	cleared := Valhalla.clear_image(frame, image, {color = {float32 = background}})
-	drawn := valhalla_imgui.render(frame, cleared) or_return
-	Valhalla.present(frame, drawn)
+	cleared := Valhalla.clear_image(frame, image, background)
+	drawn := valhalla_imgui.end_frame(frame, cleared) or_return
+	Valhalla.present(frame, drawn, editor.surface)
 	Valhalla.finalize_workload(frame) or_return
-	if _, err := execute_after_graph(editor, frame); err != Valhalla.Workload_Error.Swapchain_Changed {
-		err or_return
-	}
+	_ = execute_after_graph(editor, frame) or_return
 	return delete_doomed_nodes(editor)
 }
 

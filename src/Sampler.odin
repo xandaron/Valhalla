@@ -3,6 +3,16 @@ package Valhalla
 import "core:log"
 import vk "vendor:vulkan"
 
+Filter :: vk.Filter
+
+Mipmap_Mode :: vk.SamplerMipmapMode
+
+Address_Mode :: vk.SamplerAddressMode
+
+Border_Colour :: vk.BorderColor
+
+LOD_CLAMP_NONE :: vk.LOD_CLAMP_NONE
+
 Sampler_Error :: enum {
 	None,
 	Unsupported_Anisotropy,
@@ -16,15 +26,15 @@ Sampler :: struct {
 
 @(require_results)
 make_sampler :: proc(
-	filter := vk.Filter.LINEAR,
-	mipmap_mode := vk.SamplerMipmapMode.LINEAR,
-	address_mode := vk.SamplerAddressMode.REPEAT,
+	filter := Filter.LINEAR,
+	mipmap_mode := Mipmap_Mode.LINEAR,
+	address_mode := Address_Mode.REPEAT,
 	anisotropy: f32 = 1,
-	compare_op: Maybe(vk.CompareOp) = nil,
+	compare_op: Maybe(Compare_Op) = nil,
 	min_lod: f32 = 0,
-	max_lod: f32 = vk.LOD_CLAMP_NONE,
+	max_lod: f32 = LOD_CLAMP_NONE,
 	lod_bias: f32 = 0,
-	border_colour := vk.BorderColor.FLOAT_TRANSPARENT_BLACK,
+	border_colour := Border_Colour.FLOAT_TRANSPARENT_BLACK,
 ) -> (
 	sampler: Sampler,
 	err: Error,
@@ -66,5 +76,8 @@ make_sampler :: proc(
 }
 
 delete_sampler :: proc(sampler: ^Sampler) {
-	release_sampler_slot(sampler)
+	if sampler.heap_index != 0 {
+		bury(sampler^)
+	}
+	sampler^ = {}
 }

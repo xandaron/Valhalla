@@ -6,7 +6,6 @@ package slang
 // Code loaded and compiled within a session is owned by the session and
 // stays resident until the session is released. Use multiple sessions to
 // control the memory usage of compiled/loaded code independently.
-@(private)
 Session :: struct #raw_union {
 	#subtype unknown: Unknown,
 	using vtable:     ^Session_VTable,

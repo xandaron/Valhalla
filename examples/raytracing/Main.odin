@@ -65,6 +65,8 @@ main :: proc() {
 	}
 }
 
+GEOMETRY_USAGE :: Valhalla.Buffer_Usages{.Storage, .Acceleration_Input}
+
 run :: proc() -> Valhalla.Error {
 	Valhalla.init() or_return
 	defer Valhalla.shutdown()
@@ -75,7 +77,7 @@ run :: proc() -> Valhalla.Error {
 
 	window := Valhalla.make_window(title = "Ray tracing: drag to orbit, scroll to zoom", size = {1280, 720}) or_return
 	defer Valhalla.delete_window(&window)
-	surface := Valhalla.make_surface(&window, {}) or_return
+	surface := Valhalla.make_surface(window) or_return
 	defer Valhalla.delete_surface(&surface)
 
 	vertices: [dynamic]Vertex
@@ -86,12 +88,11 @@ run :: proc() -> Valhalla.Error {
 	cube := add_cube(&vertices, &indices)
 	sphere := add_sphere(&vertices, &indices, rings = 48, segments = 96)
 
-	geometry := Valhalla.Buffer_Settings{usage = {.Storage, .Acceleration_Input}}
-	geometry.name = "vertices"
-	vertex_buffer := Valhalla.make_buffer(raw_bytes(vertices[:]), geometry) or_return
+	geometry_name := "vertices"
+	vertex_buffer := Valhalla.make_buffer_from_memory(raw_bytes(vertices[:]), GEOMETRY_USAGE, name = geometry_name) or_return
 	defer Valhalla.delete_buffer(&vertex_buffer)
-	geometry.name = "indices"
-	index_buffer := Valhalla.make_buffer(raw_bytes(indices[:]), geometry) or_return
+	geometry_name = "indices"
+	index_buffer := Valhalla.make_buffer_from_memory(raw_bytes(indices[:]), GEOMETRY_USAGE, name = geometry_name) or_return
 	defer Valhalla.delete_buffer(&index_buffer)
 
 	meshes := [?]Mesh{plane, cube, sphere}
@@ -159,15 +160,12 @@ run :: proc() -> Valhalla.Error {
 
 	scene := Valhalla.make_top_level(instances[:], name = "scene") or_return
 	defer Valhalla.delete_acceleration_structure(&scene)
-	object_buffer := Valhalla.make_buffer(raw_bytes(objects[:]), Valhalla.Buffer_Settings{usage = {.Storage}, name = "objects"}) or_return
+	object_buffer := Valhalla.make_buffer_from_memory(raw_bytes(objects[:]), {.Storage}, name = "objects") or_return
 	defer Valhalla.delete_buffer(&object_buffer)
-	frame_buffer := Valhalla.make_buffer(size_of(Frame), Valhalla.Buffer_Settings{usage = {.Storage}, memory = .Host_Visible, name = "frame"}) or_return
+	frame_buffer := Valhalla.make_buffer(size_of(Frame), {.Storage}, .Host_Visible, "frame") or_return
 	defer Valhalla.delete_buffer(&frame_buffer)
 
-	settings := Valhalla.Compiler_Settings {
-		search_paths = {#directory + "/../../src/shaders"},
-	}
-	raytrace, _ := Valhalla.make_shader(#load("Raytracing.slang"), []string{"raytrace"}, settings, {push_type = Push}) or_return
+	raytrace := Valhalla.make_shader(#load("Raytracing.slang"), []string{"raytrace"}, push_type = Push) or_return
 	defer Valhalla.delete_shader(&raytrace)
 
 	state := State {
@@ -178,27 +176,25 @@ run :: proc() -> Valhalla.Error {
 		frame_buffer = &frame_buffer,
 		start        = time.now(),
 	}
-	state.image = Valhalla.make_image(.R16G16B16A16_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, kind = .Generic, name = "traced") or_return
+	state.image = Valhalla.make_image(.R16G16B16A16_SFLOAT, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, usage = {.Storage}, name = "traced") or_return
 	defer Valhalla.delete_image(&state.image)
+	state.target = Valhalla.make_image(surface.format, {max(surface.extent.x, 1), max(surface.extent.y, 1), 1}, {.Attachment}, name = "target") or_return
+	defer Valhalla.delete_image(&state.target)
 	state.frame = Valhalla.make_workload("frame") or_return
 	defer Valhalla.delete_workload(&state.frame)
 	defer _ = Valhalla.wait_execution(state.last)
 
-	Valhalla.set_window_user_pointer(&window, rawptr(&state.camera))
-	Valhalla.set_mouse_button_callback(&window, on_mouse_button)
-	Valhalla.set_cursor_position_callback(&window, on_cursor_pos)
-	Valhalla.set_scroll_callback(&window, on_scroll)
-	Valhalla.set_key_callback(&window, on_key)
-	Valhalla.set_frame_callback(draw_frame, rawptr(&state))
-	defer Valhalla.set_frame_callback(nil)
-
-	for !Valhalla.should_close(&window) {
-		if state.minimised {
-			Valhalla.wait_events() or_return
-		} else {
-			Valhalla.poll_events() or_return
-		}
+	Valhalla.set_window_user_pointer(window, rawptr(&state.camera))
+	Valhalla.set_mouse_button_callback(window, on_mouse_button)
+	Valhalla.set_cursor_position_callback(window, on_cursor_pos)
+	Valhalla.set_scroll_callback(window, on_scroll)
+	Valhalla.set_key_callback(window, on_key)
+	for !Valhalla.should_close(window) {
+		Valhalla.poll_events()
 		draw_frame(&state) or_return
+		if state.surface.minimised {
+			Valhalla.wait_events()
+		}
 	}
 	return nil
 }
@@ -214,16 +210,16 @@ State :: struct {
 	recorded:     bool,
 	last:         Valhalla.Execution,
 	start:        time.Time,
-	minimised:    bool,
+	target:    Valhalla.Image,
 }
 
 draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	state := (^State)(user_data)
+	if state.target.extent.xy != state.surface.extent {
+		state.recorded = false
+	}
 	if !state.recorded {
 		record_frame(state) or_return
-		if !state.recorded {
-			return nil
-		}
 	}
 
 	seconds := f32(time.duration_seconds(time.since(state.start)))
@@ -239,32 +235,22 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		sun                     = {sun.x, sun.y, sun.z, 1.6},
 	}
 	Valhalla.wait_execution(state.last) or_return
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&frame), state.frame_buffer) or_return
+	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&frame), state.frame_buffer^) or_return
 
-	execution, err := Valhalla.execute_workloads(&state.frame)
-	if err == Valhalla.Workload_Error.Swapchain_Changed {
-		state.recorded = false
-		return nil
-	}
-	state.last = execution
-	return err
+	state.last = Valhalla.execute_workloads(&state.frame) or_return
+	return nil
 }
 
 record_frame :: proc(state: ^State) -> Valhalla.Error {
 	frame := &state.frame
 	Valhalla.reset_workload(frame) or_return
-	target, acquire_err := Valhalla.acquire(frame, state.surface)
-	state.minimised = acquire_err == Valhalla.Surface_Error.Surface_Minimised
-	if state.minimised {
-		return nil
-	} else if acquire_err != nil {
-		return acquire_err
-	}
-	Valhalla.resize_image(&state.image, target.extent) or_return
+	_ = Valhalla.resize_image(&state.target, {max(state.surface.extent.x, 1), max(state.surface.extent.y, 1), 1}) or_return
+	target := state.target
+	_ = Valhalla.resize_image(&state.image, target.extent) or_return
 
 	raytrace := state.raytrace
 	Valhalla.reset_shader(raytrace)
-	traced, _ := Valhalla.bind_shader_output(raytrace, state.image) or_return
+	traced := Valhalla.bind_shader_output(raytrace, state.image) or_return
 	push := state.push
 	push.output = state.image
 	Valhalla.set_push_data(raytrace, push)
@@ -272,20 +258,20 @@ record_frame :: proc(state: ^State) -> Valhalla.Error {
 	Valhalla.bind_shader(frame, raytrace^) or_return
 
 	shown := Valhalla.blit_image(frame, traced, target, filter = .NEAREST)
-	Valhalla.present(frame, shown)
+	Valhalla.present(frame, shown, state.surface)
 	Valhalla.finalize_workload(frame) or_return
 	state.recorded = true
 	return nil
 }
 
-on_mouse_button :: proc(window: ^Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_mouse_button :: proc(window: Valhalla.Window, button: Valhalla.Mouse_Button, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	camera := (^Camera)(Valhalla.window_user_pointer(window))
 	if button == .Left {
 		camera.dragging = action == .Press
 	}
 }
 
-on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
+on_cursor_pos :: proc(window: Valhalla.Window, position: [2]f64) {
 	camera := (^Camera)(Valhalla.window_user_pointer(window))
 	if camera.dragging {
 		delta := position - camera.last_mouse
@@ -295,12 +281,12 @@ on_cursor_pos :: proc(window: ^Valhalla.Window, position: [2]f64) {
 	camera.last_mouse = position
 }
 
-on_scroll :: proc(window: ^Valhalla.Window, offset: [2]f64) {
+on_scroll :: proc(window: Valhalla.Window, offset: [2]f64) {
 	camera := (^Camera)(Valhalla.window_user_pointer(window))
 	camera.orbit.distance = clamp(camera.orbit.distance - f32(offset.y) * 0.75, 3, 25)
 }
 
-on_key :: proc(window: ^Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
+on_key :: proc(window: Valhalla.Window, key: Valhalla.Key, scancode: i32, action: Valhalla.Action, mods: Valhalla.Modifiers) {
 	if key == .Escape && action == .Press {
 		Valhalla.request_close(window)
 	}
