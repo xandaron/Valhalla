@@ -2,7 +2,6 @@ package Textured_Cube
 
 import "core:log"
 import "core:math"
-import "core:mem"
 import "core:math/linalg"
 import "core:time"
 
@@ -58,9 +57,9 @@ run :: proc() -> Valhalla.Error {
 	defer Valhalla.delete_surface(&surface)
 
 	cube_vertices, cube_indices := make_cube()
-	vertices := Valhalla.make_buffer_from_memory(raw_bytes(cube_vertices[:]), {.Storage}) or_return
+	vertices := Valhalla.make_buffer_from(cube_vertices, {.Storage}) or_return
 	defer Valhalla.delete_buffer(&vertices)
-	indices := Valhalla.make_buffer_from_memory(raw_bytes(cube_indices[:]), {.Index}) or_return
+	indices := Valhalla.make_buffer_from(cube_indices, {.Index}) or_return
 	defer Valhalla.delete_buffer(&indices)
 
 	texture := Valhalla.make_image_from_file(#directory + "/Cube.png") or_return
@@ -137,7 +136,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 	frame := Frame {
 		transform = view_projection(scene.depth.extent.xy) * linalg.matrix4_rotate_f32(seconds * 0.5, {0, 1, 0}),
 	}
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&frame), scene.frame_data) or_return
+	Valhalla.load_to_buffer(frame, scene.frame_data) or_return
 
 	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
 	return nil
@@ -200,8 +199,4 @@ view_projection :: proc(size: [2]u32) -> matrix[4, 4]f32 {
 	}
 	view := linalg.matrix4_look_at_f32({4, 3.5, 5}, {0, 0, 0}, {0, 1, 0})
 	return projection * view
-}
-
-raw_bytes :: proc(data: []$T) -> []u8 {
-	return ([^]u8)(raw_data(data))[:len(data) * size_of(T)]
 }

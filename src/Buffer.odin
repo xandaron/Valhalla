@@ -1,8 +1,12 @@
 package Valhalla
 
+import "base:intrinsics"
 import "base:runtime"
+
 import "core:log"
+import "core:mem"
 import "core:strings"
+
 import vk "vendor:vulkan"
 
 Buffer_Error :: enum {
@@ -11,6 +15,7 @@ Buffer_Error :: enum {
 	Buffer_Creation_Failed,
 	Buffer_Bind_Failed,
 	Buffer_Out_Of_Range,
+	Buffer_Not_Mapped,
 }
 
 Buffer_Usage :: enum {
@@ -111,7 +116,11 @@ make_owned_buffer :: proc(
 		return {}, .Invalid_Buffer_Size
 	}
 	if .Uniform in settings.usage && size > int(device.properties.limits.maxUniformBufferRange) {
-		log.errorf("A uniform buffer can hold at most %v bytes, got %v", device.properties.limits.maxUniformBufferRange, size)
+		log.errorf(
+			"A uniform buffer can hold at most %v bytes, got %v",
+			device.properties.limits.maxUniformBufferRange,
+			size,
+		)
 		return {}, .Invalid_Buffer_Size
 	}
 
@@ -132,7 +141,7 @@ make_owned_buffer :: proc(
 	}
 	name_object(.BUFFER, u64(buffer.handle), settings.name)
 	buffer.variant = Owned_Buffer {
-		name   = strings.clone(settings.name) if settings.name != "" else "",
+		name = strings.clone(settings.name) if settings.name != "" else "",
 	}
 	defer if err != nil {
 		delete_buffer(&buffer)
@@ -158,8 +167,8 @@ make_owned_buffer :: proc(
 }
 
 @(require_results)
-make_buffer_from_memory :: proc(
-	data: []u8,
+make_buffer_from :: proc(
+	source: $T,
 	usage: Buffer_Usages,
 	memory := Buffer_Memory.Device_Local,
 	name := "",
@@ -167,8 +176,8 @@ make_buffer_from_memory :: proc(
 	buffer: Buffer,
 	err: Error,
 ) {
-	buffer = make_buffer(len(data), usage, memory, name) or_return
-	if err = load_memory_to_buffer(data, buffer); err != nil {
+	buffer = make_buffer(source_size(source), usage, memory, name) or_return
+	if err = load_to_buffer(source, buffer); err != nil {
 		delete_buffer(&buffer)
 		return {}, err
 	}
@@ -176,24 +185,75 @@ make_buffer_from_memory :: proc(
 }
 
 @(require_results)
-load_memory_to_buffer :: proc(source: []u8, buffer: Buffer, #any_int offset: int = 0) -> Error {
-	if offset < 0 || vk.DeviceSize(offset + len(source)) > buffer.size {
+load_to_buffer :: proc(source: $T, buffer: Buffer, #any_int offset: int = 0) -> Error {
+	when T == Image {
+		return load_image_to_buffer(source, buffer, offset = offset)
+	} else when T == Buffer {
+		return load_buffer_to_buffer(source, buffer, offset = offset)
+	} else {
+		source := source
+		data, size := source_span(&source)
+		return load_ptr_to_buffer(data, size, buffer, offset)
+	}
+}
+
+@(require_results)
+load_ptr_to_buffer :: proc(
+	source: rawptr,
+	size: int,
+	buffer: Buffer,
+	#any_int offset: int = 0,
+) -> Error {
+	if offset < 0 || vk.DeviceSize(offset + size) > buffer.size {
 		log.errorf(
 			"Writing %v bytes at offset %v overruns a %v byte buffer",
-			len(source),
+			size,
 			offset,
 			buffer.size,
 		)
 		return .Buffer_Out_Of_Range
 	}
-	if len(source) == 0 {
+	if size == 0 {
 		return nil
 	}
 	if buffer.mapped != nil {
-		copy(buffer.mapped[offset:][:len(source)], source)
+		mem.copy(&buffer.mapped[offset], source, size)
 		return nil
 	}
-	return upload_to_buffer(buffer.handle, vk.DeviceSize(offset), source)
+	return upload_to_buffer(buffer.handle, vk.DeviceSize(offset), source, size)
+}
+
+@(require_results)
+load_from_buffer :: proc(buffer: Buffer, destination: $T, #any_int offset: int = 0) -> Error {
+	data, size := destination_span(destination)
+	return load_buffer_to_ptr(buffer, data, size, offset)
+}
+
+@(require_results)
+load_buffer_to_ptr :: proc(
+	buffer: Buffer,
+	destination: rawptr,
+	size: int,
+	#any_int offset: int = 0,
+) -> Error {
+	if offset < 0 || size < 0 || vk.DeviceSize(offset + size) > buffer.size {
+		log.errorf(
+			"Reading %v bytes at offset %v overruns a %v byte buffer",
+			size,
+			offset,
+			buffer.size,
+		)
+		return .Buffer_Out_Of_Range
+	}
+	if buffer.mapped == nil {
+		log.error("Only a Host_Visible buffer can be read directly; read a Device_Local buffer with readback")
+		return .Buffer_Not_Mapped
+	}
+	if size == 0 {
+		return nil
+	}
+	mem.copy(destination, &buffer.mapped[offset], size)
+	return nil
 }
 
 @(require_results)
@@ -221,6 +281,69 @@ load_buffer_to_buffer :: proc(
 	cmd := staging_commands() or_return
 	emit_buffer_copy(cmd, source.handle, buffer.handle, region)
 	return nil
+}
+
+@(private)
+source_size :: proc(source: $T) -> int {
+	when T == Image {
+		return image_region_bytes(source, {})
+	} else when T == Buffer {
+		return int(source.size)
+	} else {
+		source := source
+		_, size := source_span(&source)
+		return size
+	}
+}
+
+@(private)
+source_span :: proc(source: ^$T) -> (data: rawptr, size: int) {
+	#assert(!intrinsics.type_is_pointer(T), "a source is passed by value, not by pointer")
+	#assert(!intrinsics.type_is_multi_pointer(T), "a multi-pointer does not say how many elements it covers")
+	#assert(!intrinsics.type_is_map(T), "a map cannot be a source")
+	#assert(!intrinsics.type_is_proc(T), "a procedure cannot be a source")
+	#assert(!intrinsics.type_is_any(T), "an any cannot be a source")
+	#assert(!intrinsics.type_is_typeid(T), "a typeid cannot be a source")
+	when intrinsics.type_is_cstring(T) {
+		return rawptr(source^), len(source^)
+	} else when intrinsics.type_is_cstring16(T) {
+		return rawptr(source^), len(source^) * size_of(u16)
+	} else when intrinsics.type_is_slice(T) || intrinsics.type_is_dynamic_array(T) || intrinsics.type_is_string(T) {
+		return raw_data(source^), len(source^) * size_of(raw_data(source^)[0])
+	} else when intrinsics.type_is_fixed_capacity_dynamic_array(T) {
+		return raw_data(source^[:]), len(source^) * size_of(source^[0])
+	} else {
+		return source, size_of(T)
+	}
+}
+
+@(private)
+destination_span :: proc(destination: $T) -> (data: rawptr, size: int) {
+	when intrinsics.type_is_slice(T) {
+		return raw_data(destination), len(destination) * size_of(raw_data(destination)[0])
+	} else when intrinsics.type_is_pointer(T) && T != rawptr {
+		E :: intrinsics.type_elem_type(T)
+		#assert(
+			!intrinsics.type_is_slice(E) &&
+			!intrinsics.type_is_dynamic_array(E) &&
+			!intrinsics.type_is_fixed_capacity_dynamic_array(E) &&
+			!intrinsics.type_is_string(E),
+			"a pointer to a slice, dynamic array or string would overwrite its header; pass the slice itself",
+		)
+		#assert(
+			!intrinsics.type_is_pointer(E) &&
+			!intrinsics.type_is_multi_pointer(E) &&
+			!intrinsics.type_is_map(E) &&
+			!intrinsics.type_is_proc(E) &&
+			!intrinsics.type_is_any(E) &&
+			!intrinsics.type_is_typeid(E),
+			"a copy destination must point at plain data",
+		)
+		return destination, size_of(E)
+	} else {
+		#assert(false, "a copy destination is a pointer to a value or a slice")
+		return nil, 0
+	}
 }
 
 delete_buffer :: proc(buffer: ^Buffer) {
@@ -339,7 +462,10 @@ make_top_level :: proc(
 }
 
 @(require_results)
-update_top_level :: proc(structure: Acceleration_Structure, instances: []Acceleration_Instance) -> Error {
+update_top_level :: proc(
+	structure: Acceleration_Structure,
+	instances: []Acceleration_Instance,
+) -> Error {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	assert(structure.handle != 0, "update_top_level needs a structure made by make_top_level")
 	instance_buffer, described, ranges := describe_instances(instances) or_return
@@ -379,7 +505,10 @@ describe_instances :: proc(
 	) or_return
 	written := ([^]vk.AccelerationStructureInstanceKHR)(buffer.mapped)
 	for instance, index in instances {
-		assert(instance.structure.handle != 0, "an instance needs a bottom level acceleration structure")
+		assert(
+			instance.structure.handle != 0,
+			"an instance needs a bottom level acceleration structure",
+		)
 		transform: vk.TransformMatrixKHR
 		for row in 0 ..< 3 {
 			for column in 0 ..< 4 {
@@ -395,9 +524,14 @@ describe_instances :: proc(
 	}
 	geometries = make([]vk.AccelerationStructureGeometryKHR, 1, context.temp_allocator)
 	geometries[0] = {
-		sType        = .ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		sType = .ACCELERATION_STRUCTURE_GEOMETRY_KHR,
 		geometryType = .INSTANCES,
-		geometry     = {instances = {sType = .ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR, data = {deviceAddress = buffer.address}}},
+		geometry = {
+			instances = {
+				sType = .ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+				data = {deviceAddress = buffer.address},
+			},
+		},
 	}
 	ranges = make([]vk.AccelerationStructureBuildRangeInfoKHR, 1, context.temp_allocator)
 	ranges[0] = {
@@ -430,7 +564,13 @@ acceleration_build_sizes :: proc(
 	sizes = {
 		sType = .ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
 	}
-	vk.GetAccelerationStructureBuildSizesKHR(device.handle, .DEVICE, &build_info, raw_data(counts), &sizes)
+	vk.GetAccelerationStructureBuildSizesKHR(
+		device.handle,
+		.DEVICE,
+		&build_info,
+		raw_data(counts),
+		&sizes,
+	)
 	return
 }
 
@@ -445,9 +585,16 @@ make_acceleration_structure :: proc(
 	structure: Acceleration_Structure,
 	err: Error,
 ) {
-	assert(device.optional.ray_query, "acceleration structures need a device with ray queries (device.optional.ray_query)")
+	assert(
+		device.optional.ray_query,
+		"acceleration structures need a device with ray queries (device.optional.ray_query)",
+	)
 	build_info, sizes := acceleration_build_sizes(type, geometries, ranges)
-	structure.storage = make_owned_buffer(sizes.accelerationStructureSize, {name = name}, {.ACCELERATION_STRUCTURE_STORAGE_KHR}) or_return
+	structure.storage = make_owned_buffer(
+		sizes.accelerationStructureSize,
+		{name = name},
+		{.ACCELERATION_STRUCTURE_STORAGE_KHR},
+	) or_return
 	defer if err != nil {
 		delete_acceleration_structure(&structure)
 	}
@@ -457,7 +604,12 @@ make_acceleration_structure :: proc(
 		size   = sizes.accelerationStructureSize,
 		type   = type,
 	}
-	if res := vk.CreateAccelerationStructureKHR(device.handle, &create_info, nil, &structure.handle); res != .SUCCESS {
+	if res := vk.CreateAccelerationStructureKHR(
+		device.handle,
+		&create_info,
+		nil,
+		&structure.handle,
+	); res != .SUCCESS {
 		log.errorf("Failed to create an acceleration structure: %v", res)
 		return structure, .Buffer_Creation_Failed
 	}
@@ -488,7 +640,11 @@ build_acceleration_structure :: proc(
 	}
 	vk.GetPhysicalDeviceProperties2(device.physical_device, &query)
 	alignment := vk.DeviceSize(max(properties.minAccelerationStructureScratchOffsetAlignment, 1))
-	scratch := make_owned_buffer(sizes.buildScratchSize + alignment, {}, {.STORAGE_BUFFER}) or_return
+	scratch := make_owned_buffer(
+		sizes.buildScratchSize + alignment,
+		{},
+		{.STORAGE_BUFFER},
+	) or_return
 	defer delete_buffer(&scratch)
 	build_info.dstAccelerationStructure = structure.handle
 	build_info.scratchData = {

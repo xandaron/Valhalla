@@ -2,7 +2,6 @@ package Input
 
 import "core:fmt"
 import "core:log"
-import "core:mem"
 import "core:strings"
 
 import Valhalla "../../src"
@@ -177,7 +176,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		radius   = state.radius * scale.x,
 		locked   = u32(state.locked),
 	}
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&disc), state.disc) or_return
+	Valhalla.load_to_buffer(disc, state.disc) or_return
 
 	state.last = Valhalla.execute_workloads(&state.frame) or_return
 	return nil

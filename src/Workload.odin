@@ -795,6 +795,11 @@ readback_data :: proc(readback: Readback) -> []u8 {
 }
 
 @(require_results)
+load_from_readback :: proc(readback: Readback, destination: $T, #any_int offset: int = 0) -> Error {
+	return load_from_buffer(readback.buffer, destination, offset)
+}
+
+@(require_results)
 write_readback :: proc(readback: Readback, file: ^os.File, encoded := true) -> Error {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	data := readback_data(readback)

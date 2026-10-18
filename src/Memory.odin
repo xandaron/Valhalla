@@ -5,7 +5,13 @@ import "core:log"
 import vk "vendor:vulkan"
 
 @(private)
-find_memory_type :: proc(type_bits: u32, properties: vk.MemoryPropertyFlags) -> (index: u32, found: bool) {
+find_memory_type :: proc(
+	type_bits: u32,
+	properties: vk.MemoryPropertyFlags,
+) -> (
+	index: u32,
+	found: bool,
+) {
 	for memory_type, type_index in device.memory_properties.memoryTypes[:device.memory_properties.memoryTypeCount] {
 		if type_bits & (1 << u32(type_index)) != 0 && properties <= memory_type.propertyFlags {
 			return u32(type_index), true
@@ -88,7 +94,13 @@ Memory_Resource :: union {
 
 @(private)
 @(require_results)
-allocate_memory :: proc(resource: Memory_Resource, properties: vk.MemoryPropertyFlags) -> (allocation: Allocation, err: Error) {
+allocate_memory :: proc(
+	resource: Memory_Resource,
+	properties: vk.MemoryPropertyFlags,
+) -> (
+	allocation: Allocation,
+	err: Error,
+) {
 	dedicated_requirements: vk.MemoryDedicatedRequirements = {
 		sType = .MEMORY_DEDICATED_REQUIREMENTS,
 	}
@@ -102,17 +114,26 @@ allocate_memory :: proc(resource: Memory_Resource, properties: vk.MemoryProperty
 	usage: Memory_Usage
 	switch handle in resource {
 	case vk.Buffer:
-		vk.GetBufferMemoryRequirements2(device.handle, &{sType = .BUFFER_MEMORY_REQUIREMENTS_INFO_2, buffer = handle}, &requirements2)
+		vk.GetBufferMemoryRequirements2(
+			device.handle,
+			&{sType = .BUFFER_MEMORY_REQUIREMENTS_INFO_2, buffer = handle},
+			&requirements2,
+		)
 		dedicated_info.buffer = handle
 		usage = .Linear
 	case vk.Image:
-		vk.GetImageMemoryRequirements2(device.handle, &{sType = .IMAGE_MEMORY_REQUIREMENTS_INFO_2, image = handle}, &requirements2)
+		vk.GetImageMemoryRequirements2(
+			device.handle,
+			&{sType = .IMAGE_MEMORY_REQUIREMENTS_INFO_2, image = handle},
+			&requirements2,
+		)
 		dedicated_info.image = handle
 		usage = .Optimal
 	}
 	requirements := requirements2.memoryRequirements
 	dedicated: ^vk.MemoryDedicatedAllocateInfo
-	if dedicated_requirements.prefersDedicatedAllocation || dedicated_requirements.requiresDedicatedAllocation {
+	if dedicated_requirements.prefersDedicatedAllocation ||
+	   dedicated_requirements.requiresDedicatedAllocation {
 		dedicated = &dedicated_info
 	}
 
@@ -121,14 +142,25 @@ allocate_memory :: proc(resource: Memory_Resource, properties: vk.MemoryProperty
 		log.errorf("No memory type has the properties %v", properties)
 		return {}, .No_Suitable_Memory_Type
 	}
-	host_visible := .HOST_VISIBLE in device.memory_properties.memoryTypes[memory_type].propertyFlags
+	host_visible :=
+		.HOST_VISIBLE in device.memory_properties.memoryTypes[memory_type].propertyFlags
 
 	if dedicated != nil || requirements.size >= DEDICATED_THRESHOLD {
 		if !memory_within_budget(memory_type, requirements.size) {
-			log.errorf("The heap for memory type %v cannot fit a %v byte dedicated allocation", memory_type, requirements.size)
+			log.errorf(
+				"The heap for memory type %v cannot fit a %v byte dedicated allocation",
+				memory_type,
+				requirements.size,
+			)
 			return {}, .Out_Of_Budget
 		}
-		memory, mapped := allocate_device_memory(requirements.size, memory_type, host_visible, dedicated, MEMORY_PRIORITY_DEDICATED) or_return
+		memory, mapped := allocate_device_memory(
+			requirements.size,
+			memory_type,
+			host_visible,
+			dedicated,
+			MEMORY_PRIORITY_DEDICATED,
+		) or_return
 		memory_allocator.dedicated_count += 1
 		memory_allocator.live_dedicated += 1
 		return {memory = memory, size = requirements.size, mapped = mapped}, nil
@@ -139,15 +171,22 @@ allocate_memory :: proc(resource: Memory_Resource, properties: vk.MemoryProperty
 	carved := false
 	for candidate in memory_allocator.blocks {
 		if candidate.memory_type == memory_type && candidate.usage == usage {
-			if offset, carved = carve_block(candidate, requirements.size, requirements.alignment); carved {
+			if offset, carved = carve_block(candidate, requirements.size, requirements.alignment);
+			   carved {
 				block = candidate
 				break
 			}
 		}
 	}
 	if !carved {
-		block = add_memory_block(memory_type, usage, host_visible, requirements.size + requirements.alignment) or_return
-		if offset, carved = carve_block(block, requirements.size, requirements.alignment); !carved {
+		block = add_memory_block(
+			memory_type,
+			usage,
+			host_visible,
+			requirements.size + requirements.alignment,
+		) or_return
+		if offset, carved = carve_block(block, requirements.size, requirements.alignment);
+		   !carved {
 			log.error("An allocation did not fit in a fresh memory block")
 			return {}, .Allocation_Failed
 		}
@@ -191,7 +230,12 @@ report_memory_leaks :: proc() {
 			used -= range.size
 		}
 		if used != 0 {
-			log.warnf("Memory block %v (type %v) still has %v bytes allocated", index, block.memory_type, used)
+			log.warnf(
+				"Memory block %v (type %v) still has %v bytes allocated",
+				index,
+				block.memory_type,
+				used,
+			)
 		}
 	}
 	if memory_allocator.live_dedicated != 0 {
@@ -317,13 +361,23 @@ add_memory_block :: proc(
 
 	for !memory_within_budget(memory_type, block_size) {
 		if block_size <= minimum_size {
-			log.errorf("The heap for memory type %v is out of budget (needed %v bytes)", memory_type, minimum_size)
+			log.errorf(
+				"The heap for memory type %v is out of budget (needed %v bytes)",
+				memory_type,
+				minimum_size,
+			)
 			return nil, .Out_Of_Budget
 		}
 		block_size = max(block_size / 2, minimum_size)
 	}
 
-	memory, mapped := allocate_device_memory(block_size, memory_type, host_visible, nil, MEMORY_PRIORITY_BLOCK) or_return
+	memory, mapped := allocate_device_memory(
+		block_size,
+		memory_type,
+		host_visible,
+		nil,
+		MEMORY_PRIORITY_BLOCK,
+	) or_return
 	block = new(Memory_Block)
 	block^ = {
 		memory      = memory,
@@ -335,7 +389,12 @@ add_memory_block :: proc(
 	}
 	append(&block.free, Memory_Range{offset = 0, size = block_size})
 	append(&memory_allocator.blocks, block)
-	log.infof("Allocated a %v MiB %v memory block (type %v)", block_size / (1024 * 1024), usage, memory_type)
+	log.infof(
+		"Allocated a %v MiB %v memory block (type %v)",
+		block_size / (1024 * 1024),
+		usage,
+		memory_type,
+	)
 	return block, nil
 }
 
@@ -362,7 +421,13 @@ round_up :: proc(value, multiple: vk.DeviceSize) -> vk.DeviceSize {
 }
 
 @(private = "file")
-carve_block :: proc(block: ^Memory_Block, size, alignment: vk.DeviceSize) -> (offset: vk.DeviceSize, ok: bool) {
+carve_block :: proc(
+	block: ^Memory_Block,
+	size, alignment: vk.DeviceSize,
+) -> (
+	offset: vk.DeviceSize,
+	ok: bool,
+) {
 	for &range, index in block.free {
 		aligned := round_up(range.offset, alignment)
 		padding := aligned - range.offset
@@ -394,11 +459,13 @@ release_block_range :: proc(block: ^Memory_Block, offset, size: vk.DeviceSize) {
 		index += 1
 	}
 	inject_at(&block.free, index, Memory_Range{offset, size})
-	if index + 1 < len(block.free) && block.free[index].offset + block.free[index].size == block.free[index + 1].offset {
+	if index + 1 < len(block.free) &&
+	   block.free[index].offset + block.free[index].size == block.free[index + 1].offset {
 		block.free[index].size += block.free[index + 1].size
 		ordered_remove(&block.free, index + 1)
 	}
-	if index > 0 && block.free[index - 1].offset + block.free[index - 1].size == block.free[index].offset {
+	if index > 0 &&
+	   block.free[index - 1].offset + block.free[index - 1].size == block.free[index].offset {
 		block.free[index - 1].size += block.free[index].size
 		ordered_remove(&block.free, index)
 	}
@@ -455,7 +522,10 @@ stage :: proc(
 		log.infof("Staging ring: %v MiB", STAGING_SIZE / (1024 * 1024))
 	}
 	if reserved_offset, reserved := reserve_staging(size, alignment); reserved {
-		return staging.buffer.handle, reserved_offset, staging.buffer.allocation.mapped[reserved_offset:], nil
+		return staging.buffer.handle,
+			reserved_offset,
+			staging.buffer.allocation.mapped[reserved_offset:],
+			nil
 	}
 	oversized := make_host_buffer(size, {.TRANSFER_SRC}) or_return
 	append(&staging.oversized, oversized)
@@ -466,7 +536,13 @@ stage :: proc(
 @(require_results)
 staging_commands :: proc() -> (command_buffer: vk.CommandBuffer, err: Error) {
 	if staging.recording {
-		memory_barrier(staging.command_buffer, {.ALL_TRANSFER}, {.TRANSFER_READ, .TRANSFER_WRITE}, {.ALL_TRANSFER}, {.TRANSFER_READ, .TRANSFER_WRITE})
+		memory_barrier(
+			staging.command_buffer,
+			{.ALL_TRANSFER},
+			{.TRANSFER_READ, .TRANSFER_WRITE},
+			{.ALL_TRANSFER},
+			{.TRANSFER_READ, .TRANSFER_WRITE},
+		)
 		return staging.command_buffer, nil
 	}
 	open_staging() or_return
@@ -477,7 +553,13 @@ staging_commands :: proc() -> (command_buffer: vk.CommandBuffer, err: Error) {
 		staging.command_buffer = allocate_command_buffer(staging.command_pool, "staging") or_return
 	}
 	begin_commands(staging.command_buffer, {.ONE_TIME_SUBMIT}) or_return
-	memory_barrier(staging.command_buffer, {.ALL_COMMANDS}, {.MEMORY_READ, .MEMORY_WRITE}, {.ALL_TRANSFER}, {.TRANSFER_READ, .TRANSFER_WRITE})
+	memory_barrier(
+		staging.command_buffer,
+		{.ALL_COMMANDS},
+		{.MEMORY_READ, .MEMORY_WRITE},
+		{.ALL_TRANSFER},
+		{.TRANSFER_READ, .TRANSFER_WRITE},
+	)
 	staging.recording = true
 	return staging.command_buffer, nil
 }
@@ -488,7 +570,13 @@ flush_staging :: proc() -> Error {
 	if !staging.recording {
 		return nil
 	}
-	memory_barrier(staging.command_buffer, {.ALL_TRANSFER}, {.TRANSFER_WRITE}, {.ALL_COMMANDS}, {.MEMORY_READ, .MEMORY_WRITE})
+	memory_barrier(
+		staging.command_buffer,
+		{.ALL_TRANSFER},
+		{.TRANSFER_WRITE},
+		{.ALL_COMMANDS},
+		{.MEMORY_READ, .MEMORY_WRITE},
+	)
 	if res := vk.EndCommandBuffer(staging.command_buffer); res != .SUCCESS {
 		log.errorf("Failed to end a staging command buffer: %v", res)
 		return .Recording_Failed
@@ -522,7 +610,12 @@ flush_staging :: proc() -> Error {
 	}
 	append(
 		&staging.pending,
-		Staging_Batch{head = staging.head, value = staging.submitted, command_buffer = command_buffer, oversized = staging.oversized},
+		Staging_Batch {
+			head = staging.head,
+			value = staging.submitted,
+			command_buffer = command_buffer,
+			oversized = staging.oversized,
+		},
 	)
 	staging.oversized = {}
 	return nil
@@ -530,12 +623,26 @@ flush_staging :: proc() -> Error {
 
 @(private)
 @(require_results)
-upload_to_buffer :: proc(destination: vk.Buffer, destination_offset: vk.DeviceSize, source: []u8) -> Error {
-	size := vk.DeviceSize(len(source))
-	buffer, offset, mapped := stage(size) or_return
-	runtime.mem_copy_non_overlapping(mapped, raw_data(source), len(source))
+upload_to_buffer :: proc(
+	destination: vk.Buffer,
+	destination_offset: vk.DeviceSize,
+	source: rawptr,
+	size: int,
+) -> Error {
+	buffer, offset, mapped := stage(vk.DeviceSize(size)) or_return
+	runtime.mem_copy_non_overlapping(mapped, source, size)
 	command_buffer := staging_commands() or_return
-	emit_buffer_copy(command_buffer, buffer, destination, {sType = .BUFFER_COPY_2, srcOffset = offset, dstOffset = destination_offset, size = size})
+	emit_buffer_copy(
+		command_buffer,
+		buffer,
+		destination,
+		{
+			sType = .BUFFER_COPY_2,
+			srcOffset = offset,
+			dstOffset = destination_offset,
+			size = vk.DeviceSize(size),
+		},
+	)
 	return nil
 }
 
@@ -545,7 +652,10 @@ open_staging :: proc() -> Error {
 	if staging.command_pool != 0 {
 		return nil
 	}
-	staging.command_pool = make_command_pool({.TRANSIENT, .RESET_COMMAND_BUFFER}, "staging") or_return
+	staging.command_pool = make_command_pool(
+		{.TRANSIENT, .RESET_COMMAND_BUFFER},
+		"staging",
+	) or_return
 	staging.timeline = make_semaphore(true, "staging timeline") or_return
 	return nil
 }
@@ -585,7 +695,13 @@ Host_Buffer :: struct {
 
 @(private)
 @(require_results)
-make_host_buffer :: proc(size: vk.DeviceSize, usage: vk.BufferUsageFlags2) -> (buffer: Host_Buffer, err: Error) {
+make_host_buffer :: proc(
+	size: vk.DeviceSize,
+	usage: vk.BufferUsageFlags2,
+) -> (
+	buffer: Host_Buffer,
+	err: Error,
+) {
 	usage_info: vk.BufferUsageFlags2CreateInfo = {
 		sType = .BUFFER_USAGE_FLAGS_2_CREATE_INFO,
 		usage = usage,
@@ -604,7 +720,12 @@ make_host_buffer :: proc(size: vk.DeviceSize, usage: vk.BufferUsageFlags2) -> (b
 		destroy_host_buffer(&buffer)
 	}
 	buffer.allocation = allocate_memory(buffer.handle, {.HOST_VISIBLE, .HOST_COHERENT}) or_return
-	if res := vk.BindBufferMemory(device.handle, buffer.handle, buffer.allocation.memory, buffer.allocation.offset); res != .SUCCESS {
+	if res := vk.BindBufferMemory(
+		device.handle,
+		buffer.handle,
+		buffer.allocation.memory,
+		buffer.allocation.offset,
+	); res != .SUCCESS {
 		log.errorf("Failed to bind host buffer memory: %v", res)
 		return buffer, .Host_Buffer_Creation_Failed
 	}
@@ -622,7 +743,10 @@ destroy_host_buffer :: proc(buffer: ^Host_Buffer) {
 
 @(private)
 buffer_address :: proc(buffer: vk.Buffer) -> vk.DeviceAddress {
-	return vk.GetBufferDeviceAddress(device.handle, &{sType = .BUFFER_DEVICE_ADDRESS_INFO, buffer = buffer})
+	return vk.GetBufferDeviceAddress(
+		device.handle,
+		&{sType = .BUFFER_DEVICE_ADDRESS_INFO, buffer = buffer},
+	)
 }
 
 @(private = "file")

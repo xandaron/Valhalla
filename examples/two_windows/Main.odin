@@ -2,7 +2,6 @@ package Two_Windows
 
 import "core:log"
 import "core:math"
-import "core:mem"
 
 import Valhalla "../../src"
 
@@ -120,7 +119,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		pick   = scene.controls.pick,
 		radius = scene.controls.radius,
 	}
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&shared), scene.shared) or_return
+	Valhalla.load_to_buffer(shared, scene.shared) or_return
 
 	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
 	return nil

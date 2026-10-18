@@ -646,13 +646,9 @@ update_params :: proc(editor: ^Editor, order: []^Node) -> Valhalla.Error {
 		return nil
 	}
 	Valhalla.wait_execution(editor.graph_last) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(editor.param_values[:]), editor.params) or_return
+	Valhalla.load_to_buffer(editor.param_values, editor.params) or_return
 	editor.params_written = true
 	return nil
-}
-
-raw_bytes :: proc(data: []$T) -> []u8 {
-	return ([^]u8)(raw_data(data))[:len(data) * size_of(T)]
 }
 
 compile_custom :: proc(editor: ^Editor, node: ^Node) {
@@ -1260,7 +1256,7 @@ run :: proc() -> Valhalla.Error {
 	defer Valhalla.delete_sampler(&editor.sampler)
 	editor.black = Valhalla.make_image(.R8G8B8A8_UNORM, {1, 1, 1}) or_return
 	defer Valhalla.delete_image(&editor.black)
-	Valhalla.load_memory_to_image([]u8{0, 0, 0, 255}, &editor.black) or_return
+	Valhalla.load_to_image([]u8{0, 0, 0, 255}, editor.black) or_return
 	editor.display_shown = editor.black
 	defer Valhalla.delete_image(&editor.display)
 	defer delete(editor.save_path)

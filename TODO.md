@@ -6,11 +6,10 @@
       follow. Each should read top to bottom as the steps of the one thing it shows, with setup,
       per-frame work and teardown easy to tell apart. Seen so far: `lighting` threads ~25 fields
       through a `Scene` struct of pointers and splits a frame across `draw_frame`/`record_frame` with
-      a `recorded` flag; the same helpers are copied between examples (`raw_bytes` five times,
-      `add_cube`/`add_plane`/`add_sphere` and `projection` three times, orbit-camera input callbacks
-      in four or five); `image_editor` is 1391 lines in one file; every example that passes
-      `&surface` into a frame procedure trips Odin's "may keep a reference to stack memory" warning.
-      Copies of `raw_bytes` suggest something the API should offer itself.
+      a `recorded` flag; the same helpers are copied between examples (`add_cube`/`add_plane`/
+      `add_sphere` and `projection` three times, orbit-camera input callbacks in four or five);
+      `image_editor` is 1391 lines in one file; every example that passes `&surface` into a frame
+      procedure trips Odin's "may keep a reference to stack memory" warning.
 - [ ] `Valhalla_ImGui.init(window, format)`: decide whether it should take the surface instead and
       follow its format through an HDR toggle; not yet discussed.
 - [ ] `Valhalla_ImGui` sizes its geometry ring to `MAX_EXECUTIONS_IN_FLIGHT + 1`, which only holds if

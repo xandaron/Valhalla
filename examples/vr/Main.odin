@@ -3,7 +3,6 @@ package Vr
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:mem"
 import "core:time"
 import vk "vendor:vulkan"
 
@@ -162,9 +161,9 @@ run :: proc() -> Valhalla.Error {
 		append(&spinners, Spinner{object = object, position = def.position, scale = def.scale, speed = def.speed, bob = f32(index)})
 	}
 
-	vertex_buffer := Valhalla.make_buffer_from_memory(raw_bytes(vertices[:]), {.Storage}) or_return
+	vertex_buffer := Valhalla.make_buffer_from(vertices, {.Storage}) or_return
 	defer Valhalla.delete_buffer(&vertex_buffer)
-	index_buffer := Valhalla.make_buffer_from_memory(raw_bytes(indices[:]), {.Index}) or_return
+	index_buffer := Valhalla.make_buffer_from(indices, {.Index}) or_return
 	defer Valhalla.delete_buffer(&index_buffer)
 	object_buffer := Valhalla.make_buffer(len(objects) * size_of(Object), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&object_buffer)
@@ -300,9 +299,9 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 			position        = {position.x, position.y, position.z, 1},
 		}
 	}
-	Valhalla.load_memory_to_buffer(raw_bytes(scene.objects), scene.object_buffer^) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(eyes[:]), scene.eye_buffer^) or_return
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&view), scene.view_buffer^) or_return
+	Valhalla.load_to_buffer(scene.objects, scene.object_buffer^) or_return
+	Valhalla.load_to_buffer(eyes, scene.eye_buffer^) or_return
+	Valhalla.load_to_buffer(view, scene.view_buffer^) or_return
 
 	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
 	return nil
@@ -501,8 +500,4 @@ projection :: proc(focal, aspect, near, far: f32) -> matrix[4, 4]f32 {
 		0, 0, far / (near - far), near * far / (near - far),
 		0, 0, -1, 0,
 	}
-}
-
-raw_bytes :: proc(data: []$T) -> []u8 {
-	return ([^]u8)(raw_data(data))[:len(data) * size_of(T)]
 }

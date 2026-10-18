@@ -3,7 +3,6 @@ package Raytracing
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:mem"
 import "core:time"
 
 import Valhalla "../../src"
@@ -89,10 +88,10 @@ run :: proc() -> Valhalla.Error {
 	sphere := add_sphere(&vertices, &indices, rings = 48, segments = 96)
 
 	geometry_name := "vertices"
-	vertex_buffer := Valhalla.make_buffer_from_memory(raw_bytes(vertices[:]), GEOMETRY_USAGE, name = geometry_name) or_return
+	vertex_buffer := Valhalla.make_buffer_from(vertices, GEOMETRY_USAGE, name = geometry_name) or_return
 	defer Valhalla.delete_buffer(&vertex_buffer)
 	geometry_name = "indices"
-	index_buffer := Valhalla.make_buffer_from_memory(raw_bytes(indices[:]), GEOMETRY_USAGE, name = geometry_name) or_return
+	index_buffer := Valhalla.make_buffer_from(indices, GEOMETRY_USAGE, name = geometry_name) or_return
 	defer Valhalla.delete_buffer(&index_buffer)
 
 	meshes := [?]Mesh{plane, cube, sphere}
@@ -160,7 +159,7 @@ run :: proc() -> Valhalla.Error {
 
 	scene := Valhalla.make_top_level(instances[:], name = "scene") or_return
 	defer Valhalla.delete_acceleration_structure(&scene)
-	object_buffer := Valhalla.make_buffer_from_memory(raw_bytes(objects[:]), {.Storage}, name = "objects") or_return
+	object_buffer := Valhalla.make_buffer_from(objects, {.Storage}, name = "objects") or_return
 	defer Valhalla.delete_buffer(&object_buffer)
 	frame_buffer := Valhalla.make_buffer(size_of(Frame), {.Storage}, .Host_Visible, "frame") or_return
 	defer Valhalla.delete_buffer(&frame_buffer)
@@ -235,7 +234,7 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		sun                     = {sun.x, sun.y, sun.z, 1.6},
 	}
 	Valhalla.wait_execution(state.last) or_return
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&frame), state.frame_buffer^) or_return
+	Valhalla.load_to_buffer(frame, state.frame_buffer^) or_return
 
 	state.last = Valhalla.execute_workloads(&state.frame) or_return
 	return nil
@@ -350,8 +349,4 @@ projection :: proc(focal, aspect, near, far: f32) -> matrix[4, 4]f32 {
 		0, 0, far / (near - far), near * far / (near - far),
 		0, 0, -1, 0,
 	}
-}
-
-raw_bytes :: proc(data: []$T) -> []u8 {
-	return ([^]u8)(raw_data(data))[:len(data) * size_of(T)]
 }

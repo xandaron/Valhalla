@@ -1,5 +1,6 @@
 package Valhalla
 
+import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -283,7 +284,7 @@ make_image_from_file :: proc(
 		return {}, .Image_Decode_Failed
 	}
 	image = make_image(format, {u32(width), u32(height), 1}, usage, name = filepath.base(filename), view_formats = view_formats) or_return
-	if err = load_encoded_to_image(filename, data, &image, 0, 0); err != nil {
+	if err = load_encoded_to_image(filename, data, image, 0, 0); err != nil {
 		delete_image(&image)
 		return {}, err
 	}
@@ -291,8 +292,8 @@ make_image_from_file :: proc(
 }
 
 @(require_results)
-make_image_from_memory :: proc(
-	data: []u8,
+make_image_from :: proc(
+	source: $T,
 	format: Format,
 	size: [3]u32,
 	usage := Image_Usages{},
@@ -307,7 +308,7 @@ make_image_from_memory :: proc(
 	err: Error,
 ) {
 	image = make_image(format, size, usage, shape, layers, mip_levels, samples, name, view_formats) or_return
-	if err = load_memory_to_image(data, &image); err != nil {
+	if err = load_to_image(source, image); err != nil {
 		delete_image(&image)
 		return {}, err
 	}
@@ -331,21 +332,29 @@ resize_image :: proc(image: ^Image, size: [3]u32) -> (resized: bool, err: Error)
 }
 
 @(require_results)
-load_file_to_image :: proc(filename: string, image: ^Image, mip_level: u32 = 0, layer: u32 = 0) -> Error {
+load_file_to_image :: proc(filename: string, image: Image, mip_level: u32 = 0, layer: u32 = 0) -> Error {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	data := read_image_file(filename) or_return
 	return load_encoded_to_image(filename, data, image, mip_level, layer)
 }
 
 @(require_results)
-load_memory_to_image :: proc(
-	source: []u8,
-	image: ^Image,
-	mip_level: u32 = 0,
-	first_layer: u32 = 0,
-	offset := [3]u32{},
-	size := [3]u32{},
-) -> Error {
+load_to_image :: proc(source: $T, image: Image, region := Image_Region{}) -> Error {
+	#assert(!intrinsics.type_is_string(T), "load_to_image takes texel data, not a string; load an image file with load_file_to_image")
+	when T == Image {
+		return load_image_to_image(source, image, region = region)
+	} else when T == Buffer {
+		return load_buffer_to_image(source, image, region = region)
+	} else {
+		source := source
+		data, size := source_span(&source)
+		return load_ptr_to_image(data, size, image, region)
+	}
+}
+
+@(require_results)
+load_ptr_to_image :: proc(source: rawptr, size: int, image: Image, region := Image_Region{}) -> Error {
+	assert_general(image)
 	if .TRANSFER_DST not_in image.usage {
 		log.error("The image cannot be written to: it was not created as a transfer destination")
 		return .Invalid_Upload
@@ -354,8 +363,8 @@ load_memory_to_image :: proc(
 		log.error("Combined depth-stencil images cannot be loaded from memory")
 		return .Invalid_Upload
 	}
-	if mip_level >= image.mip_levels {
-		log.errorf("Mip level %v is outside an image with %v levels", mip_level, image.mip_levels)
+	if region.mip_level >= image.mip_levels {
+		log.errorf("Mip level %v is outside an image with %v levels", region.mip_level, image.mip_levels)
 		return .Invalid_Upload
 	}
 	texel_size, known := format_texel_size(image.format)
@@ -363,50 +372,50 @@ load_memory_to_image :: proc(
 		log.errorf("Loading %v images from memory is not supported yet", image.format)
 		return .Unsupported_Format
 	}
-	full := mip_extent(image^, mip_level)
+	full := mip_extent(image, region.mip_level)
+	offset := region.offset
 	if offset.x >= full.x || offset.y >= full.y || offset.z >= full.z {
-		log.errorf("Offset %v lies outside mip %v, which is %v", offset, mip_level, full)
+		log.errorf("Offset %v lies outside mip %v, which is %v", offset, region.mip_level, full)
 		return .Invalid_Upload
 	}
-	extent := size if size != {} else full - offset
+	extent := region.size if region.size != {} else full - offset
 	if extent.x == 0 || extent.y == 0 || extent.z == 0 || offset.x + extent.x > full.x || offset.y + extent.y > full.y || offset.z + extent.z > full.z {
-		log.errorf("A %v region at %v does not fit inside mip %v, which is %v", extent, offset, mip_level, full)
+		log.errorf("A %v region at %v does not fit inside mip %v, which is %v", extent, offset, region.mip_level, full)
 		return .Invalid_Upload
 	}
 	layer_size := int(texel_size * extent.x * extent.y * extent.z)
-	if len(source) == 0 || len(source) % layer_size != 0 {
+	if size <= 0 || size % layer_size != 0 {
 		log.errorf(
 			"A %v region of this image takes %v bytes of tightly packed texels per layer; %v bytes is not a whole number of layers",
 			extent,
 			layer_size,
-			len(source),
+			size,
 		)
 		return .Invalid_Upload
 	}
-	layer_count := u32(len(source) / layer_size)
-	if first_layer + layer_count > image.layers {
-		log.errorf("Loading %v layers from layer %v overruns an image with %v layers", layer_count, first_layer, image.layers)
+	layer_count := u32(size / layer_size)
+	if region.layers != 0 && region.layers != layer_count {
+		log.errorf("The region asks for %v layers but %v bytes holds %v", region.layers, size, layer_count)
+		return .Invalid_Upload
+	}
+	if region.first_layer + layer_count > image.layers {
+		log.errorf("Loading %v layers from layer %v overruns an image with %v layers", layer_count, region.first_layer, image.layers)
 		return .Invalid_Upload
 	}
 
-	buffer, staged_offset, mapped := stage(vk.DeviceSize(len(source))) or_return
-	copy(mapped[:len(source)], source)
+	buffer, staged_offset, mapped := stage(vk.DeviceSize(size)) or_return
+	runtime.mem_copy_non_overlapping(mapped, source, size)
 	command_buffer := staging_commands() or_return
-	base_mip, base_layer := view_base(image^)
-
-	if image.layout != .GENERAL {
-		transition(command_buffer, image.handle, image.aspect, image.layout, .GENERAL)
-		image.layout = .GENERAL
-	}
-	region := Buffer_Image_Region {
+	base_mip, base_layer := view_base(image)
+	copy_region := Buffer_Image_Region {
 		offset = staged_offset,
 		image = {
-			subresource = {aspectMask = image.aspect, mipLevel = base_mip + mip_level, baseArrayLayer = base_layer + first_layer, layerCount = layer_count},
+			subresource = {aspectMask = image.aspect, mipLevel = base_mip + region.mip_level, baseArrayLayer = base_layer + region.first_layer, layerCount = layer_count},
 			offset = {i32(offset.x), i32(offset.y), i32(offset.z)},
 			extent = {extent.x, extent.y, extent.z},
 		},
 	}
-	emit_buffer_to_image(command_buffer, buffer, image.handle, region)
+	emit_buffer_to_image(command_buffer, buffer, image.handle, copy_region)
 	return nil
 }
 
@@ -696,7 +705,7 @@ read_image_file :: proc(filename: string) -> ([]u8, Error) {
 
 @(private = "file")
 @(require_results)
-load_encoded_to_image :: proc(filename: string, data: []u8, image: ^Image, mip_level, layer: u32) -> Error {
+load_encoded_to_image :: proc(filename: string, data: []u8, image: Image, mip_level, layer: u32) -> Error {
 	width, height, channels: i32
 	pixels: rawptr
 	#partial switch image.format {
@@ -716,13 +725,13 @@ load_encoded_to_image :: proc(filename: string, data: []u8, image: ^Image, mip_l
 	}
 	defer stbi.image_free(pixels)
 
-	extent := mip_extent(image^, mip_level)
+	extent := mip_extent(image, mip_level)
 	if mip_level >= image.mip_levels || u32(width) != extent.x || u32(height) != extent.y || extent.z != 1 {
 		log.errorf("%v is %vx%v, which does not match mip %v of a %v image", filename, width, height, mip_level, image.extent)
 		return .Invalid_Upload
 	}
 	texel_size, _ := format_texel_size(image.format)
-	return load_memory_to_image(([^]u8)(pixels)[:int(width) * int(height) * int(texel_size)], image, mip_level, layer)
+	return load_ptr_to_image(pixels, int(width) * int(height) * int(texel_size), image, {mip_level = mip_level, first_layer = layer, layers = 1})
 }
 
 @(private)

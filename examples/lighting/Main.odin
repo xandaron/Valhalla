@@ -2,7 +2,6 @@ package Lighting
 
 import "core:log"
 import "core:math"
-import "core:mem"
 import "core:math/linalg"
 import "core:time"
 
@@ -132,9 +131,9 @@ run :: proc() -> Valhalla.Error {
 		append(&meshes, sphere)
 	}
 
-	vertex_buffer := Valhalla.make_buffer_from_memory(raw_bytes(vertices[:]), {.Storage}) or_return
+	vertex_buffer := Valhalla.make_buffer_from(vertices, {.Storage}) or_return
 	defer Valhalla.delete_buffer(&vertex_buffer)
-	index_buffer := Valhalla.make_buffer_from_memory(raw_bytes(indices[:]), {.Index}) or_return
+	index_buffer := Valhalla.make_buffer_from(indices, {.Index}) or_return
 	defer Valhalla.delete_buffer(&index_buffer)
 	object_buffer := Valhalla.make_buffer(len(objects) * size_of(Object), {.Storage}, .Host_Visible) or_return
 	defer Valhalla.delete_buffer(&object_buffer)
@@ -277,10 +276,10 @@ draw_frame :: proc(user_data: rawptr) -> Valhalla.Error {
 		view_projection = projection(1 / math.tan(f32(math.PI) / 8), f32(extent.x) / f32(extent.y), 0.1, 100) * linalg.matrix4_look_at_f32(eye, {0, 0.5, 0}, {0, 1, 0}),
 		camera          = {eye.x, eye.y, eye.z, 1},
 	}
-	Valhalla.load_memory_to_buffer(raw_bytes(faces[:]), scene.faces_buffer^) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(scene.objects), scene.object_buffer^) or_return
-	Valhalla.load_memory_to_buffer(raw_bytes(lights[:]), scene.light_buffer^) or_return
-	Valhalla.load_memory_to_buffer(mem.ptr_to_bytes(&view), scene.view_buffer^) or_return
+	Valhalla.load_to_buffer(faces, scene.faces_buffer^) or_return
+	Valhalla.load_to_buffer(scene.objects, scene.object_buffer^) or_return
+	Valhalla.load_to_buffer(lights, scene.light_buffer^) or_return
+	Valhalla.load_to_buffer(view, scene.view_buffer^) or_return
 
 	scene.last = Valhalla.execute_workloads(&scene.frame) or_return
 	return nil
@@ -459,8 +458,4 @@ orthographic :: proc(half_size, near, far: f32) -> matrix[4, 4]f32 {
 		0, 0, -1 / (far - near), -near / (far - near),
 		0, 0, 0, 1,
 	}
-}
-
-raw_bytes :: proc(data: []$T) -> []u8 {
-	return ([^]u8)(raw_data(data))[:len(data) * size_of(T)]
 }

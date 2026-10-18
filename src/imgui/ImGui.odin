@@ -517,8 +517,8 @@ end_frame :: proc(workload: ^Valhalla.Workload, target: Valhalla.Image) -> (writ
 	for list in draw_data.CmdLists.Data[:draw_data.CmdLists.Size] {
 		vertices := ([^]u8)(list.VtxBuffer.Data)[:int(list.VtxBuffer.Size) * size_of(imgui.DrawVert)]
 		indices := ([^]u8)(list.IdxBuffer.Data)[:int(list.IdxBuffer.Size) * size_of(imgui.DrawIdx)]
-		Valhalla.load_memory_to_buffer(vertices, backend.vertices[set], vertex_bytes) or_return
-		Valhalla.load_memory_to_buffer(indices, backend.indices[set], index_bytes) or_return
+		Valhalla.load_to_buffer(vertices, backend.vertices[set], vertex_bytes) or_return
+		Valhalla.load_to_buffer(indices, backend.indices[set], index_bytes) or_return
 		vertex_bytes += len(vertices)
 		index_bytes += len(indices)
 	}
@@ -663,7 +663,7 @@ upload_texture_rect :: proc(texture: ^imgui.TextureData, rect: imgui.TextureRect
 		}
 	}
 	image := (^Valhalla.Image)(texture.BackendUserData)
-	return Valhalla.load_memory_to_image(pixels, image, 0, 0, {u32(rect.x), u32(rect.y), 0}, {u32(width), u32(height), 1})
+	return Valhalla.load_to_image(pixels, image^, {offset = {u32(rect.x), u32(rect.y), 0}, size = {u32(width), u32(height), 1}})
 }
 
 @(private = "file")
