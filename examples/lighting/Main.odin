@@ -153,7 +153,7 @@ run :: proc() -> Valhalla.Error {
 	defer for &point_shadow_map in point_shadow_maps {
 		Valhalla.delete_image(&point_shadow_map)
 	}
-	shadow_sampler := Valhalla.make_sampler(address_mode = .CLAMP_TO_BORDER, compare_op = .LESS_OR_EQUAL, border_colour = .FLOAT_OPAQUE_WHITE) or_return
+	shadow_sampler := Valhalla.make_sampler(address_mode = .CLAMP_TO_BORDER, compare_op = .GREATER_OR_EQUAL) or_return
 	defer Valhalla.delete_sampler(&shadow_sampler)
 
 	shadow := Valhalla.make_shader(#load("Lighting.slang"), []string{"shadow_vertex"}, push_type = Push, depth_format = .D32_SFLOAT) or_return
@@ -309,7 +309,7 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	shadowed := Valhalla.bind_shader_depth(shadow, shadow_cleared)
 	Valhalla.set_depth_test(shadow, true)
 	Valhalla.set_depth_write(shadow, true)
-	Valhalla.set_depth_bias(shadow, true, constant = 1.5, slope = 2)
+	Valhalla.set_depth_bias(shadow, true, constant = -1.5, slope = -2)
 	Valhalla.set_push_data(shadow, push)
 	for mesh, index in scene.meshes[:scene.scene_count] {
 		Valhalla.draw_indexed(shadow, mesh.index_count, first_index = mesh.first_index, vertex_offset = mesh.base_vertex, draw_data = u32(index))
@@ -319,7 +319,7 @@ record_frame :: proc(scene: ^Scene) -> Valhalla.Error {
 	Valhalla.reset_shader(point_shadow)
 	Valhalla.set_depth_test(point_shadow, true)
 	Valhalla.set_depth_write(point_shadow, true)
-	Valhalla.set_depth_bias(point_shadow, true, constant = 1.5, slope = 2)
+	Valhalla.set_depth_bias(point_shadow, true, constant = -1.5, slope = -2)
 	for mesh, index in scene.meshes[:scene.scene_count] {
 		Valhalla.draw_indexed(point_shadow, mesh.index_count, first_index = mesh.first_index, vertex_offset = mesh.base_vertex, draw_data = u32(index))
 	}
@@ -446,7 +446,7 @@ projection :: proc(focal, aspect, near, far: f32, flip_y := true) -> matrix[4, 4
 	return matrix[4, 4]f32{
 		focal / aspect, 0, 0, 0,
 		0, -focal if flip_y else focal, 0, 0,
-		0, 0, far / (near - far), near * far / (near - far),
+		0, 0, near / (far - near), near * far / (far - near),
 		0, 0, -1, 0,
 	}
 }
@@ -455,7 +455,7 @@ orthographic :: proc(half_size, near, far: f32) -> matrix[4, 4]f32 {
 	return matrix[4, 4]f32{
 		1 / half_size, 0, 0, 0,
 		0, 1 / half_size, 0, 0,
-		0, 0, -1 / (far - near), -near / (far - near),
+		0, 0, 1 / (far - near), far / (far - near),
 		0, 0, 0, 1,
 	}
 }

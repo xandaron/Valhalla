@@ -1723,7 +1723,7 @@ DrawCmd :: struct {
 DrawVert :: struct {
 	pos: Vec2,
 	uv:  Vec2,
-	col: u32,
+	col: [4]u8,
 }
 
 // [Internal] For use by ImDrawList
@@ -2401,7 +2401,7 @@ foreign lib {
 	@(link_name="ImGui_GetFontBaked") GetFontBaked  :: proc() -> ^FontBaked ---                            // get current font bound at current size // == GetFont()->GetFontBaked(GetFontSize())
 
 	// Parameters stacks (shared)
-	@(link_name="ImGui_PushStyleColor") PushStyleColor       :: proc(idx: GuiCol, col: u32) ---               // modify a style color. always use this if you modify the style after NewFrame().
+	@(link_name="ImGui_PushStyleColor") PushStyleColor       :: proc(idx: GuiCol, col: [4]u8) ---               // modify a style color. always use this if you modify the style after NewFrame().
 	@(link_name="ImGui_PushStyleColorImVec4") PushStyleColorImVec4 :: proc(idx: GuiCol, col: Vec4) ---
 	@(link_name="ImGui_PopStyleColorEx") PopStyleColor      :: proc(count: i32 = 1) ---
 	@(link_name="ImGui_PushStyleVar") PushStyleVar         :: proc(idx: GuiStyleVar, val: f32) ---          // modify a style float variable. always use this if you modify the style after NewFrame()!
@@ -2425,7 +2425,7 @@ foreign lib {
 	@(link_name="ImGui_GetFontTexUvWhitePixel") GetFontTexUvWhitePixel :: proc() -> Vec2 ---                                        // get UV coordinate for a white pixel, useful to draw custom shapes via the ImDrawList API
 	@(link_name="ImGui_GetColorU32Ex") GetColorU32          :: proc(idx: GuiCol, alpha_mul: f32 = 1) -> u32 --- // retrieve given style color with style alpha applied and optional extra alpha multiplier, packed as a 32-bit value suitable for ImDrawList
 	@(link_name="ImGui_GetColorU32ImVec4") GetColorU32ImVec4      :: proc(col: Vec4) -> u32 ---                                // retrieve given color with style alpha applied, packed as a 32-bit value suitable for ImDrawList
-	@(link_name="ImGui_GetColorU32ImU32Ex") GetColorU32ImU32     :: proc(col: u32, alpha_mul: f32 = 1) -> u32 ---    // retrieve given color with style alpha applied, packed as a 32-bit value suitable for ImDrawList
+	@(link_name="ImGui_GetColorU32ImU32Ex") GetColorU32ImU32     :: proc(col: [4]u8, alpha_mul: f32 = 1) -> u32 ---    // retrieve given color with style alpha applied, packed as a 32-bit value suitable for ImDrawList
 	@(link_name="ImGui_GetStyleColorVec4") GetStyleColorVec4      :: proc(idx: GuiCol) -> ^Vec4 ---                            // retrieve style color as stored in ImGuiStyle structure. use to feed back into PushStyleColor(), otherwise use GetColorU32() to get style color with style alpha baked in.
 
 	// Layout cursor positioning
@@ -3187,39 +3187,39 @@ foreign lib {
 	//   In older versions (until Dear ImGui 1.77) the AddCircle functions defaulted to num_segments == 12.
 	//   In future versions we will use textures to provide cheaper and higher-quality circles.
 	//   Use AddNgon() and AddNgonFilled() functions if you need to guarantee a specific number of sides.
-	DrawList_AddLine               :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, col: u32, thickness: f32 = 1) ---
-	DrawList_AddRect               :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: u32, rounding: f32 = 0, flags: DrawFlags = {}, thickness: f32 = 1) --- // a: upper-left, b: lower-right (== upper-left + size)
-	DrawList_AddRectFilled         :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: u32, rounding: f32 = 0, flags: DrawFlags = {}) --- // a: upper-left, b: lower-right (== upper-left + size)
+	DrawList_AddLine               :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, col: [4]u8, thickness: f32 = 1) ---
+	DrawList_AddRect               :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: [4]u8, rounding: f32 = 0, flags: DrawFlags = {}, thickness: f32 = 1) --- // a: upper-left, b: lower-right (== upper-left + size)
+	DrawList_AddRectFilled         :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col: [4]u8, rounding: f32 = 0, flags: DrawFlags = {}) --- // a: upper-left, b: lower-right (== upper-left + size)
 	DrawList_AddRectFilledMultiColor :: proc(self: ^DrawList, p_min: Vec2, p_max: Vec2, col_upr_left: u32, col_upr_right: u32, col_bot_right: u32, col_bot_left: u32) ---
-	DrawList_AddQuad               :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32, thickness: f32 = 1) ---
-	DrawList_AddQuadFilled           :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32) ---
-	DrawList_AddTriangle           :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32, thickness: f32 = 1) ---
-	DrawList_AddTriangleFilled       :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32) ---
-	DrawList_AddCircle             :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: i32 = 0, thickness: f32 = 1) ---
-	DrawList_AddCircleFilled         :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: i32 = 0) ---
-	DrawList_AddNgon               :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: i32, thickness: f32 = 1) ---
-	DrawList_AddNgonFilled           :: proc(self: ^DrawList, center: Vec2, radius: f32, col: u32, num_segments: i32) ---
-	DrawList_AddEllipse            :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: u32, rot: f32 = 0, num_segments: i32 = 0, thickness: f32 = 1) ---
-	DrawList_AddEllipseFilled      :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: u32, rot: f32 = 0, num_segments: i32 = 0) ---
-	DrawList_AddText               :: proc(self: ^DrawList, pos: Vec2, col: u32, text_begin: cstring, text_end: cstring = nil) ---
-	DrawList_AddTextImFontPtr      :: proc(self: ^DrawList, font: ^Font, font_size: f32, pos: Vec2, col: u32, text_begin: cstring, text_end: cstring = nil, wrap_width: f32 = 0, cpu_fine_clip_rect: ^Vec4 = nil) ---
-	DrawList_AddBezierCubic          :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: u32, thickness: f32, num_segments: i32 = 0) --- // Cubic Bezier (4 control points)
-	DrawList_AddBezierQuadratic      :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: u32, thickness: f32, num_segments: i32 = 0) --- // Quadratic Bezier (3 control points)
+	DrawList_AddQuad               :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: [4]u8, thickness: f32 = 1) ---
+	DrawList_AddQuadFilled           :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: [4]u8) ---
+	DrawList_AddTriangle           :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: [4]u8, thickness: f32 = 1) ---
+	DrawList_AddTriangleFilled       :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: [4]u8) ---
+	DrawList_AddCircle             :: proc(self: ^DrawList, center: Vec2, radius: f32, col: [4]u8, num_segments: i32 = 0, thickness: f32 = 1) ---
+	DrawList_AddCircleFilled         :: proc(self: ^DrawList, center: Vec2, radius: f32, col: [4]u8, num_segments: i32 = 0) ---
+	DrawList_AddNgon               :: proc(self: ^DrawList, center: Vec2, radius: f32, col: [4]u8, num_segments: i32, thickness: f32 = 1) ---
+	DrawList_AddNgonFilled           :: proc(self: ^DrawList, center: Vec2, radius: f32, col: [4]u8, num_segments: i32) ---
+	DrawList_AddEllipse            :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: [4]u8, rot: f32 = 0, num_segments: i32 = 0, thickness: f32 = 1) ---
+	DrawList_AddEllipseFilled      :: proc(self: ^DrawList, center: Vec2, radius: Vec2, col: [4]u8, rot: f32 = 0, num_segments: i32 = 0) ---
+	DrawList_AddText               :: proc(self: ^DrawList, pos: Vec2, col: [4]u8, text_begin: cstring, text_end: cstring = nil) ---
+	DrawList_AddTextImFontPtr      :: proc(self: ^DrawList, font: ^Font, font_size: f32, pos: Vec2, col: [4]u8, text_begin: cstring, text_end: cstring = nil, wrap_width: f32 = 0, cpu_fine_clip_rect: ^Vec4 = nil) ---
+	DrawList_AddBezierCubic          :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, col: [4]u8, thickness: f32, num_segments: i32 = 0) --- // Cubic Bezier (4 control points)
+	DrawList_AddBezierQuadratic      :: proc(self: ^DrawList, p1: Vec2, p2: Vec2, p3: Vec2, col: [4]u8, thickness: f32, num_segments: i32 = 0) --- // Quadratic Bezier (3 control points)
 
 	// General polygon
 	// - Only simple polygons are supported by filling functions (no self-intersections, no holes).
 	// - Concave polygon fill is more expensive than convex one: it has O(N^2) complexity. Provided as a convenience for the user but not used by the main library.
-	DrawList_AddPolyline          :: proc(self: ^DrawList, points: ^Vec2, num_points: i32, col: u32, flags: DrawFlags, thickness: f32) ---
-	DrawList_AddConvexPolyFilled  :: proc(self: ^DrawList, points: ^Vec2, num_points: i32, col: u32) ---
-	DrawList_AddConcavePolyFilled :: proc(self: ^DrawList, points: ^Vec2, num_points: i32, col: u32) ---
+	DrawList_AddPolyline          :: proc(self: ^DrawList, points: ^Vec2, num_points: i32, col: [4]u8, flags: DrawFlags, thickness: f32) ---
+	DrawList_AddConvexPolyFilled  :: proc(self: ^DrawList, points: ^Vec2, num_points: i32, col: [4]u8) ---
+	DrawList_AddConcavePolyFilled :: proc(self: ^DrawList, points: ^Vec2, num_points: i32, col: [4]u8) ---
 
 	// Image primitives
 	// - Read FAQ to understand what ImTextureID/ImTextureRef are.
 	// - "p_min" and "p_max" represent the upper-left and lower-right corners of the rectangle.
 	// - "uv_min" and "uv_max" represent the normalized texture coordinates to use for those corners. Using (0,0)->(1,1) texture coordinates will generally display the entire texture.
-	DrawList_AddImage      :: proc(self: ^DrawList, tex_ref: TextureRef, p_min: Vec2, p_max: Vec2, uv_min: Vec2 = {0, 0}, uv_max: Vec2 = {1, 1}, col: u32 = 0xFFFFFFFF) ---
-	DrawList_AddImageQuad  :: proc(self: ^DrawList, tex_ref: TextureRef, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, uv1: Vec2 = {0, 0}, uv2: Vec2 = {1, 0}, uv3: Vec2 = {1, 1}, uv4: Vec2 = {0, 1}, col: u32 = 0xFFFFFFFF) ---
-	DrawList_AddImageRounded :: proc(self: ^DrawList, tex_ref: TextureRef, p_min: Vec2, p_max: Vec2, uv_min: Vec2, uv_max: Vec2, col: u32, rounding: f32, flags: DrawFlags = {}) ---
+	DrawList_AddImage      :: proc(self: ^DrawList, tex_ref: TextureRef, p_min: Vec2, p_max: Vec2, uv_min: Vec2 = {0, 0}, uv_max: Vec2 = {1, 1}, col: [4]u8 = {255, 255, 255, 255}) ---
+	DrawList_AddImageQuad  :: proc(self: ^DrawList, tex_ref: TextureRef, p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, uv1: Vec2 = {0, 0}, uv2: Vec2 = {1, 0}, uv3: Vec2 = {1, 1}, uv4: Vec2 = {0, 1}, col: [4]u8 = {255, 255, 255, 255}) ---
+	DrawList_AddImageRounded :: proc(self: ^DrawList, tex_ref: TextureRef, p_min: Vec2, p_max: Vec2, uv_min: Vec2, uv_max: Vec2, col: [4]u8, rounding: f32, flags: DrawFlags = {}) ---
 
 	// Stateful path API, add points then finish with PathFillConvex() or PathStroke()
 	// - Important: filled shapes must always use clockwise winding order! The anti-aliasing fringe depends on it. Counter-clockwise shapes will have "inward" anti-aliasing.
@@ -3227,9 +3227,9 @@ foreign lib {
 	DrawList_PathClear                  :: proc(self: ^DrawList) ---
 	DrawList_PathLineTo                 :: proc(self: ^DrawList, pos: Vec2) ---
 	DrawList_PathLineToMergeDuplicate   :: proc(self: ^DrawList, pos: Vec2) ---
-	DrawList_PathFillConvex             :: proc(self: ^DrawList, col: u32) ---
-	DrawList_PathFillConcave            :: proc(self: ^DrawList, col: u32) ---
-	DrawList_PathStroke                 :: proc(self: ^DrawList, col: u32, flags: DrawFlags = {}, thickness: f32 = 1) ---
+	DrawList_PathFillConvex             :: proc(self: ^DrawList, col: [4]u8) ---
+	DrawList_PathFillConcave            :: proc(self: ^DrawList, col: [4]u8) ---
+	DrawList_PathStroke                 :: proc(self: ^DrawList, col: [4]u8, flags: DrawFlags = {}, thickness: f32 = 1) ---
 	DrawList_PathArcTo                  :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min: f32, a_max: f32, num_segments: i32 = 0) ---
 	DrawList_PathArcToFast              :: proc(self: ^DrawList, center: Vec2, radius: f32, a_min_of_12: i32, a_max_of_12: i32) --- // Use precomputed angles for a 12 steps circle
 	DrawList_PathEllipticalArcTo      :: proc(self: ^DrawList, center: Vec2, radius: Vec2, rot: f32, a_min: f32, a_max: f32, num_segments: i32 = 0) --- // Ellipse
@@ -3267,12 +3267,12 @@ foreign lib {
 	// - All primitives needs to be reserved via PrimReserve() beforehand.
 	DrawList_PrimReserve   :: proc(self: ^DrawList, idx_count: i32, vtx_count: i32) ---
 	DrawList_PrimUnreserve :: proc(self: ^DrawList, idx_count: i32, vtx_count: i32) ---
-	DrawList_PrimRect      :: proc(self: ^DrawList, a: Vec2, b: Vec2, col: u32) ---    // Axis aligned rectangle (composed of two triangles)
-	DrawList_PrimRectUV    :: proc(self: ^DrawList, a: Vec2, b: Vec2, uv_a: Vec2, uv_b: Vec2, col: u32) ---
-	DrawList_PrimQuadUV    :: proc(self: ^DrawList, a: Vec2, b: Vec2, _c: Vec2, d: Vec2, uv_a: Vec2, uv_b: Vec2, uv_c: Vec2, uv_d: Vec2, col: u32) ---
-	DrawList_PrimWriteVtx  :: proc(self: ^DrawList, pos: Vec2, uv: Vec2, col: u32) ---
+	DrawList_PrimRect      :: proc(self: ^DrawList, a: Vec2, b: Vec2, col: [4]u8) ---    // Axis aligned rectangle (composed of two triangles)
+	DrawList_PrimRectUV    :: proc(self: ^DrawList, a: Vec2, b: Vec2, uv_a: Vec2, uv_b: Vec2, col: [4]u8) ---
+	DrawList_PrimQuadUV    :: proc(self: ^DrawList, a: Vec2, b: Vec2, _c: Vec2, d: Vec2, uv_a: Vec2, uv_b: Vec2, uv_c: Vec2, uv_d: Vec2, col: [4]u8) ---
+	DrawList_PrimWriteVtx  :: proc(self: ^DrawList, pos: Vec2, uv: Vec2, col: [4]u8) ---
 	DrawList_PrimWriteIdx  :: proc(self: ^DrawList, idx: DrawIdx) ---
-	DrawList_PrimVtx       :: proc(self: ^DrawList, pos: Vec2, uv: Vec2, col: u32) --- // Write vertex with unique index
+	DrawList_PrimVtx       :: proc(self: ^DrawList, pos: Vec2, uv: Vec2, col: [4]u8) --- // Write vertex with unique index
 
 	// [Internal helpers]
 	DrawList__SetDrawListSharedData      :: proc(self: ^DrawList, data: ^DrawListSharedData) ---
@@ -3368,8 +3368,8 @@ foreign lib {
 	Font_GetFontBaked       :: proc(self: ^Font, font_size: f32, density: f32 = -1) -> ^FontBaked --- // Get or create baked data for given size
 	Font_CalcTextSizeA      :: proc(self: ^Font, size: f32, max_width: f32, wrap_width: f32, text_begin: cstring, text_end: cstring = nil, out_remaining: ^cstring = nil) -> Vec2 ---
 	Font_CalcWordWrapPosition :: proc(self: ^Font, size: f32, text: cstring, text_end: cstring, wrap_width: f32) -> cstring ---
-	Font_RenderChar         :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, _c: Wchar, cpu_fine_clip: ^Vec4 = nil) ---
-	Font_RenderText           :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: u32, clip_rect: Vec4, text_begin: cstring, text_end: cstring, wrap_width: f32 = 0, flags: DrawTextFlags = .None) ---
+	Font_RenderChar         :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: [4]u8, _c: Wchar, cpu_fine_clip: ^Vec4 = nil) ---
+	Font_RenderText           :: proc(self: ^Font, draw_list: ^DrawList, size: f32, pos: Vec2, col: [4]u8, clip_rect: Vec4, text_begin: cstring, text_end: cstring, wrap_width: f32 = 0, flags: DrawTextFlags = .None) ---
 
 	// [Internal] Don't use!
 	Font_ClearOutputData    :: proc(self: ^Font) ---

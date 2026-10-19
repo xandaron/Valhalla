@@ -469,7 +469,7 @@ clear_image_8bit :: proc(workload: ^Workload, image: Image, colour: [4]u8) -> Im
 }
 
 @(require_results)
-clear_depth :: proc(workload: ^Workload, image: Image, depth: f32 = 1, stencil: u32 = 0) -> Image {
+clear_depth :: proc(workload: ^Workload, image: Image, depth: f32 = 0, stencil: u32 = 0) -> Image {
 	assert(.COLOR not_in image.aspect, "clear_depth clears depth and stencil images; colour images are cleared with clear_image")
 	return record_clear(workload, image, {depthStencil = {depth = depth, stencil = stencil}})
 }

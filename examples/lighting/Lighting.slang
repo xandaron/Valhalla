@@ -112,7 +112,7 @@ float sun_visibility(float3 world, float3 normal) {
 
 float cube_depth(float3 offset) {
 	float axis = max(abs(offset.x), max(abs(offset.y), abs(offset.z)));
-	return POINT_FAR / (POINT_FAR - POINT_NEAR) - POINT_NEAR * POINT_FAR / ((POINT_FAR - POINT_NEAR) * axis);
+	return POINT_NEAR * POINT_FAR / ((POINT_FAR - POINT_NEAR) * axis) - POINT_NEAR / (POINT_FAR - POINT_NEAR);
 }
 
 float point_visibility(uint light, float3 world, float3 normal, float3 light_position) {

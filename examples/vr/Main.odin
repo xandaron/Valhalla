@@ -497,7 +497,7 @@ projection :: proc(focal, aspect, near, far: f32) -> matrix[4, 4]f32 {
 	return matrix[4, 4]f32{
 		focal / aspect, 0, 0, 0,
 		0, -focal, 0, 0,
-		0, 0, far / (near - far), near * far / (near - far),
+		0, 0, near / (far - near), near * far / (far - near),
 		0, 0, -1, 0,
 	}
 }

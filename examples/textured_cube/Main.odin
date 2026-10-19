@@ -194,7 +194,7 @@ view_projection :: proc(size: [2]u32) -> matrix[4, 4]f32 {
 	projection := matrix[4, 4]f32{
 		focal / aspect, 0, 0, 0,
 		0, -focal, 0, 0,
-		0, 0, far / (near - far), near * far / (near - far),
+		0, 0, near / (far - near), near * far / (far - near),
 		0, 0, -1, 0,
 	}
 	view := linalg.matrix4_look_at_f32({4, 3.5, 5}, {0, 0, 0}, {0, 1, 0})

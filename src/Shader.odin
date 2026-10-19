@@ -1025,7 +1025,7 @@ set_polygon_mode :: proc(shader: ^Shader, polygon_mode: Polygon_Mode) {
 	graphics_state(shader).polygon_mode = polygon_mode
 }
 
-set_depth_test :: proc(shader: ^Shader, enabled: bool, compare_op := Compare_Op.LESS_OR_EQUAL) {
+set_depth_test :: proc(shader: ^Shader, enabled: bool, compare_op := Compare_Op.GREATER_OR_EQUAL) {
 	state := graphics_state(shader)
 	state.depth_test = enabled
 	state.depth_compare = compare_op
@@ -1113,7 +1113,7 @@ default_draw_state :: proc() -> (state: Draw_State) {
 	state.front_face = .COUNTER_CLOCKWISE
 	state.topology = .TRIANGLE_LIST
 	state.polygon_mode = .FILL
-	state.depth_compare = .LESS_OR_EQUAL
+	state.depth_compare = .GREATER_OR_EQUAL
 	stencil := Stencil_State {
 		compare_op    = .ALWAYS,
 		pass_op       = .KEEP,

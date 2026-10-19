@@ -57,8 +57,11 @@ Buffer :: struct {
 }
 
 Owned_Buffer :: struct {
-	allocation: Allocation,
-	name:       string,
+	allocation:  Allocation,
+	name:        string,
+	usage:       Buffer_Usages,
+	memory:      Buffer_Memory,
+	extra_usage: vk.BufferUsageFlags,
 }
 
 External_Buffer :: struct {}
@@ -141,7 +144,10 @@ make_owned_buffer :: proc(
 	}
 	name_object(.BUFFER, u64(buffer.handle), settings.name)
 	buffer.variant = Owned_Buffer {
-		name = strings.clone(settings.name) if settings.name != "" else "",
+		name        = strings.clone(settings.name) if settings.name != "" else "",
+		usage       = settings.usage,
+		memory      = settings.memory,
+		extra_usage = extra_usage,
 	}
 	defer if err != nil {
 		delete_buffer(&buffer)
@@ -182,6 +188,23 @@ make_buffer_from :: proc(
 		return {}, err
 	}
 	return
+}
+
+@(require_results)
+resize_buffer :: proc(buffer: ^Buffer, #any_int size: int) -> (resized: bool, err: Error) {
+	owned, is_owned := buffer.variant.(Owned_Buffer)
+	assert(is_owned && buffer.handle != 0, "resize_buffer needs a buffer made by make_buffer")
+	if vk.DeviceSize(size) == buffer.size {
+		return false, nil
+	}
+	replacement := make_owned_buffer(size, {owned.usage, owned.memory, owned.name}, owned.extra_usage) or_return
+	if err = load_buffer_to_buffer(buffer^, replacement, size = min(size, int(buffer.size))); err != nil {
+		delete_buffer(&replacement)
+		return false, err
+	}
+	delete_buffer(buffer)
+	buffer^ = replacement
+	return true, nil
 }
 
 @(require_results)
